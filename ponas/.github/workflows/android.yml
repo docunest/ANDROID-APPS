@@ -60,8 +60,8 @@ jobs:
       - name: Build debug APK
         run: ./gradlew --no-daemon assembleDebug
 
-      - name: Build signed release APK
-        if: env.HAS_KEYSTORE == 'true'
+      # Without secrets this still runs (unsigned) so the minified release build is checked.
+      - name: Build release APK
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
