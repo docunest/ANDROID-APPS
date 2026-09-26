@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Raidžių memory</title>
+<style>
+  body { background: linear-gradient(#EDE7F6, #FFF8E1); font-family: sans-serif; color: #37474F; }
+  #stars { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; }
+  .star { width: 28px; height: 28px; background: #ffffffaa;
+    clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+    transition: transform .3s; }
+  .star.on { background: #FFC107; transform: scale(1.15); }
+
+  #game { position: fixed; top: 72px; left: 0; right: 0; bottom: 0; padding: 0 12px 12px;
+    display: flex; flex-direction: row; align-items: center; justify-content: space-evenly; gap: 12px; }
+  @media (orientation: portrait) { #game { flex-direction: column; justify-content: space-around; } }
+
+  #left { display: flex; flex-direction: column; align-items: center; gap: 8px; flex: 0 0 auto; }
+  #pic { width: var(--pic); height: var(--pic); border-radius: 30px; background: #fff; box-shadow: 0 6px 0 #00000018;
+    display: flex; align-items: center; justify-content: center; overflow: hidden; transition: transform .2s; }
+  #pic .emoji { font-size: calc(var(--pic) * .62); line-height: 1;
+    font-family: "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif; }
+  #pic img { width: 82%; height: 82%; object-fit: contain; }
+  #pic.nudge { animation: nudge 1s ease-in-out 2; }
+  /* 5-second "look" bar: shrinks, then the cards turn over */
+  #bar { width: var(--pic); height: 10px; border-radius: 5px; background: #D1C4E9; overflow: hidden; }
+  #bar i { display: block; height: 100%; background: #7E57C2; transform-origin: left; }
+  #bar.run i { transition: transform linear; transform: scaleX(0); }
+  #bar.hide { visibility: hidden; }
+  #word { min-height: 38px; font-size: 30px; font-weight: 800; letter-spacing: 1px; visibility: hidden; }
+  #word.show { visibility: visible; }
+  #word b { color: #FB8C00; }
+
+  #cards { display: grid; gap: var(--gap); flex: 0 0 auto; }
+  .card { width: var(--cw); height: var(--ch); perspective: 600px; }
+  .card .in { position: relative; width: 100%; height: 100%; transition: transform .45s; transform-style: preserve-3d; }
+  .card.closed .in { transform: rotateY(180deg); }
+  .face, .back { position: absolute; inset: 0; border-radius: 20px; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+    display: flex; align-items: center; justify-content: center; box-shadow: 0 5px 0 #00000020; }
+  .face { background: #fff; border: 4px solid #B39DDB; font-weight: 800; color: #4527A0; font-size: calc(var(--ch) * .42); gap: 2px; }
+  .face small { font-size: .78em; color: #7E57C2; }
+  .back { transform: rotateY(180deg); background: #7E57C2;
+    background-image: radial-gradient(#ffffff33 18%, transparent 20%); background-size: 22px 22px; }
+  .back svg { width: 42%; height: 42%; }
+  .card.ok .face { border-color: #43A047; background: #E8F5E9; color: #2E7D32; }
+  .card.bad .face { border-color: #E53935; background: #FFEBEE; color: #C62828; }
+  .card.shake { animation: shake .45s; }
+
+  .spark { position: fixed; width: 18px; height: 18px; background: #FFD54F; pointer-events: none;
+    clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+    transition: transform .6s ease-out, opacity .6s ease-out; }
+  @keyframes shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-10px); }
+    40% { transform: translateX(9px); } 60% { transform: translateX(-6px); } 80% { transform: translateX(4px); } }
+  @keyframes nudge { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+</style>
+</head>
+<body>
+<div id="stars"></div>
+<div id="game">
+  <div id="left">
+    <div id="pic"></div>
+    <div id="bar"><i></i></div>
+    <div id="word"></div>
+  </div>
+  <div id="cards"></div>
+</div>
+<script src="ponas.js"></script>
+<script src="words.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
