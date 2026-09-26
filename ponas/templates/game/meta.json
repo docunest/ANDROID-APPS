@@ -1,0 +1,7 @@
+{
+  "title": "GAME_TITLE",
+  "icon": "icon.png",
+  "color": "#FF7043",
+  "order": 100,
+  "enabled": true
+}
