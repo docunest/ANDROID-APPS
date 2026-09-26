@@ -27,7 +27,8 @@ Pick an `id`: lowercase Lithuanian word without diacritics, dashes allowed (`spa
 - **No reading required.** Instructions are shown or heard, never written. Numbers as dots,
   colours as colours, letters as big glyphs with a sound. Text on screen only where the text *is*
   the lesson (a letter), and then big.
-- **One idea per screen, 2–4 big choices.** Targets ≥ ~25vmin, generous spacing, nothing tiny.
+- **One idea per screen, 2–4 big choices.** Touch targets ≥ 80px (the screen is only ~640×375),
+  generous spacing, nothing tiny.
 - **Always reacts.** Right → sparkle + happy tones + small reward. Wrong → gentle shake + soft
   "oops" tone, never a penalty, never a game over, no timers that pressure.
 - **Self-explaining.** If the child is idle ~10–12 s, replay the prompt/hint (max 2 times per round).
@@ -36,8 +37,8 @@ Pick an `id`: lowercase Lithuanian word without diacritics, dashes allowed (`spa
   celebration (fanfare, things fly away), then carry on. Save progress with `Ponas.save`.
 - **Gentle difficulty ramp** from a saved counter (e.g. Balionai: numbers 1–3, then up to 6 as
   `correct` grows).
-- **Sounds** with `Ponas.tone` / `Ponas.audio()` (Web Audio, synthesized). No speech synthesis, no
-  external audio. Recorded audio only if the parent supplies files, kept small.
+- **Sounds** with `Ponas.tone` / `Ponas.audio()` (Web Audio). No `speechSynthesis` (no Lithuanian
+  voice on the tablet). Short recorded prompts (mp3/ogg/m4a in the game folder) are fine if small.
 - Bright flat colours, rounded shapes, soft shadows, light background; CSS/SVG drawing, no images
   from the internet. Emoji are OK as pictures only if they render on Android WebView (keep it to
   common ones) — prefer drawn shapes.
@@ -63,37 +64,26 @@ Pick an `id`: lowercase Lithuanian word without diacritics, dashes allowed (`spa
   or "send a picture" only, ~1 msg / 5 s).
 - Whole game folder < 2 MB (aim for well under 200 KB). File names: `A-Z a-z 0-9 . _ - /`.
 - `meta.json`: `title`, `icon: "icon.png"`, `color` (`#RRGGBB`, the tile colour), `order`
-  (after the existing games unless told otherwise), `version: "1"`, `enabled: true`.
+  (next free slot after the ones listed in `CLAUDE.md`), `version: "1"`, `enabled: true`.
   **Changing an existing game: bump `version`.**
-- Plain ES5-style JS in an IIFE with `'use strict'` (like the existing games) — the tablet's
-  WebView may be old-ish; no modules, no build step, no dependencies.
+- Vanilla JS in an IIFE with `'use strict'` (like the existing games); no build step, no
+  dependencies (a tiny library only if vendored into the folder).
+- **Weak tablet** (2 GB RAM, weak GPU, WebView 151): animate only `transform`/`opacity`, few
+  elements at once, no full-screen canvas redrawn every frame, no big `filter`/blur.
 
 ## 4. Icon (`icon.png`, exactly 256×256 PNG)
 
-Draw it as an SVG that shows the game at a glance (the main object, no words), on a transparent
-or rounded-square background that suits the tile `color`. Render it to PNG with the preinstalled
-Chromium, e.g.:
-
-```js
-// scratch script, not committed
-import { chromium } from 'playwright';
-const b = await chromium.launch({ executablePath: process.env.CHROMIUM });
-const p = await b.newPage({ viewport: { width: 256, height: 256 } });
-await p.setContent(`<body style="margin:0;background:transparent">${svg}</body>`);
-await p.screenshot({ path: 'games/<id>/icon.png', omitBackground: true });
-await b.close();
-```
-
-Run it from the repo root after `npm i --no-save playwright` (so `playwright` resolves), with
-`CHROMIUM=$(ls -d /opt/pw-browsers/chromium-*/chrome-linux/chrome | head -1)`. Then open the PNG
-with Read and look at it.
+One big, simple picture of the game's main object, no words — the child finds the game by it.
+Transparent background is fine (the tile `color` shows behind it). Draw it with Python Pillow
+(`pip install pillow --break-system-packages`) at 1024×1024 and downscale to 256×256 with
+LANCZOS for smooth edges. Then open the PNG with Read and look at it.
 
 ## 5. Check it
 
 ```sh
 node tools/build-site.mjs                                  # must print ✓ for the game
 npm i --no-save playwright                                 # once per session
-CHROMIUM=$(ls -d /opt/pw-browsers/chromium-*/chrome-linux/chrome | head -1) node tools/smoke-test.mjs <id>
+node tools/smoke-test.mjs <id>                             # finds /opt/pw-browsers Chromium itself
 ```
 
 Both `landscape` and `portrait` must pass. **Then open `_shots/<id>-landscape.png` and
