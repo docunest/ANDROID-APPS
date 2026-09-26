@@ -5,7 +5,8 @@
 //    (never a game over). A heart comes back every 5 correct answers.
 //  - Food: the raised hand shows a picture of the task (dots) and costs one apple.
 //    An apple comes back every 3 correct answers.
-//  - Multiplayer: the player broadcasts the task and stats; open the page with ?watch to spectate.
+//  - Multiplayer: the player broadcasts the task and stats. In a browser (the parent's phone) an
+//    eye button switches to watching; it is never shown on the tablet.
 (function () {
   'use strict';
   var P = window.Ponas;
@@ -15,6 +16,17 @@
 
   var watch = /[?&]watch\b/.test(location.search);
   if (watch) document.body.classList.add('watch');
+  // Eye button (browser only): switch between playing and watching the tablet.
+  if (!P.inApp) {
+    document.body.classList.add('browser');
+    document.getElementById('watchBtn').addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      location.replace(location.pathname + (watch ? '' : '?watch'));
+    });
+  } else {
+    watch = false; // the tablet always plays
+    document.body.classList.remove('watch');
+  }
 
   var el = function (id) { return document.getElementById(id); };
   var taskEl = el('task'), dotsEl = el('dots'), visEl = el('vis'), optsEl = el('opts');

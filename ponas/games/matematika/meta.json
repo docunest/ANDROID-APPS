@@ -3,7 +3,7 @@
   "icon": "icon.png",
   "color": "#26A69A",
   "order": 40,
-  "version": "1",
+  "version": "2",
   "network": ["ntfy.sh"],
   "enabled": true
 }

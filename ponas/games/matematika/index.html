@@ -73,8 +73,14 @@
 
   /* spectator (?watch): nothing to tap */
   body.watch #hand, body.watch .opt { pointer-events: none; }
-  #eye { display: none; width: 40px; height: 40px; }
-  body.watch #eye { display: block; }
+  body.watch #hand { opacity: .45; }
+  /* watch toggle: only in a browser (the parent's phone), never on the tablet */
+  #watchBtn { display: none; width: 80px; height: 80px; margin-left: auto; border-radius: 50%; background: #fff;
+    border: 4px solid #CFD8DC; box-shadow: 0 5px 0 #00000018; align-items: center; justify-content: center; flex: 0 0 auto; }
+  body.browser #watchBtn { display: flex; }
+  #watchBtn svg { width: 46px; height: 46px; }
+  body.watch #watchBtn { background: #FFE0B2; border-color: #FB8C00; }
+  @media (orientation: portrait) { #watchBtn { margin-left: 12px; } }
 
   .spark { position: fixed; width: 18px; height: 18px; background: #FFD54F; pointer-events: none;
     clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
@@ -98,7 +104,7 @@
   <div id="help">
     <div id="hand" aria-label="pagalba"><svg viewBox="0 0 24 24"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V11V3.5a1.5 1.5 0 0 1 3 0V11V4.5a1.5 1.5 0 0 1 3 0V12V7.5a1.5 1.5 0 0 1 3 0V15c0 4-3 7-7 7h-.6c-2.2 0-3.8-.9-5-2.6L4.2 15.2a1.6 1.6 0 0 1 2.5-2L8 14.6z" fill="#FFF3E0" stroke="#6D4C41" stroke-width="1.3" stroke-linejoin="round"/></svg></div>
     <div id="food"></div>
-    <svg id="eye" viewBox="0 0 24 24"><path d="M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12z" fill="#fff" stroke="#546E7A" stroke-width="1.5"/><circle cx="12" cy="12" r="3.6" fill="#546E7A"/></svg>
+    <div id="watchBtn" aria-label="stebėti"><svg viewBox="0 0 24 24"><path d="M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12z" fill="#fff" stroke="#546E7A" stroke-width="1.6"/><circle cx="12" cy="12" r="3.8" fill="#546E7A"/></svg></div>
   </div>
 </div>
 <script src="ponas.js"></script>
