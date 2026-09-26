@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Raidžių poros</title>
+<style>
+  body { background: linear-gradient(#FFE0B2, #FFF3E0); font-family: sans-serif; color: #4E342E;
+    --big: min(46vmin, 220px); --opt: min(26vmin, 130px); }
+  #stars { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; }
+  .star { width: 28px; height: 28px; background: #ffffffaa;
+    clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+    transition: transform .3s; }
+  .star.on { background: #FFC107; transform: scale(1.15); }
+
+  #game { position: fixed; top: 72px; left: 0; right: 0; bottom: 0; padding: 0 3vmin 2vmin;
+    display: flex; flex-direction: row; align-items: center; justify-content: space-evenly; gap: 3vmin; }
+  @media (orientation: portrait) { #game { flex-direction: column; justify-content: space-around; } }
+
+  #prompt { width: var(--big); height: var(--big); border-radius: 34px; background: #fff;
+    box-shadow: 0 7px 0 #00000018; display: flex; align-items: center; justify-content: center;
+    flex: 0 0 auto; transition: transform .12s; }
+  #prompt span { font-size: calc(var(--big) * .62); font-weight: 800; line-height: 1;
+    color: #FF7043; font-family: Georgia, 'Times New Roman', serif; }
+  #prompt.nudge { animation: nudge 1s ease-in-out 2; }
+
+  #opts { display: flex; gap: 2.5vmin; flex: 0 0 auto; flex-wrap: wrap; justify-content: center;
+    max-width: 92vmin; }
+  @media (orientation: portrait) { #opts { max-width: 88vmin; } }
+  .opt { width: var(--opt); height: var(--opt); border-radius: 26px; background: #fff;
+    border: 5px solid #FFCCBC; box-shadow: 0 6px 0 #00000018;
+    display: flex; align-items: center; justify-content: center;
+    transition: transform .12s, border-color .2s, background .2s; }
+  .opt span { font-size: calc(var(--opt) * .58); font-weight: 800; line-height: 1;
+    color: #6D4C41; font-family: Georgia, 'Times New Roman', serif; }
+  .opt:active { transform: scale(.92); }
+  .opt.ok { border-color: #66BB6A; background: #E8F5E9; }
+  .opt.ok span { color: #2E7D32; }
+  .opt.bad { border-color: #EF5350; background: #FFEBEE; }
+  .opt.shake { animation: shake .4s; }
+
+  .spark { position: fixed; width: 18px; height: 18px; background: #FFB300; border-radius: 50%;
+    pointer-events: none; opacity: 1; transition: transform .55s ease-out, opacity .55s ease-out; }
+
+  @keyframes nudge { 0%,100% { transform: scale(1) rotate(0); } 25% { transform: scale(1.08) rotate(-4deg); }
+    75% { transform: scale(1.08) rotate(4deg); } }
+  @keyframes shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-8px); }
+    75% { transform: translateX(8px); } }
+</style>
+</head>
+<body>
+<div id="stars"></div>
+<div id="game">
+  <div id="prompt"><span id="promptLetter">A</span></div>
+  <div id="opts"></div>
+</div>
+<!-- ponas.js is added by tools/build-site.mjs: pause/close buttons, ▶ start overlay, sound, storage. -->
+<script src="ponas.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
