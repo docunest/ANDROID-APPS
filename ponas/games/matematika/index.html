@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Matematika</title>
+<style>
+  body { background: linear-gradient(#E8F5E9, #FFFDE7); font-family: sans-serif; color: #37474F; }
+
+  /* stats between the pause (left) and close (right) buttons */
+  #top { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); height: 48px;
+    display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+  #stars { display: flex; align-items: center; gap: 3px; font-weight: 800; font-size: 22px; color: #F57F17;
+    transition: transform .2s; }
+  #stars.bump { transform: scale(1.3); }
+  #stars svg { width: 28px; height: 28px; }
+  #hearts { display: flex; gap: 1px; }
+  #hearts svg { width: 19px; height: 19px; transition: transform .3s, opacity .3s; }
+  #hearts svg.lost { opacity: .25; transform: scale(.8); }
+  #net { width: 26px; height: 20px; opacity: .3; display: none; }
+  #net.on { opacity: 1; }
+  body.mp #net { display: block; }
+
+  #game { position: fixed; top: 72px; left: 0; right: 0; bottom: 0; padding: 0 10px 10px;
+    display: grid; gap: 8px; grid-template-columns: 1fr auto; grid-template-rows: auto 1fr auto;
+    grid-template-areas: "task opts" "vis opts" "help opts"; }
+  @media (orientation: portrait) {
+    #game { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto auto;
+      grid-template-areas: "task" "vis" "opts" "help"; padding-bottom: 14px; }
+  }
+
+  #task { grid-area: task; justify-self: center; align-self: start; background: #fff; border-radius: 22px;
+    box-shadow: 0 5px 0 #00000018; padding: 2px 22px; font-weight: 800; font-size: min(14vmin, 64px);
+    letter-spacing: 2px; transition: transform .2s; }
+  #task .q { color: #FB8C00; }
+  #task.new { transform: scale(.85); }
+
+  #vis { grid-area: vis; position: relative; min-height: 0; min-width: 0;
+    display: flex; align-items: center; justify-content: center; }
+  #dots { display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: var(--g, 6px);
+    opacity: 0; transform: scale(.9); transition: opacity .25s, transform .25s; }
+  #dots.show { opacity: 1; transform: scale(1); }
+  #dots.grid { display: grid; }
+  #dots i { display: block; width: var(--s, 20px); height: var(--s, 20px); border-radius: 50%; background: #43A047;
+    box-shadow: inset 0 -3px 0 #00000026; position: relative; }
+  #dots i.gap { background: none; box-shadow: none; }
+  #dots i.x { background: #C8E6C9; }
+  #dots i.x::after { content: ""; position: absolute; left: -10%; top: 45%; width: 120%; height: 14%;
+    background: #E53935; border-radius: 3px; transform: rotate(-40deg); }
+  #dots b { display: flex; align-items: center; justify-content: center; width: var(--s, 20px); height: var(--s, 20px);
+    color: #FB8C00; font-size: calc(var(--s, 20px) * 1.3); font-weight: 900; }
+
+  #opts { grid-area: opts; display: flex; flex-direction: column; justify-content: center; gap: 10px; }
+  @media (orientation: portrait) { #opts { flex-direction: row; } }
+  .opt { width: min(26vmin, 112px); height: 88px; border-radius: 22px; background: #fff; border: 4px solid #90CAF9;
+    box-shadow: 0 5px 0 #00000020; display: flex; align-items: center; justify-content: center;
+    font-size: 46px; font-weight: 800; color: #1565C0; transition: transform .12s, background-color .2s; }
+  .opt.ok { background: #66BB6A; border-color: #2E7D32; color: #fff; transform: scale(1.08); }
+  .opt.bad { background: #FFCDD2; border-color: #E57373; color: #C62828; }
+  .opt.shake { animation: shake .45s; }
+  body.watch .opt.pick { outline: 5px solid #FB8C00; outline-offset: 2px; }
+
+  #help { grid-area: help; display: flex; align-items: center; gap: 12px; }
+  @media (orientation: portrait) { #help { justify-content: center; } }
+  #hand { width: 84px; height: 84px; border-radius: 50%; background: #FFCA28; box-shadow: 0 5px 0 #F9A825;
+    display: flex; align-items: center; justify-content: center; transition: transform .15s, opacity .2s; flex: 0 0 auto; }
+  #hand svg { width: 56px; height: 56px; }
+  #hand.off { opacity: .35; }
+  #hand.nudge { animation: nudge 1s ease-in-out 2; }
+  #food { display: flex; gap: 4px; }
+  #food svg { width: 30px; height: 30px; transition: opacity .3s, transform .3s; }
+  #food svg.empty { opacity: .22; transform: scale(.85); }
+
+  /* spectator (?watch): nothing to tap */
+  body.watch #hand, body.watch .opt { pointer-events: none; }
+  #eye { display: none; width: 40px; height: 40px; }
+  body.watch #eye { display: block; }
+
+  .spark { position: fixed; width: 18px; height: 18px; background: #FFD54F; pointer-events: none;
+    clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+    transition: transform .6s ease-out, opacity .6s ease-out; }
+  @keyframes shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-10px); }
+    40% { transform: translateX(9px); } 60% { transform: translateX(-6px); } 80% { transform: translateX(4px); } }
+  @keyframes nudge { 0%, 100% { transform: rotate(0) scale(1); } 25% { transform: rotate(-12deg) scale(1.1); }
+    75% { transform: rotate(12deg) scale(1.1); } }
+</style>
+</head>
+<body>
+<div id="top">
+  <div id="stars"><svg viewBox="0 0 24 24"><path d="M12 1.8l3.1 6.6 7.2.9-5.3 5 1.4 7.1L12 17.9l-6.4 3.5L7 14.3l-5.3-5 7.2-.9z" fill="#FFC107" stroke="#F57F17" stroke-width="1" stroke-linejoin="round"/></svg><span id="starN">0</span></div>
+  <div id="hearts"></div>
+  <svg id="net" viewBox="0 0 44 32"><path d="M12 28h22a8 8 0 0 0 0-16 11 11 0 0 0-21-2A9 9 0 0 0 12 28z" fill="#66BB6A"/></svg>
+</div>
+<div id="game">
+  <div id="task"></div>
+  <div id="vis"><div id="dots"></div></div>
+  <div id="opts"></div>
+  <div id="help">
+    <div id="hand" aria-label="pagalba"><svg viewBox="0 0 24 24"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V11V3.5a1.5 1.5 0 0 1 3 0V11V4.5a1.5 1.5 0 0 1 3 0V12V7.5a1.5 1.5 0 0 1 3 0V15c0 4-3 7-7 7h-.6c-2.2 0-3.8-.9-5-2.6L4.2 15.2a1.6 1.6 0 0 1 2.5-2L8 14.6z" fill="#FFF3E0" stroke="#6D4C41" stroke-width="1.3" stroke-linejoin="round"/></svg></div>
+    <div id="food"></div>
+    <svg id="eye" viewBox="0 0 24 24"><path d="M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12z" fill="#fff" stroke="#546E7A" stroke-width="1.5"/><circle cx="12" cy="12" r="3.6" fill="#546E7A"/></svg>
+  </div>
+</div>
+<script src="ponas.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
