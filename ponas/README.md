@@ -1,24 +1,32 @@
 # Ponas
 
-A home screen for a stripped-down kid tablet. It shows big picture tiles, and each tile is a
-small HTML/JS game from this repo. Install the APK once. After that, every push to `main` that
-changes `games/` gets published to GitHub Pages, and the tablet picks it up by itself.
+A home screen for a stripped-down kid tablet: big picture tiles, and each tile is a small
+HTML/JS game from this repo. You install the APK once. On the tablet you choose which games to
+install, and installed games then update themselves whenever you push changes to GitHub.
 
 ```
-phone / Claude ──push──▶ GitHub main ──Actions──▶ GitHub Pages ──sync (≤15 min)──▶ tablet
-                          (games/)                 manifest.json + games/
+phone / Claude ──push──▶ GitHub main ──Actions──▶ GitHub Pages ──────────▶ tablet
+                          games/ sdk/              launcher + manifest     install (PIN) / auto-update
 ```
 
-- **Shell app** (`android/`): Kotlin with plain Android Views. Its only dependencies are
+- **App** (`android/`): Kotlin with plain Android Views. Its only dependencies are
   `androidx.core` and `androidx.webkit`, and it needs only two permissions: `INTERNET` and
-  `ACCESS_NETWORK_STATE`. It shows one WebView at a time, created when a game opens and
-  destroyed when it closes.
-- **Games** (`games/<id>/`): self-contained pages. They work offline after the first sync.
-- **Manifest** (`tools/build-manifest.mjs`): checks every game against the rules and computes
-  a content hash for each one. The tablet re-downloads a game only when its hash changes.
+  `ACCESS_NETWORK_STATE`.
+  - **Isolation:** each game runs in its own fresh browser process, which is ended when the game
+    closes, so nothing leaks from one game into the next.
+  - **Own storage:** each game has its own origin, so its saved progress stays private to it.
+  - **Network:** the only site a game can reach is ntfy.sh, and only if the game asks for it.
+  - **Screen:** works in both orientations.
+- **Games** (`games/<id>/`): self-contained pages that work offline.
+- **Shared kit** (`sdk/ponas.js`): gives every game the same orange pause button, close button,
+  ▶ start and resume overlays, save/load, sound, and ntfy multiplayer.
+- **Site build** (`tools/build-site.mjs`): checks every game against the rules and builds the
+  Pages site. That's the launcher, `manifest.json`, and each game with `ponas.js` and its own
+  `game.json`. The tablet re-downloads a game only when its content hash changes.
 
-Pages URL: https://eb07-lab.github.io/ponas-app/ (a list of the games you can try in any
-browser) and https://eb07-lab.github.io/ponas-app/manifest.json.
+**Pages:** https://eb07-lab.github.io/ponas-app/ shows every game, with the same tiles as the
+tablet, for playing in any browser. https://eb07-lab.github.io/ponas-app/manifest.json is the
+catalog the tablet reads.
 
 ---
 
@@ -118,11 +126,23 @@ adb -s 172.20.10.2:PORT logcat --pid=$(adb -s 172.20.10.2:PORT shell pidof lt.eb
 adb -s 172.20.10.2:PORT logcat -s PonasSync     # sync messages only
 ```
 
+### Installing games (parent only)
+
+Tap the small **⬇ button in the bottom-right corner** of the home screen and enter the PIN
+(default **1234**; change it!). The **Games** screen lists every game in the catalog plus every
+game already installed. Each one shows its version, date, size, and whether it goes online.
+
+- **Install** downloads the game and adds its tile.
+- **Update** appears when a newer version exists. Installed games also update automatically
+  when the tablet syncs (at most every 15 min, or right away with Refresh).
+- **Remove** takes the tile away. Saved progress stays, in case you install the game again.
+- A game that was taken out of the catalog stays installed until you remove it.
+
 ### Parent menu
 
-Hold the **top-right corner for 3 seconds**, then enter the PIN (default **1234**. Change
-it!). The menu has these options:
+Hold the **top-right corner for 3 seconds**, then enter the PIN. The menu has these options:
 
+- Install / remove games
 - Refresh games now
 - Sync status and last error
 - Open Android Settings
@@ -144,12 +164,20 @@ they swipe the navigation bar in. To unpin, hold Back + Overview.
 1. On your phone, ask Claude (claude.ai/code, repo `eb07-lab/ponas-app`), for example: *"add a
    game in games/spalvos where the child taps the balloon of the colour they hear"*.
 2. Claude follows `CLAUDE.md`. It copies `templates/game`, builds the game and its icon, runs
-   `node tools/build-manifest.mjs`, tests at 640×375, and commits to `main`.
+   `node tools/build-site.mjs` and `node tools/smoke-test.mjs` (both orientations), and commits
+   to `main`.
 3. **Actions → Publish games** runs, which takes about 1 minute. If a game breaks a rule (too
-   big, missing icon, external URL…), the run fails and the tablet keeps the old version.
-4. The tablet shows the new or updated tile within about 15 minutes (it checks when it comes
-   back to the home screen). For an immediate update, use **Parent menu → Refresh games now**.
-5. You don't need the Mac, adb, or a new APK.
+   big, missing icon, external URL…), the run fails and nothing changes on the tablet.
+4. Try the game on your phone at https://eb07-lab.github.io/ponas-app/.
+5. **New game:** on the tablet, tap ⬇ → PIN → **Install**. **Changed game:** it updates by
+   itself within about 15 minutes, or right away with parent menu → Refresh.
+6. You don't need the Mac, adb, or a new APK.
+
+**Multiplayer games** (such as Linkėjimai) talk through ntfy.sh on the topic
+`bimmer-car-93204-lit-<game-id>`. Open the same game on the tablet and on your phone (from the
+Pages site). ntfy.sh is free with no account, but topics are public and the free server allows
+only about 1 message every 5 s per device after a short burst. That suits turn-based games and
+"send a picture", not fast real-time play.
 
 To try a game in a phone browser before the child sees it:
 https://eb07-lab.github.io/ponas-app/
@@ -161,26 +189,33 @@ To hide a game without deleting it, set `"enabled": false` in its `meta.json`.
 ## 4. Acceptance test
 
 1. **Install the APK** as described in section 2 and set Ponas as the home app. You should see
-   the Ponas home screen with the **Balionai** tile and the **Kamera** tile. On the very first
-   run with Wi‑Fi on, a short loading spinner appears first.
-2. **Tiles appear.** Press Home: Ponas comes back. Press Back on the home screen: nothing
-   happens.
+   the Ponas home screen with just the **Kamera** tile and a hint to install games.
+2. **Install games.** Tap ⬇ (bottom-right) → PIN → the Games screen lists Balionai, Piešimas
+   and Linkėjimai. Install all three and go back: three tiles appear, plus Kamera. Press Home:
+   Ponas comes back. Press Back on the home screen: nothing happens.
 3. **Game runs.** Tap Balionai → ▶. You hear rising beeps as the card counts its dots. Tap the
-   balloon with the same number of dots and it pops. Back, or two fingers held for 1.5 s,
-   returns home.
-4. **Offline.** Turn on airplane mode. Open Balionai again: it still works, with sound, and the
+   balloon with the same number of dots and it pops. The **orange pause** button shows a big ▶
+   to resume. The **✕** button, Back, or two fingers held for 1.5 s all return home.
+   **Rotate the tablet:** the game rearranges itself.
+4. **Isolation.** Open and close a few games. In
+   `adb -s … shell ps -A | grep ponas`, the `lt.eb07.ponas:game` process disappears each time a
+   game closes.
+5. **Multiplayer.** Open Linkėjimai on the tablet and
+   https://eb07-lab.github.io/ponas-app/games/linkejimai/ on your phone. Tap the heart on one
+   device and it pops up big on the other. The cloud icon turns solid when connected.
+6. **Offline.** Turn on airplane mode. Open Balionai again: it still works, with sound, and the
    stars from before are still there.
-5. **Update.** Turn airplane mode off. On GitHub (the phone is fine), change something visible,
+7. **Update.** Turn airplane mode off. On GitHub (the phone is fine), change something visible,
    for example `"color"` in `games/balionai/meta.json` or the balloon colours in `game.js`.
    Commit to `main` and wait for **Publish games** to go green.
-6. **Tablet updates.** Open Parent menu → **Refresh games now**. You'll see a toast saying
-   "Games are up to date", and the change shows up. **Versions** shows the new game hash and
-   manifest version.
-7. **Camera.** The Kamera tile opens the camera app.
-8. **No Wi‑Fi on a fresh install** (optional): run
+8. **Tablet updates.** Open Parent menu → **Refresh games now**. You'll see a toast saying
+   "Games are up to date", and the change shows up without reinstalling. The ⬇ Games screen and
+   **Versions** show the new version.
+9. **Camera.** The Kamera tile opens the camera app.
+10. **No Wi‑Fi on a fresh install** (optional): run
    `adb -s … shell pm clear lt.eb07.ponas`, turn Wi‑Fi off, and open Ponas. It shows the Wi‑Fi
-   picture and "Prijunkite Wi‑Fi / Connect Wi‑Fi". Turn Wi‑Fi on and within about 30 s the
-   games appear.
+   picture and "Prijunkite Wi‑Fi / Connect Wi‑Fi". Turn Wi‑Fi on and within about 30 s it
+   switches to the "install games" hint.
 
 ---
 
@@ -195,7 +230,7 @@ To hide a game without deleting it, set `"enabled": false` in its `meta.json`.
 | `Manifest download failed: … UnknownHost / timeout` | The hotspot has no internet, or the connection is too slow. Try again. |
 | `<id>: … size N, expected M (Pages may still be deploying)` | The CDN is still serving old files. Wait 5–10 min and Refresh. The old version stays until then. |
 | `<id>: … checksum mismatch` | Same as above. If it keeps happening, re-run **Publish games**. |
-| New game doesn't appear | Check that **Actions → Publish games** is green. A red run means `build-manifest` rejected the game; the log says why. Also check `"enabled": true`. |
+| New game doesn't appear | Check that **Actions → Publish games** is green. A red run means `build-site` rejected the game; the log says why. Also check `"enabled": true`. New games must be installed from ⬇ on the tablet; they never appear by themselves. |
 
 - **Pages URL:** it's always `https://eb07-lab.github.io/ponas-app/`. The address is set in
   `android/.../SyncManager.kt` (`BASE_URL`). If the repo is renamed or moved, that line needs
@@ -212,6 +247,9 @@ To hide a game without deleting it, set `"enabled": false` in its `meta.json`.
   "Ponas debug", then on the Mac open `chrome://inspect` in Chrome or Edge while adb is
   connected.
 - **Tablet still shows an old game:** sync runs at most every 15 min. Use Refresh.
+- **Multiplayer doesn't connect:** the game needs `"network": ["ntfy.sh"]` in its `meta.json`,
+  and the tablet needs internet access (not just Wi‑Fi). Too many messages in a row hit ntfy's
+  free rate limit; wait a minute.
 
 ---
 
@@ -221,7 +259,9 @@ To hide a game without deleting it, set `"enabled": false` in its `meta.json`.
 android/                     Kotlin shell app (Gradle, AGP 8.7, minSdk 26, targetSdk 34)
 games/<id>/                  one folder per game: index.html, meta.json, icon.png, …
 templates/game/              starter for new games (not published)
-tools/build-manifest.mjs     validates games, writes manifest.json (Node 18+, no deps)
+sdk/ponas.js                 shared kit injected into every game (pause/close, overlays, storage, sound, ntfy)
+tools/build-site.mjs         validates games, builds _site/ (launcher, manifest.json, games)
+tools/smoke-test.mjs         headless test of every game in both orientations (needs Playwright)
 .github/workflows/pages.yml  publish games to GitHub Pages
 .github/workflows/android.yml build the APK (debug always, signed release with secrets)
 CLAUDE.md                    rules for Claude sessions editing this repo
@@ -230,8 +270,9 @@ CLAUDE.md                    rules for Claude sessions editing this repo
 Local check (any machine with Node):
 
 ```sh
-node tools/build-manifest.mjs     # validates all games, writes ./manifest.json (git-ignored)
-npx serve games                   # then open a game at 640×375 in the browser's responsive mode
+node tools/build-site.mjs         # validates all games, builds _site/ (git-ignored)
+npx serve _site                   # launcher + games; use responsive mode at 640×375 and 375×640
+npm i --no-save playwright && node tools/smoke-test.mjs   # automatic check, screenshots in _shots/
 ```
 
 Not built yet: an in-app self-update from GitHub Releases. It would need the

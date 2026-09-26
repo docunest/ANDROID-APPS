@@ -5,71 +5,48 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>GAME_TITLE</title>
 <style>
-  html, body {
-    margin: 0; height: 100%; overflow: hidden; background: #FFF6E0;
-    touch-action: none; -webkit-user-select: none; user-select: none;
-    -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none;
-    font-family: sans-serif;
-  }
-  /* Design everything in this fixed 640×375 box; the script scales it to the screen. */
-  #stage {
-    position: absolute; left: 50%; top: 50%; width: 640px; height: 375px;
-    transform: translate(-50%, -50%); overflow: hidden;
-  }
-  #start { position: absolute; inset: 0; background: #0000004d; display: flex; align-items: center; justify-content: center; }
-  #start.hidden { display: none; }
-  .play { width: 150px; height: 150px; border-radius: 50%; background: #43A047; position: relative; }
-  .play::after { content: ""; position: absolute; left: 58px; top: 42px;
-    border-left: 56px solid #fff; border-top: 34px solid transparent; border-bottom: 34px solid transparent; }
-  .target { position: absolute; left: 245px; top: 110px; width: 150px; height: 150px; border-radius: 30px; background: #FF7043; }
+  body { background: #FFF6E0; font-family: sans-serif; --size: min(40vmin, 200px); }
+  /* Keep the top 72px free: ponas.js puts the pause (left) and close (right) buttons there. */
+  #game { position: fixed; left: 0; right: 0; top: 72px; bottom: 0;
+    display: flex; flex-direction: row; align-items: center; justify-content: space-evenly; }
+  @media (orientation: portrait) { #game { flex-direction: column; } }
+  .target { width: var(--size); height: var(--size); border-radius: 30px; background: #FF7043;
+    box-shadow: 0 6px 0 #00000022; transition: transform .12s; }
+  .target:active { transform: scale(.92); }
+  #count { display: flex; gap: 6px; flex-wrap: wrap; max-width: var(--size); }
+  #count i { width: 22px; height: 22px; border-radius: 50%; background: #FFB300; }
 </style>
 </head>
 <body>
-<div id="stage">
+<div id="game">
   <div class="target" id="target"></div>
-  <div id="start"><div class="play"></div></div>
+  <div id="count"></div>
 </div>
+<!-- ponas.js is added by tools/build-site.mjs: pause/close buttons, ▶ start overlay, sound, storage. -->
+<script src="ponas.js"></script>
 <script>
 (function () {
   'use strict';
-  var KEY = 'GAME_ID:'; // localStorage prefix: always "<id>:"
-  var stage = document.getElementById('stage');
+  var P = window.Ponas;
+  var taps = P.load('taps', 0);            // saved as "GAME_ID:taps"
+  var countEl = document.getElementById('count');
 
-  function fit() {
-    var s = Math.min(innerWidth / 640, innerHeight / 375);
-    stage.style.transform = 'translate(-50%, -50%) scale(' + s + ')';
+  function draw() {
+    countEl.innerHTML = '';
+    for (var i = 0; i < taps % 10; i++) countEl.appendChild(document.createElement('i'));
   }
-  addEventListener('resize', fit); fit();
 
-  function load(k, d) { try { var v = localStorage.getItem(KEY + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
-  function save(k, v) { try { localStorage.setItem(KEY + k, JSON.stringify(v)); } catch (e) {} }
-
-  var ac = null;
-  function unlock() {
-    if (!ac) { var C = window.AudioContext || window.webkitAudioContext; if (C) ac = new C(); }
-    if (ac && ac.state === 'suspended') ac.resume();
-  }
-  function tone(freq, delay, dur) {
-    if (!ac) return;
-    var t = ac.currentTime + (delay || 0), o = ac.createOscillator(), g = ac.createGain();
-    o.frequency.value = freq;
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + dur + 0.05);
-  }
-  document.addEventListener('visibilitychange', function () { if (ac) { document.hidden ? ac.suspend() : ac.resume(); } });
-  document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
-
-  var taps = load('taps', 0);
   document.getElementById('target').addEventListener('pointerdown', function (e) {
-    e.preventDefault(); unlock();
-    taps++; save('taps', taps);
-    tone(523, 0, 0.2); tone(784, 0.12, 0.3);
+    e.preventDefault();
+    if (P.paused) return;
+    taps++; P.save('taps', taps); draw();
+    P.tone(523, { dur: 0.2 }); P.tone(784, { delay: 0.12, dur: 0.3 });
   });
 
-  document.getElementById('start').addEventListener('pointerdown', function (e) {
-    e.preventDefault(); unlock(); this.classList.add('hidden');
-  });
+  P.onStart(function () { /* start music, timers, first prompt… */ });
+  P.onPause(function () { /* stop timers/loops */ });
+  P.onResume(function () { /* restart them */ });
+  draw();
 })();
 </script>
 </body>

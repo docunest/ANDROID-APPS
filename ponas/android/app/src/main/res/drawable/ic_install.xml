@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Download arrow into a tray: "install games". -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#00000000" android:strokeColor="#6D4C41" android:strokeWidth="2.4"
+        android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M12,3 L12,14 M7.5,9.5 L12,14 L16.5,9.5" />
+    <path android:fillColor="#00000000" android:strokeColor="#6D4C41" android:strokeWidth="2.4"
+        android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M4,15 L4,20 L20,20 L20,15" />
+</vector>

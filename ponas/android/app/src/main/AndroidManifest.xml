@@ -30,7 +30,7 @@
             android:exported="true"
             android:launchMode="singleTask"
             android:resizeableActivity="false"
-            android:screenOrientation="sensorLandscape"
+            android:screenOrientation="fullUser"
             android:stateNotNeeded="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -43,12 +43,22 @@
             </intent-filter>
         </activity>
 
+        <!-- Parent-only (opened after the PIN). -->
+        <activity
+            android:name=".InstallActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
+            android:exported="false"
+            android:screenOrientation="fullUser" />
+
+        <!-- Each game runs in its own ":game" process, which is ended when the game closes,
+             so every game starts in a fresh browser with nothing left over from the last one. -->
         <activity
             android:name=".GameActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
             android:exported="false"
+            android:process=":game"
             android:resizeableActivity="false"
-            android:screenOrientation="sensorLandscape"
+            android:screenOrientation="fullUser"
             android:theme="@style/Theme.Ponas.Game" />
     </application>
 </manifest>

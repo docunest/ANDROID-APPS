@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Piešimas</title>
+<style>
+  body { background: #F3E5F5; font-family: sans-serif; }
+  /* Layout: paper + palette. Landscape: palette on the right. Portrait: palette at the bottom. */
+  #wrap { position: fixed; left: 0; right: 0; top: 72px; bottom: 0; display: flex; flex-direction: row; gap: 8px; padding: 0 8px 8px; }
+  @media (orientation: portrait) { #wrap { flex-direction: column; } }
+  #paper { position: relative; flex: 1 1 auto; overflow: hidden; background: #fff; border-radius: 18px;
+    box-shadow: inset 0 0 0 3px #CE93D8; touch-action: none; }
+  #paper canvas { position: absolute; left: 0; top: 0; }
+  #palette { flex: 0 0 auto; display: grid; grid-template-columns: repeat(2, 84px); grid-auto-rows: 84px; align-content: center; }
+  @media (orientation: portrait) {
+    #palette { grid-template-columns: repeat(3, 84px); justify-content: center; }
+  }
+  .pick { display: flex; align-items: center; justify-content: center; }
+  .pick i { display: block; width: 66px; height: 66px; border-radius: 50%; background: var(--c);
+    box-shadow: 0 4px 0 #00000030; transition: transform .12s; }
+  .pick.on i { transform: scale(1.12); box-shadow: 0 0 0 5px #fff, 0 0 0 9px var(--c); }
+  .pick svg { width: 66px; height: 66px; }
+  .pick.new i { background: #fff; display: flex; align-items: center; justify-content: center; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="paper"><canvas id="c"></canvas></div>
+  <div id="palette"></div>
+</div>
+<script src="ponas.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

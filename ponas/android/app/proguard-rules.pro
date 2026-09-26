@@ -1,1 +1,4 @@
-# Ponas uses no reflection. androidx.webkit ships its own consumer rules.
+# Ponas uses no reflection except the WebView bridge (window.PonasApp) in GameActivity.
+-keepclassmembers class lt.eb07.ponas.GameActivity$Bridge {
+    @android.webkit.JavascriptInterface <methods>;
+}

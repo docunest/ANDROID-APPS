@@ -20,7 +20,7 @@ object ParentMenu {
 
     private const val DIALOG_THEME = android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
 
-    fun askPin(home: HomeActivity) {
+    fun askPin(home: HomeActivity, onOk: () -> Unit) {
         if (home.isFinishing) return
         val input = pinField(home, "PIN")
         val dialog = AlertDialog.Builder(home, DIALOG_THEME)
@@ -28,7 +28,7 @@ object ParentMenu {
             .setView(padded(home, input))
             .setPositiveButton("OK") { _, _ ->
                 if (input.text.toString() == Store.pin(home)) {
-                    showMenu(home)
+                    onOk()
                 } else {
                     Toast.makeText(home, "Wrong PIN", Toast.LENGTH_SHORT).show()
                 }
@@ -40,8 +40,9 @@ object ParentMenu {
         input.requestFocus()
     }
 
-    private fun showMenu(home: HomeActivity) {
+    fun showMenu(home: HomeActivity) {
         val items = arrayOf(
+            "Install / remove games",
             "Refresh games now",
             "Sync status and last error",
             "Open Android Settings",
@@ -53,12 +54,13 @@ object ParentMenu {
             .setTitle("Ponas – parent menu")
             .setItems(items) { _, which ->
                 when (which) {
-                    0 -> refresh(home)
-                    1 -> showText(home, "Sync status", statusText(home))
-                    2 -> startSafely(home, Intent(Settings.ACTION_SETTINGS))
-                    3 -> openLauncher3(home)
-                    4 -> changePin(home)
-                    5 -> showText(home, "Versions", versionsText(home))
+                    0 -> home.startActivity(Intent(home, InstallActivity::class.java))
+                    1 -> refresh(home)
+                    2 -> showText(home, "Sync status", statusText(home))
+                    3 -> startSafely(home, Intent(Settings.ACTION_SETTINGS))
+                    4 -> openLauncher3(home)
+                    5 -> changePin(home)
+                    6 -> showText(home, "Versions", versionsText(home))
                 }
             }
             .setNegativeButton("Close", null)
@@ -109,8 +111,8 @@ object ParentMenu {
             val games = Store.loadInstalled(home)
             if (games.isEmpty()) append("(none)")
             for (g in games) {
-                append("• ").append(g.title).append(" [").append(g.id).append("] ")
-                    .append(g.hash.take(10)).append('\n')
+                append("• ").append(g.title).append(" [").append(g.id).append("] v").append(g.version)
+                    .append(" · ").append(g.hash.take(10)).append('\n')
             }
         }
     }

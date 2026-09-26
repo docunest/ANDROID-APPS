@@ -15,15 +15,19 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArraySet
+import java.util.concurrent.Executors
 
 /**
- * Downloads manifest.json from GitHub Pages and keeps filesDir/games/<id>/<hash>/ in sync.
+ * Talks to GitHub Pages. All work runs on one low-priority background thread, one job at a time.
  *
- * Rules:
- *  - at most every 15 min unless forced from the parent menu;
- *  - a game is switched only after all of its files downloaded and matched size + sha256;
- *  - on any failure the last good version stays.
+ *  - [maybeSync]: download the catalog (manifest.json) and auto-update installed games whose
+ *    hash changed. At most every 15 min unless forced. Never installs or removes games by itself.
+ *  - [install] / [uninstall]: what the parent picks on the install screen.
+ *
+ * A game version is switched only after every file downloaded and matched size + sha256.
+ * On any failure the last good version stays.
  */
 object SyncManager {
     private const val TAG = "PonasSync"
@@ -32,69 +36,117 @@ object SyncManager {
     const val MANIFEST_URL = BASE_URL + "manifest.json"
 
     private const val MIN_INTERVAL_MS = 15L * 60 * 1000
-    private const val EMPTY_RETRY_MS = 30L * 1000 // retry quickly while nothing is installed
-    private const val MAX_MANIFEST_BYTES = 512L * 1024
-    private const val MAX_GAME_BYTES = 4L * 1024 * 1024 // build-manifest enforces 2 MB; this is a safety cap
+    private const val EMPTY_RETRY_MS = 30L * 1000
+    private const val MAX_MANIFEST_BYTES = 1024L * 1024
+    private const val MAX_GAME_BYTES = 4L * 1024 * 1024 // build-site enforces 2 MB; safety cap
+    private const val MAX_ICON_BYTES = 512L * 1024
     private const val CONNECT_TIMEOUT_MS = 15_000
     private const val READ_TIMEOUT_MS = 30_000
 
-    private val ID_RE = Regex("^[a-z0-9][a-z0-9-]{0,39}$")
+    val ID_RE = Regex("^[a-z0-9][a-z0-9-]{0,39}$")
     private val HASH_RE = Regex("^[a-f0-9]{8,64}$")
     private val PATH_RE = Regex("^[A-Za-z0-9._/-]{1,200}$")
     private val SHA_RE = Regex("^[a-f0-9]{64}$")
 
-    private val running = AtomicBoolean(false)
+    private val executor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "ponas-sync").apply { priority = Thread.MIN_PRIORITY }
+    }
     private val main = Handler(Looper.getMainLooper())
+    private val listeners = CopyOnWriteArraySet<Runnable>()
 
-    /** True while a GameActivity is open, so old version folders are not deleted under it. */
+    /** Game ids with an install/update in progress (for the install screen). */
+    val busy: MutableSet<String> = ConcurrentHashMap.newKeySet<String>()
+
     @Volatile
-    var gameOpen = false
+    var catalogRunning = false
+        private set
 
-    /** Called on the main thread when a sync starts and when it ends. Main thread only. */
-    var listener: (() -> Unit)? = null
+    val isRunning: Boolean get() = catalogRunning || busy.isNotEmpty()
 
-    val isRunning: Boolean get() = running.get()
+    fun addListener(l: Runnable) { listeners.add(l) }
+    fun removeListener(l: Runnable) { listeners.remove(l) }
+    private fun notifyListeners() { main.post { for (l in listeners) l.run() } }
 
-    /** Starts a background sync if one is due (or [force]). Returns true if a sync was started. */
+    // ---- public jobs --------------------------------------------------------------------
+
+    /** Refresh the catalog and auto-update installed games, if due (or [force]). */
     fun maybeSync(ctx: Context, force: Boolean = false): Boolean {
         val app = ctx.applicationContext
-        val now = System.currentTimeMillis()
+        if (catalogRunning) return false
         if (!force) {
+            val now = System.currentTimeMillis()
             val last = Store.prefs(app).getLong(Store.KEY_LAST_ATTEMPT, 0L)
-            val interval = if (Store.loadInstalled(app).isEmpty()) EMPTY_RETRY_MS else MIN_INTERVAL_MS
+            val never = Store.loadCatalog(app).isEmpty()
+            val interval = if (never) EMPTY_RETRY_MS else MIN_INTERVAL_MS
             if (last in 1..now && now - last < interval) return false
         }
-        if (!running.compareAndSet(false, true)) return false
-        notifyListener()
-        val t = Thread({
+        catalogRunning = true
+        notifyListeners()
+        executor.execute {
             try {
-                runSync(app)
+                refresh(app)
             } catch (e: Throwable) {
-                Log.e(TAG, "sync crashed", e)
                 recordError(app, "Sync crashed: $e")
             } finally {
-                running.set(false)
-                notifyListener()
+                catalogRunning = false
+                notifyListeners()
             }
-        }, "ponas-sync")
-        t.priority = Thread.MIN_PRIORITY
-        t.start()
+        }
         return true
     }
 
-    private fun notifyListener() {
-        main.post { listener?.invoke() }
+    fun install(ctx: Context, id: String) {
+        val app = ctx.applicationContext
+        if (!busy.add(id)) return
+        notifyListeners()
+        executor.execute {
+            try {
+                val entry = Store.loadCatalog(app).firstOrNull { it.first.id == id }
+                    ?: throw IOException("not in catalog")
+                installEntry(app, entry.first, entry.second)
+                clearError(app)
+            } catch (e: Throwable) {
+                recordError(app, "$id: $e")
+            } finally {
+                busy.remove(id)
+                notifyListeners()
+            }
+        }
     }
 
-    private fun recordError(ctx: Context, msg: String) {
-        Log.w(TAG, msg)
-        Store.prefs(ctx).edit()
-            .putString(Store.KEY_LAST_ERROR, msg)
-            .putLong(Store.KEY_LAST_ERROR_AT, System.currentTimeMillis())
-            .apply()
+    fun uninstall(ctx: Context, id: String) {
+        val app = ctx.applicationContext
+        executor.execute {
+            try {
+                Store.saveInstalled(app, Store.loadInstalled(app).filter { it.id != id })
+                File(Store.gamesRoot(app), id).deleteRecursively()
+            } catch (e: Throwable) {
+                recordError(app, "remove $id: $e")
+            } finally {
+                notifyListeners()
+            }
+        }
     }
 
-    private fun runSync(ctx: Context) {
+    /** Downloads a catalog game's icon for the install screen (blocking; call off the main thread). */
+    fun fetchIcon(ctx: Context, g: Game): File? {
+        val dir = File(ctx.cacheDir, "icons").apply { mkdirs() }
+        val f = File(dir, "${g.id}-${g.hash}.png")
+        if (f.isFile) return f
+        if (!PATH_RE.matches(g.icon) || !isOnline(ctx)) return null
+        return try {
+            val bytes = fetchBytes(URL(BASE_URL + "games/${g.id}/${g.icon}?h=${g.hash}"), MAX_ICON_BYTES)
+            dir.listFiles()?.filter { it.name.startsWith("${g.id}-") }?.forEach { it.delete() }
+            f.writeBytes(bytes)
+            f
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // ---- work ---------------------------------------------------------------------------
+
+    private fun refresh(ctx: Context) {
         val now = System.currentTimeMillis()
         Store.prefs(ctx).edit().putLong(Store.KEY_LAST_ATTEMPT, now).apply()
         cleanup(ctx)
@@ -104,71 +156,33 @@ object SyncManager {
             return
         }
 
+        val text: String
         val manifest: JSONObject
         try {
-            val bytes = fetchBytes(URL("$MANIFEST_URL?t=$now"), MAX_MANIFEST_BYTES)
-            manifest = JSONObject(String(bytes, Charsets.UTF_8))
+            text = String(fetchBytes(URL("$MANIFEST_URL?t=$now"), MAX_MANIFEST_BYTES), Charsets.UTF_8)
+            manifest = JSONObject(text)
+            if (manifest.optJSONArray("games") == null) throw IOException("no \"games\" list")
         } catch (e: Exception) {
             recordError(ctx, "Manifest download failed: $e")
             return
         }
+        Store.saveCatalog(ctx, text)
 
-        val version = manifest.optLong("version", 0L)
-        val list = manifest.optJSONArray("games")
-        if (list == null) {
-            recordError(ctx, "Manifest has no \"games\" list")
-            return
-        }
-
-        val installed = Store.loadInstalled(ctx).associateBy { it.id }
-        val result = ArrayList<Game>()
+        // Auto-update installed games whose hash changed; refresh their titles/colours/etc.
+        val catalog = Store.loadCatalog(ctx).associateBy { it.first.id }
         val errors = ArrayList<String>()
-        val seen = HashSet<String>()
-
-        for (i in 0 until list.length()) {
-            val o = list.optJSONObject(i) ?: continue
-            val id = o.optString("id")
-            if (!ID_RE.matches(id) || !seen.add(id)) {
-                errors.add("Skipped invalid or duplicate id '$id'")
-                continue
-            }
-            if (!o.optBoolean("enabled", true)) continue
-            val hash = o.optString("hash")
-            if (!HASH_RE.matches(hash)) {
-                errors.add("$id: invalid hash")
-                installed[id]?.let { result.add(it) }
-                continue
-            }
-            val game = Game(
-                id = id,
-                title = o.optString("title", id),
-                color = o.optString("color", "#4CAF50"),
-                order = o.optInt("order", 100),
-                icon = o.optString("icon", "icon.png"),
-                hash = hash,
-            )
-            val old = installed[id]
-            if (old != null && old.hash == hash) {
-                result.add(game) // same files; title/colour/order may still have changed
-                continue
-            }
+        for (g in Store.loadInstalled(ctx)) {
+            val entry = catalog[g.id] ?: continue // removed from the catalog: keep it installed
             try {
-                val files = o.optJSONArray("files") ?: throw IOException("no files list")
-                installGame(ctx, game, files)
-                result.add(game)
-                Log.i(TAG, "installed $id @ $hash")
+                installEntry(ctx, entry.first, entry.second)
             } catch (e: Exception) {
-                errors.add("$id: $e")
-                if (old != null) result.add(old) // keep the last good version
+                errors.add("${g.id}: $e")
             }
         }
-
-        // Games missing from the manifest (or disabled) are not in `result` and get removed.
-        Store.saveInstalled(ctx, result)
         cleanup(ctx)
 
         val edit = Store.prefs(ctx).edit()
-            .putLong(Store.KEY_MANIFEST_VERSION, version)
+            .putLong(Store.KEY_MANIFEST_VERSION, manifest.optLong("version", 0L))
             .putLong(Store.KEY_LAST_OK, System.currentTimeMillis())
         if (errors.isEmpty()) {
             edit.remove(Store.KEY_LAST_ERROR).remove(Store.KEY_LAST_ERROR_AT)
@@ -179,12 +193,32 @@ object SyncManager {
         edit.apply()
     }
 
-    private fun installGame(ctx: Context, game: Game, files: JSONArray) {
-        val root = File(Store.gamesRoot(ctx), game.id)
-        val finalDir = File(root, game.hash)
-        if (File(finalDir, "index.html").isFile) return // already complete from an earlier run
+    /** Installs or updates one game from its catalog entry, then records it as installed. */
+    private fun installEntry(ctx: Context, g: Game, raw: JSONObject) {
+        if (!ID_RE.matches(g.id)) throw IOException("invalid id")
+        if (!HASH_RE.matches(g.hash)) throw IOException("invalid hash")
+        val current = Store.loadInstalled(ctx).firstOrNull { it.id == g.id }
+        if (current == null || current.hash != g.hash) {
+            val files = raw.optJSONArray("files") ?: throw IOException("no files list")
+            download(ctx, g, files)
+        }
+        val list = Store.loadInstalled(ctx).filter { it.id != g.id }.toMutableList()
+        val prev = when {
+            current == null -> null
+            current.hash != g.hash -> current.hash
+            else -> current.prev
+        }
+        list.add(g.copy(prev = prev))
+        Store.saveInstalled(ctx, list)
+        Log.i(TAG, "installed ${g.id} @ ${g.hash}")
+    }
 
-        val tmp = File(root, game.hash + ".tmp")
+    private fun download(ctx: Context, g: Game, files: JSONArray) {
+        val root = File(Store.gamesRoot(ctx), g.id)
+        val finalDir = File(root, g.hash)
+        if (File(finalDir, "index.html").isFile) return // complete from an earlier run
+
+        val tmp = File(root, g.hash + ".tmp")
         tmp.deleteRecursively()
         if (!tmp.mkdirs()) throw IOException("cannot create ${tmp.path}")
 
@@ -203,8 +237,8 @@ object SyncManager {
                 if (size < 0 || total > MAX_GAME_BYTES) throw IOException("game too large")
                 val out = File(tmp, path)
                 out.parentFile?.mkdirs()
-                // ?h= busts the GitHub Pages CDN cache so we never mix old and new files.
-                val url = URL(BASE_URL + "games/" + game.id + "/" + path + "?h=" + game.hash)
+                // ?h= busts the GitHub Pages CDN cache so old and new files never mix.
+                val url = URL(BASE_URL + "games/" + g.id + "/" + path + "?h=" + g.hash)
                 downloadTo(url, out, size, if (SHA_RE.matches(sha)) sha else null)
                 if (path == "index.html") hasIndex = true
             }
@@ -217,29 +251,37 @@ object SyncManager {
         }
     }
 
-    /** Removes temp folders, versions that are no longer current, and removed games. */
+    /** Deletes temp folders, uninstalled games and versions other than current + previous. */
     private fun cleanup(ctx: Context) {
-        val root = Store.gamesRoot(ctx)
-        val dirs = root.listFiles() ?: return
-        val current = Store.loadInstalled(ctx).associate { it.id to it.hash }
-        val safe = !gameOpen
+        val dirs = Store.gamesRoot(ctx).listFiles() ?: return
+        val keep = Store.loadInstalled(ctx).associate { it.id to setOfNotNull(it.hash, it.prev) }
         for (gameDir in dirs) {
-            val keep = current[gameDir.name]
-            if (keep == null) {
-                if (safe) gameDir.deleteRecursively()
+            val versions = keep[gameDir.name]
+            if (versions == null) {
+                gameDir.deleteRecursively()
                 continue
             }
             for (v in gameDir.listFiles() ?: emptyArray()) {
-                if (v.name.endsWith(".tmp")) {
-                    v.deleteRecursively()
-                } else if (v.name != keep && safe) {
-                    v.deleteRecursively()
-                }
+                if (v.name !in versions) v.deleteRecursively()
             }
         }
     }
 
-    private fun isOnline(ctx: Context): Boolean {
+    // ---- helpers ------------------------------------------------------------------------
+
+    private fun recordError(ctx: Context, msg: String) {
+        Log.w(TAG, msg)
+        Store.prefs(ctx).edit()
+            .putString(Store.KEY_LAST_ERROR, msg)
+            .putLong(Store.KEY_LAST_ERROR_AT, System.currentTimeMillis())
+            .apply()
+    }
+
+    private fun clearError(ctx: Context) {
+        Store.prefs(ctx).edit().remove(Store.KEY_LAST_ERROR).remove(Store.KEY_LAST_ERROR_AT).apply()
+    }
+
+    fun isOnline(ctx: Context): Boolean {
         val cm = ctx.getSystemService(ConnectivityManager::class.java) ?: return true
         val net = cm.activeNetwork ?: return false
         val caps = cm.getNetworkCapabilities(net) ?: return false

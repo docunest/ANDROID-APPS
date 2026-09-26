@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Linkėjimai</title>
+<style>
+  body { background: linear-gradient(#FFEBEE, #FFF8E1); font-family: sans-serif; --b: min(34vmin, 170px); }
+  /* online indicator between the pause and close buttons: a cloud, green when connected */
+  #net { position: fixed; top: 18px; left: 50%; transform: translateX(-50%); width: 44px; height: 32px; opacity: .35; transition: opacity .3s; }
+  #net.on { opacity: 1; }
+  #pics { position: fixed; left: 0; right: 0; top: 72px; bottom: 0; display: grid;
+    grid-template-columns: repeat(4, var(--b)); gap: 3vmin; align-content: center; justify-content: center; }
+  @media (orientation: portrait) { #pics { grid-template-columns: repeat(2, var(--b)); } }
+  .pic { width: var(--b); height: var(--b); border-radius: 30px; background: #fff; box-shadow: 0 6px 0 #00000020;
+    display: flex; align-items: center; justify-content: center; transition: transform .12s; }
+  .pic:active { transform: scale(.92); }
+  .pic svg { width: 70%; height: 70%; }
+  .fly { position: fixed; pointer-events: none; transition: transform 1.1s ease-in, opacity 1.1s ease-in; }
+  .fly svg { width: 100%; height: 100%; }
+  /* picture received from the other device */
+  #got { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+  #got .big { width: min(70vmin, 360px); height: min(70vmin, 360px); transform: scale(0); opacity: 0;
+    transition: transform .45s cubic-bezier(.2,1.6,.4,1), opacity .3s; }
+  #got .big.show { transform: scale(1); opacity: 1; }
+  #got .big svg { width: 100%; height: 100%; filter: drop-shadow(0 8px 0 #00000022); }
+</style>
+</head>
+<body>
+<svg id="net" viewBox="0 0 44 32"><path d="M12 28h22a8 8 0 0 0 0-16 11 11 0 0 0-21-2A9 9 0 0 0 12 28z" fill="#66BB6A"/></svg>
+<div id="pics"></div>
+<div id="got"><div class="big"></div></div>
+<script src="ponas.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

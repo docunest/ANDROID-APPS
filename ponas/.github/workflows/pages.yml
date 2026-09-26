@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "games/**"
+      - "sdk/**"
       - "tools/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
@@ -23,19 +24,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # git history gives each game its "updated" date
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Build manifest (validates every game)
-        run: node tools/build-manifest.mjs --out _site/manifest.json --index _site/index.html
-
-      - name: Assemble site
+      - name: Build site (validates every game)
         run: |
-          cp -r games _site/games
-          rm -f _site/games/*/meta.json
-          touch _site/.nojekyll
+          node tools/build-site.mjs --out _site
           find _site -type f | sort
 
       - uses: actions/configure-pages@v5

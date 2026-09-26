@@ -3,5 +3,6 @@
   "icon": "icon.png",
   "color": "#FF7043",
   "order": 100,
+  "version": "1",
   "enabled": true
 }

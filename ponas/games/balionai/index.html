@@ -4,24 +4,80 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Balionai</title>
-<link rel="stylesheet" href="style.css">
+<style>
+  body {
+    background: linear-gradient(#8FD3F8, #D4F1FF);
+    font-family: sans-serif;
+    --card: min(38vmin, 200px);
+    --bw: min(27vmin, 140px);
+  }
+  /* stars sit between the pause (left) and close (right) buttons */
+  #stars { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; }
+  .star {
+    width: 28px; height: 28px; background: #ffffff99;
+    clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+    transition: transform .3s;
+  }
+  .star.on { background: #FFC107; transform: scale(1.15); }
+
+  #game {
+    position: fixed; left: 0; right: 0; top: 72px; bottom: 0;
+    display: flex; flex-direction: row; align-items: center; justify-content: space-evenly;
+    padding: 0 8px 12px;
+  }
+  @media (orientation: portrait) { #game { flex-direction: column; } }
+
+  #card {
+    width: var(--card); height: var(--card); flex: 0 0 auto;
+    background: #fff; border-radius: 26px; box-shadow: 0 6px 0 #00000022;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .dots { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); width: 82%; aspect-ratio: 1; }
+  .dots span { display: flex; align-items: center; justify-content: center; }
+  .dots i { display: block; width: 72%; aspect-ratio: 1; border-radius: 50%; background: #37474F;
+    transition: transform .15s, background-color .15s; }
+  #card .dots i.lit { background: #FF6F00; transform: scale(1.2); }
+
+  #balloons { display: flex; gap: 2.5vmin; flex: 0 0 auto; }
+  .balloon { position: relative; width: var(--bw); height: calc(var(--bw) * 1.75);
+    transition: transform .35s ease-out, opacity .35s ease-out; }
+  .balloon.enter { transform: scale(.6); opacity: 0; }
+  .balloon.popped { transform: scale(1.35); opacity: 0; transition-duration: .18s; }
+  .balloon.fly { transform: translateY(-120vh); transition: transform 1.2s ease-in; }
+  .balloon .inner { position: absolute; inset: 0; animation: bob 3s ease-in-out infinite; }
+  .balloon:nth-child(2) .inner { animation-delay: -1s; }
+  .balloon:nth-child(3) .inner { animation-delay: -2s; }
+  .balloon .body {
+    position: absolute; left: 0; top: 0; width: 100%; height: 68%;
+    border-radius: 50% 50% 48% 48% / 56% 56% 44% 44%;
+    background: var(--c); box-shadow: inset -10px -8px 0 #00000018;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .balloon .body::after { content: ""; position: absolute; left: 18%; top: 12%; width: 13%; height: 18%;
+    border-radius: 50%; background: #ffffff55; transform: rotate(20deg); }
+  .balloon .knot { position: absolute; left: 44%; top: 66%; width: 12%; height: 5%; background: var(--c);
+    clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+  .balloon .string { position: absolute; left: calc(50% - 1px); top: 70%; width: 2px; height: 30%; background: #607D8B; }
+  .balloon .dots { width: 78%; }
+  .balloon .dots i { background: #fff; box-shadow: 0 0 0 3px #00000040; }
+  .balloon.shake .inner { animation: shake .45s; }
+  @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); } 20% { transform: translateX(-12px) rotate(-4deg); }
+    40% { transform: translateX(10px) rotate(4deg); } 60% { transform: translateX(-8px); } 80% { transform: translateX(6px); }
+  }
+  .spark { position: fixed; width: 18px; height: 18px; background: #FFD54F; pointer-events: none;
+    clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+    transition: transform .6s ease-out, opacity .6s ease-out; }
+</style>
 </head>
 <body>
-<div id="stage">
-  <div class="cloud c1"></div>
-  <div class="cloud c2"></div>
-
-  <!-- progress: 5 stars, no timer, no penalty -->
-  <div id="stars"></div>
-
-  <!-- the number to find, shown as dots; tap it to hear the count again -->
-  <div id="card" aria-label="Kiek taškų?"><div class="dots"></div></div>
-
+<div id="stars"></div>
+<div id="game">
+  <div id="card"><div class="dots"></div></div>
   <div id="balloons"></div>
-
-  <!-- first tap unlocks sound -->
-  <div id="start"><div class="play"></div></div>
 </div>
+<script src="ponas.js"></script>
 <script src="game.js"></script>
 </body>
 </html>
