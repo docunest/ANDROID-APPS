@@ -265,6 +265,7 @@ tools/smoke-test.mjs         headless test of every game in both orientations (n
 .github/workflows/pages.yml  publish games to GitHub Pages
 .github/workflows/android.yml build the APK (debug always, signed release with secrets)
 CLAUDE.md                    rules for Claude sessions editing this repo
+.claude/skills/ponas-game/   Claude skill: the step-by-step "make a game" workflow (shareable copy)
 ```
 
 Local check (any machine with Node):
