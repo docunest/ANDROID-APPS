@@ -66,17 +66,22 @@ base64 -i ponas-release.jks | pbcopy
 > Ponas, which also deletes the child's saved progress, and set everything up again. Never
 > commit the keystore; `.gitignore` already blocks `*.jks`.
 
-### 1b. Add the four secrets
+### 1b. Add the secrets
 
-GitHub → **eb07-lab/ponas-app → Settings → Secrets and variables → Actions → New repository
-secret**. Add each of these:
+GitHub → **eb07-lab/ponas-app → Settings → Secrets and variables → Actions → Secrets tab →
+Repository secrets → New repository secret**. (Not *Environment* secrets, not *Variables*, not
+Codespaces/Dependabot — the build can't see those.) Two are required:
 
 | Name                | Value                                        |
 |---------------------|----------------------------------------------|
 | `KEYSTORE_BASE64`   | paste the clipboard from `base64 … \| pbcopy` |
 | `KEYSTORE_PASSWORD` | the password you chose                       |
-| `KEY_ALIAS`         | `ponas`                                      |
-| `KEY_PASSWORD`      | the same password again                      |
+| `KEY_ALIAS`         | optional — only if the alias isn't `ponas`   |
+| `KEY_PASSWORD`      | optional — defaults to `KEYSTORE_PASSWORD`   |
+
+Names are case-sensitive. Then run **Actions → Build APK → Run workflow** (adding secrets alone
+doesn't start a build). The step **Decode and check signing keystore** says exactly what's wrong
+if a secret doesn't fit (bad base64, wrong password, wrong alias).
 
 ### 1c. Turn on GitHub Pages
 

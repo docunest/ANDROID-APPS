@@ -41,21 +41,47 @@ jobs:
             echo "PONAS_VERSION_NAME=0.1.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
           fi
 
-      - name: Decode signing keystore
+      # Needs repository secrets (Settings → Secrets and variables → Actions → *Repository* secrets):
+      #   KEYSTORE_BASE64   base64 of ponas-release.jks      (required)
+      #   KEYSTORE_PASSWORD the keystore password             (required)
+      #   KEY_ALIAS         optional, defaults to "ponas"
+      #   KEY_PASSWORD      optional, defaults to KEYSTORE_PASSWORD (same thing for PKCS12)
+      - name: Decode and check signing keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/ponas-release.jks"
-            echo "PONAS_KEYSTORE=$RUNNER_TEMP/ponas-release.jks" >> "$GITHUB_ENV"
-            echo "HAS_KEYSTORE=true" >> "$GITHUB_ENV"
-          else
-            echo "::warning::KEYSTORE_BASE64 secret is not set, so only the debug APK is built. See README → One-time setup."
-            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-              echo "::error::Tagged releases need the signing secrets."
-              exit 1
-            fi
+          fail() { echo "::error::$1"; exit 1; }
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::KEYSTORE_BASE64 secret is not set (or not a *Repository* secret under Actions), so only the debug APK is built. See README → One-time setup."
+            [[ "$GITHUB_REF" == refs/tags/v* ]] && fail "Tagged releases need the signing secrets."
+            exit 0
           fi
+          [ -n "$KEYSTORE_PASSWORD" ] || fail "KEYSTORE_BASE64 is set but KEYSTORE_PASSWORD is missing."
+          ALIAS="${KEY_ALIAS:-ponas}"
+          KPASS="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+          JKS="$RUNNER_TEMP/ponas-release.jks"
+          # Tolerate line breaks, spaces and Windows CRs from copy-paste.
+          printf '%s' "$KEYSTORE_BASE64" | tr -d ' \r\n\t' | base64 -d > "$JKS" 2>/dev/null \
+            || fail "KEYSTORE_BASE64 is not valid base64. Re-copy it with: base64 -i ponas-release.jks | pbcopy"
+          [ -s "$JKS" ] || fail "KEYSTORE_BASE64 decoded to an empty file."
+          keytool -list -keystore "$JKS" -storepass "$KEYSTORE_PASSWORD" >/dev/null 2>&1 \
+            || fail "Cannot open the keystore: KEYSTORE_PASSWORD is wrong, or KEYSTORE_BASE64 is not the ponas-release.jks file."
+          keytool -list -keystore "$JKS" -storepass "$KEYSTORE_PASSWORD" -alias "$ALIAS" >/dev/null 2>&1 \
+            || fail "Keystore opened, but it has no key named \"$ALIAS\". Aliases in it: $(keytool -list -keystore "$JKS" -storepass "$KEYSTORE_PASSWORD" | grep -E 'Entry,' | cut -d, -f1 | tr '\n' ' ')"
+          echo "Keystore OK (alias $ALIAS)."
+          {
+            echo "PONAS_KEYSTORE=$JKS"
+            echo "HAS_KEYSTORE=true"
+          } >> "$GITHUB_ENV"
+          # Pass alias/key password on with defaults applied (masked in logs).
+          echo "::add-mask::$KPASS"
+          {
+            echo "PONAS_KEY_ALIAS=$ALIAS"
+            echo "PONAS_KEY_PASSWORD=$KPASS"
+          } >> "$GITHUB_ENV"
 
       - name: Build debug APK
         run: ./gradlew --no-daemon assembleDebug
@@ -64,9 +90,7 @@ jobs:
       - name: Build release APK
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew --no-daemon assembleRelease
+        run: KEY_ALIAS="$PONAS_KEY_ALIAS" KEY_PASSWORD="$PONAS_KEY_PASSWORD" ./gradlew --no-daemon assembleRelease
 
       - name: Collect APKs
         run: |
