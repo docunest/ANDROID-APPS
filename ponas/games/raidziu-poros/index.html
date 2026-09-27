@@ -6,14 +6,14 @@
 <title>Raidžių poros</title>
 <style>
   body { background: linear-gradient(#FFE0B2, #FFF3E0); font-family: sans-serif; color: #4E342E;
-    --big: min(46vmin, 220px); --opt: min(26vmin, 130px); }
+    --big: min(44vmin, 210px); --opt: min(25vmin, 124px); }
   #stars { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; }
   .star { width: 28px; height: 28px; background: #ffffffaa;
     clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
     transition: transform .3s; }
   .star.on { background: #FFC107; transform: scale(1.15); }
 
-  #game { position: fixed; top: 72px; left: 0; right: 0; bottom: 0; padding: 0 3vmin 2vmin;
+  #game { position: fixed; top: 72px; left: 0; right: 0; bottom: 68px; padding: 0 3vmin 1vmin;
     display: flex; flex-direction: row; align-items: center; justify-content: space-evenly; gap: 3vmin; }
   @media (orientation: portrait) { #game { flex-direction: column; justify-content: space-around; } }
 
@@ -24,7 +24,7 @@
     color: #FF7043; font-family: Georgia, 'Times New Roman', serif; }
   #prompt.nudge { animation: nudge 1s ease-in-out 2; }
 
-  #opts { display: flex; gap: 2.5vmin; flex: 0 0 auto; flex-wrap: wrap; justify-content: center;
+  #opts { display: flex; gap: 2.2vmin; flex: 0 0 auto; flex-wrap: wrap; justify-content: center;
     max-width: 92vmin; }
   @media (orientation: portrait) { #opts { max-width: 88vmin; } }
   .opt { width: var(--opt); height: var(--opt); border-radius: 26px; background: #fff;
@@ -42,6 +42,31 @@
   .spark { position: fixed; width: 18px; height: 18px; background: #FFB300; border-radius: 50%;
     pointer-events: none; opacity: 1; transition: transform .55s ease-out, opacity .55s ease-out; }
 
+  /* Small, low-key controls tucked in the bottom corners — for the parent, not the game itself. */
+  .special-btn { position: fixed; bottom: 8px; width: 52px; height: 52px; border-radius: 50%; border: 0; padding: 0;
+    display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 0 #00000018;
+    opacity: .85; z-index: 500; }
+  .special-btn:active { transform: scale(.92); }
+  #modeBtn { left: 8px; background: #FFE0B2; font-family: Georgia, 'Times New Roman', serif;
+    font-weight: 800; font-size: 13px; color: #E65100; line-height: 1.05; text-align: center; }
+  #statsBtn { right: 8px; background: #ECEFF1; }
+  #statsBtn svg { width: 24px; height: 24px; }
+
+  #statsOv { position: fixed; inset: 0; background: #00000055; z-index: 1000;
+    display: flex; align-items: center; justify-content: center; }
+  #statsOv.hidden { display: none; }
+  #statsCard { background: #fff; border-radius: 24px; padding: 22px 24px 18px; width: min(88vmin, 380px);
+    max-height: 82vh; overflow: auto; box-shadow: 0 10px 0 #00000018; font-family: sans-serif; color: #37474F; }
+  .stat-row { display: flex; justify-content: space-between; align-items: center; margin: 12px 0;
+    padding-bottom: 10px; border-bottom: 2px solid #F5F5F5; font-size: 14px; }
+  .stat-row b { font-family: Georgia, 'Times New Roman', serif; font-size: 22px; color: #FF7043; min-width: 76px; }
+  .stat-nums { text-align: right; line-height: 1.55; }
+  .stat-nums small { display: block; color: #90A4AE; font-size: 11px; }
+  #statsClose { margin-top: 6px; width: 100%; padding: 12px; border: 0; border-radius: 14px;
+    background: #FFCCBC; color: #BF360C; font-weight: 700; font-size: 15px; }
+  #hardLetters { font-size: 15px; letter-spacing: 3px; font-family: Georgia, 'Times New Roman', serif;
+    color: #6D4C41; margin-top: 4px; }
+
   @keyframes nudge { 0%,100% { transform: scale(1) rotate(0); } 25% { transform: scale(1.08) rotate(-4deg); }
     75% { transform: scale(1.08) rotate(4deg); } }
   @keyframes shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-8px); }
@@ -53,6 +78,29 @@
 <div id="game">
   <div id="prompt"><span id="promptLetter">A</span></div>
   <div id="opts"></div>
+</div>
+<button id="modeBtn" class="special-btn" aria-label="mode"></button>
+<button id="statsBtn" class="special-btn" aria-label="stats">
+  <svg viewBox="0 0 24 24"><rect x="4" y="12" width="4" height="8" rx="1" fill="#455A64"/>
+    <rect x="10" y="7" width="4" height="13" rx="1" fill="#455A64"/>
+    <rect x="16" y="3" width="4" height="17" rx="1" fill="#455A64"/></svg>
+</button>
+<div id="statsOv" class="hidden">
+  <div id="statsCard">
+    <div class="stat-row">
+      <b>A → a</b>
+      <div class="stat-nums" id="statU2l"></div>
+    </div>
+    <div class="stat-row">
+      <b>a → A</b>
+      <div class="stat-nums" id="statL2u"></div>
+    </div>
+    <div>
+      <small style="color:#90A4AE;">Sunkiausios raidės</small>
+      <div id="hardLetters">—</div>
+    </div>
+    <button id="statsClose">Gerai</button>
+  </div>
 </div>
 <!-- ponas.js is added by tools/build-site.mjs: pause/close buttons, ▶ start overlay, sound, storage. -->
 <script src="ponas.js"></script>
