@@ -35,6 +35,19 @@
     font-variant-numeric: tabular-nums; will-change: transform; }
   .pt.ok { border-color: #43A047; color: #2E7D32; }
   .pt.hi { border-color: #E53935; color: #C62828; }
+  #cv .lvl { stroke: #43A047; stroke-width: 2; stroke-dasharray: 8 6; }
+  #cv .legl { stroke: #FB8C00; stroke-width: 4; stroke-linecap: round; }
+  #cv .barl { fill: none; stroke: #455A64; stroke-width: 4; stroke-linejoin: round; }
+  #cv .body2 { fill: #ECEFF1; stroke: #546E7A; stroke-width: 2; stroke-linejoin: round; }
+  #cv .win2 { fill: #B3E5FC; }
+  #cv .wheel2 { fill: #37474F; }
+  .pt.q { display: none; font-size: calc(var(--fs) * .72); line-height: 1.25; text-align: center; padding: 1px 4px; }
+  .pt.q small { display: block; font-size: 10px; font-weight: 600; color: #78909C; }
+  #left.prof .pt.q { display: block; }
+  #left.prof .pt:not(.q) { display: none; }
+  #viewChip { position: absolute; left: 6px; top: 4px; font-size: 12px; font-weight: 700; color: #1565C0;
+    background: #E3F2FD; border-radius: 10px; padding: 3px 8px; pointer-events: none; }
+  #left.prof #legend { top: 28px; bottom: auto; }
   #legend { position: absolute; left: 6px; bottom: 4px; font-size: 11px; color: #607D8B; pointer-events: none; }
   #perm { position: absolute; inset: 8px; display: none; flex-direction: column; align-items: center;
     justify-content: center; gap: 10px; text-align: center; background: #fffe; border-radius: 14px; font-size: var(--fs); }
@@ -90,7 +103,25 @@
         <circle class="ring0" cx="0" cy="1.15" r="0.24" stroke-width="0.03"/>
         <g transform="translate(0 1.15)"><g id="bubble"><circle r="0.2" stroke-width="0.04"/></g></g>
       </g>
+      <!-- side view (from the left side: hitch on the left) and back view, drawn in px by game.js -->
+      <g id="vSide" style="display:none">
+        <line class="lvl" id="sLvl"/>
+        <line class="legl" id="sLegR"/><line class="legl" id="sLegF"/><line class="legl" id="sJock"/>
+        <polyline class="barl" id="sBar"/>
+        <polygon class="body2" id="sBody"/>
+        <polygon class="win2" id="sWin"/>
+        <circle class="wheel2" id="sWheel"/>
+        <circle class="hitch" id="sHitch" r="5"/>
+      </g>
+      <g id="vBack" style="display:none">
+        <line class="lvl" id="bLvl"/>
+        <polygon class="wheel2" id="bWL"/><polygon class="wheel2" id="bWR"/>
+        <polygon class="body2" id="bBody"/>
+        <polygon class="win2" id="bWin"/>
+      </g>
     </svg>
+    <div class="pt q" id="q0"></div><div class="pt q" id="q1"></div><div class="pt q" id="q2"></div><div class="pt q" id="q3"></div>
+    <div id="viewChip">⟳ iš viršaus</div>
     <div class="pt" id="p0"></div><div class="pt" id="p1"></div><div class="pt" id="p2"></div><div class="pt" id="p3"></div>
     <div class="pt" id="p4"></div><div class="pt" id="p5"></div><div class="pt" id="p6"></div>
     <div id="legend">↑ kiek kelti, cm</div>

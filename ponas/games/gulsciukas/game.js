@@ -50,6 +50,8 @@
   var zero = P.load('cal', null);            // phone offset {b, g, a} from calibration, or null
   var calStep = 0, calFirst = null;          // 1 = first reading taken, waiting for the 180° one
   var refMode = P.load('ref', 'wheels') === 'top' ? 'top' : 'wheels';
+  var VIEWS = ['top', 'back', 'side'], VIEW_LT = { top: 'iš viršaus', back: 'iš galo', side: 'iš šono (kairės)' };
+  var viewMode = P.load('view', 'top'); if (VIEWS.indexOf(viewMode) < 0) viewMode = 'top';
   var orient = P.load('orient', 0) | 0;      // phone top edge: 0 hitch, 1 right, 2 rear, 3 left
   if (orient < 0 || orient > 3) orient = 0;
 
@@ -231,6 +233,13 @@
     var target = refMode === 'top' ? Math.max.apply(null, hs) : Math.max(hs[3], hs[4]);
     var ch = hs.map(function (h) { return target - h; });     // + raise, − lower
     var big = Math.max.apply(null, ch.map(Math.abs));
+    var prof = viewMode !== 'top';
+    $('left').classList.toggle('prof', prof);
+    $('car').style.display = prof ? 'none' : '';
+    $('vSide').style.display = viewMode === 'side' ? '' : 'none';
+    $('vBack').style.display = viewMode === 'back' ? '' : 'none';
+    $('viewChip').textContent = '⟳ ' + VIEW_LT[viewMode];
+    if (prof) { drawProfile(r ? sl : null, ch, big); return sl; }
     for (i = 0; i < POINTS.length; i++) {
       var el = $('p' + i), pt = POINTS[i], d = ch[i];
       el.textContent = !r ? '—' : Math.abs(d) < 0.0005 ? '0.0' : (d > 0 ? '↑' : '↓') + cm(Math.abs(d));
@@ -256,6 +265,90 @@
     $('bubble').setAttribute('transform', 'translate(' + bx.toFixed(3) + ' ' + by.toFixed(3) + ')');
     $('bubble').setAttribute('class', ok ? 'ok' : '');
     return sl;
+  }
+
+  // ---------- back / side views (tilt exaggerated so it can be seen; the numbers are real) ----------
+  function fmtCh(d) { return Math.abs(d) < 0.0005 ? '0.0' : (d > 0 ? '↑' : '↓') + cm(Math.abs(d)); }
+  function attr(id, o) { var e = $(id); for (var k in o) e.setAttribute(k, typeof o[k] === 'number' ? o[k].toFixed(1) : o[k]); }
+  function poly(pts) { return pts.map(function (p) { return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' '); }
+  function label(id, html, x, y, hot) {
+    var el = $(id);
+    el.innerHTML = html;
+    el.className = 'pt q' + (hot === 2 ? ' hi' : hot === 1 ? ' ok' : '');
+    var hw = el.offsetWidth / 2, hh = el.offsetHeight / 2;
+    x = Math.max(hw + 1, Math.min(box.w - hw - 1, x)); y = Math.max(hh + 1, Math.min(box.h - hh - 1, y));
+    el.style.transform = 'translate(' + (x - hw).toFixed(1) + 'px,' + (y - hh).toFixed(1) + 'px)';
+  }
+  function hot(list, ch, big) {   // 2 = has the biggest move, 1 = all zero
+    var any = false, top = false;
+    list.forEach(function (i) { if (Math.abs(ch[i]) >= 0.0005) any = true; if (big >= 0.0005 && Math.abs(ch[i]) === big) top = true; });
+    return top ? 2 : any ? 0 : 1;
+  }
+  var BODY_H = 1.9, WHEEL_R = 0.3, CHASSIS = 0.45;   // drawing only (metres)
+  function drawProfile(sl, ch, big) {
+    var se = sl ? sl.se : 0, sn = sl ? sl.sn : 0, ex, maxDev, s, i;
+    var none = !sl;
+    if (viewMode === 'side') {
+      // centre-line height at station n, relative to the axle
+      var hc = function (n) { return (n - AXLE_N) * sn; };
+      maxDev = Math.max(Math.abs(hc(0)), Math.abs(hc(HITCH_N)));
+      ex = maxDev > 1e-6 ? Math.min(30, 0.6 / maxDev) : 30;
+      var dev = Math.min(0.6, maxDev * ex);
+      var lab = 42;                                  // label row under the ground line
+      s = Math.min((box.w - 30) / (HITCH_N + 0.6), (box.h - lab - 52) / (BODY_H + CHASSIS + 2 * dev + 0.1));
+      var x = function (n) { return box.w / 2 - s * (n - N_MID); };     // hitch on the left
+      var contentH = s * (BODY_H + CHASSIS + 2 * dev) + lab + 6;
+      var groundY = (box.h + contentH) / 2 - lab - 6 - s * dev;
+      var cy = function (n) { return groundY - s * CHASSIS - s * ex * hc(n); };   // chassis line
+      attr('sLvl', { x1: 4, x2: box.w - 4, y1: groundY, y2: groundY });
+      attr('sBody', { points: poly([[x(0), cy(0)], [x(BOX_L), cy(BOX_L)], [x(BOX_L), cy(BOX_L) - s * BODY_H * 0.9],
+        [x(BOX_L) - s * 0.3, cy(BOX_L) - s * BODY_H], [x(0), cy(0) - s * BODY_H]]) });
+      attr('sWin', { points: poly([[x(1.2), cy(1.2) - s * 1.3], [x(3.6), cy(3.6) - s * 1.3], [x(3.6), cy(3.6) - s * 0.9], [x(1.2), cy(1.2) - s * 0.9]]) });
+      attr('sBar', { points: poly([[x(BOX_L), cy(BOX_L)], [x(HITCH_N), cy(HITCH_N)]]) });
+      attr('sWheel', { cx: x(AXLE_N), cy: cy(AXLE_N) + s * (CHASSIS - WHEEL_R), r: s * WHEEL_R });
+      attr('sHitch', { cx: x(HITCH_N), cy: cy(HITCH_N) });
+      attr('sLegR', { x1: x(0) - 3, x2: x(0) - 3, y1: cy(0), y2: groundY });
+      attr('sLegF', { x1: x(BOX_L) + 3, x2: x(BOX_L) + 3, y1: cy(BOX_L), y2: groundY });
+      attr('sJock', { x1: x(HITCH_N - 0.2), x2: x(HITCH_N - 0.2), y1: cy(HITCH_N - 0.2), y2: groundY });
+      var ly = groundY + s * dev + lab / 2 + 4;
+      var two = function (a, b, name) { return none ? '—' : '<small>' + name + '</small>K ' + fmtCh(ch[a]) + '<br>D ' + fmtCh(ch[b]); };
+      label('q0', none ? '—' : '<small>kablys</small>' + fmtCh(ch[0]), x(HITCH_N), ly, none ? 0 : hot([0], ch, big));
+      label('q1', two(1, 2, 'priekis'), x(BOX_L), ly, none ? 0 : hot([1, 2], ch, big));
+      label('q2', two(3, 4, 'ratai'), x(AXLE_N), ly, none ? 0 : hot([3, 4], ch, big));
+      label('q3', two(5, 6, 'galas'), x(0), ly, none ? 0 : hot([5, 6], ch, big));
+    } else {
+      // seen from behind: left on the left. Roll only (relative to the centre line)
+      var hb = function (e) { return e * se; };
+      maxDev = Math.abs(hb(BOX_W / 2));
+      ex = maxDev > 1e-6 ? Math.min(30, 0.35 / maxDev) : 30;
+      var devb = Math.min(0.35, maxDev * ex);
+      var col = 84, bottom = 34;
+      s = Math.min((box.w - 2 * col) / 2.9, (box.h - bottom - 52) / (BODY_H + CHASSIS + 2 * devb));
+      var cxb = box.w / 2;
+      var bx = function (e) { return cxb + s * e; };
+      var contentHb = s * (BODY_H + CHASSIS + 2 * devb) + bottom;
+      var gY = (box.h + contentHb) / 2 - bottom - s * devb;
+      var by = function (e) { return gY - s * CHASSIS - s * ex * hb(e); };
+      var L = -BOX_W / 2, R = BOX_W / 2, tilt = function (e, up) { return by(e) - s * up; };
+      attr('bLvl', { x1: 4, x2: box.w - 4, y1: gY, y2: gY });
+      attr('bBody', { points: poly([[bx(L), by(L)], [bx(R), by(R)], [bx(R), tilt(R, BODY_H * 0.92)],
+        [bx(R - 0.25), tilt(R - 0.25, BODY_H)], [bx(L + 0.25), tilt(L + 0.25, BODY_H)], [bx(L), tilt(L, BODY_H * 0.92)]]) });
+      attr('bWin', { points: poly([[bx(-0.5), tilt(-0.5, 1.45)], [bx(0.5), tilt(0.5, 1.45)], [bx(0.5), tilt(0.5, 1.0)], [bx(-0.5), tilt(-0.5, 1.0)]]) });
+      var wheel = function (e0, e1) {
+        return poly([[bx(e0), by(e0) + s * 0.05], [bx(e1), by(e1) + s * 0.05], [bx(e1), by(e1) + s * CHASSIS], [bx(e0), by(e0) + s * CHASSIS]]);
+      };
+      attr('bWL', { points: wheel(L - 0.05, L + 0.22) });
+      attr('bWR', { points: wheel(R - 0.22, R + 0.05) });
+      var three = function (a, b, c, side) {
+        return none ? '—' : '<small>' + side + '</small>priekis ' + fmtCh(ch[a]) + '<br>ratas ' + fmtCh(ch[b]) + '<br>galas ' + fmtCh(ch[c]);
+      };
+      var midY = by(0) - s * BODY_H / 2;
+      label('q0', three(1, 3, 5, 'kairė'), bx(L) - 8 - 40, midY, none ? 0 : hot([1, 3, 5], ch, big));
+      label('q1', three(2, 4, 6, 'dešinė'), bx(R) + 8 + 40, midY, none ? 0 : hot([2, 4, 6], ch, big));
+      label('q2', none ? '—' : '<small>kablys</small>' + fmtCh(ch[0]), cxb, gY + s * devb + bottom / 2 + 2, none ? 0 : hot([0], ch, big));
+      $('q3').style.transform = 'translate(-999px,0)';
+    }
+    $('legend').textContent = (refMode === 'top' ? '↑ kelti, cm' : '↑ kelti / ↓ nuleisti, cm') + ' · pokrypis piešinyje ×' + Math.round(ex);
   }
 
   function render() {
@@ -288,7 +381,7 @@
     var calNow = mode === 'follow' ? (v ? v.calStep : 0) : calStep, calOk = mode === 'follow' ? v && v.zero : zero;
     $('bZeroS').textContent = calNow ? '2/2: apsukus 180°' : calOk ? 'kalibruota ✓' : '1/2: pradėti';
     $('bClearS').textContent = refMode === 'top' ? 'aukščiausias' : 'ratai';
-    $('legend').textContent = (refMode === 'top' ? '↑ kelti, cm · 0.0 = aukščiausias taškas' : '↑ kelti / ↓ nuleisti, cm · 0.0 = aukštesnis ratas');
+    if (viewMode === 'top') $('legend').textContent = (refMode === 'top' ? '↑ kelti, cm · 0.0 = aukščiausias taškas' : '↑ kelti / ↓ nuleisti, cm · 0.0 = aukštesnis ratas');
     renderStatus();
   }
 
@@ -569,6 +662,13 @@
     if (mode === 'follow') return;
     orient = (orient + 1) % 4; P.save('orient', orient); wantSend = true; dirty = true;
     Ponas.tone(600, { dur: 0.1 });
+  });
+  $('left').addEventListener('pointerdown', function (e) {
+    if (P.paused || $('perm').classList.contains('show')) return;
+    e.preventDefault();
+    viewMode = VIEWS[(VIEWS.indexOf(viewMode) + 1) % VIEWS.length];
+    P.save('view', viewMode); dirty = true;
+    Ponas.tone(700, { dur: 0.08 });
   });
   var roomIn = $('roomIn');
   roomIn.value = room;
