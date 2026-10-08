@@ -19,9 +19,9 @@
  * on the same spot: the average is the phone's own offset (camera bump, sensor bias), the surface
  * tilt cancels out, so it works right on the caravan floor.
  *
- * Remote: modes local / master / follower over Ponas.net (ntfy.sh). Free ntfy.sh: ~1 msg per 5 s
- * per device and 250 msgs per day per IP, so the master sends only when the angle changed,
- * at most once every 5 s, and followers ask for the current value when they join.
+ * Remote: modes local / master / follower. Angles, calibration and commands go ONLY over a direct
+ * WebRTC data channel. ntfy.sh (Ponas.net) is used just for the handshake: one offer from the
+ * follower, one answer from the master (free ntfy.sh: 250 msgs per day per IP). Retries are sparse.
  */
 (function () {
   'use strict';
@@ -390,19 +390,19 @@
     if (mode === 'follow') {
       if (fOpen) s = 'P2P tiesiogiai · ' + rxHz + ' Hz · vėlinimas ~' + Math.max(1, Math.round(rttMs / 2)) + ' ms';
       else {
-        if (!remote) s = online ? 'Laukiama master įrenginio…' : 'Jungiamasi…';
-        else s = 'ntfy · master duomenys prieš ' + Math.max(0, Math.round((Date.now() - remoteT) / 1000)) + ' s';
+        s = !online ? 'Jungiamasi prie ntfy…' : 'Nėra tiesioginio ryšio su master';
+        if (remote) s += ' · paskutiniai duomenys prieš ' + Math.max(0, Math.round((Date.now() - remoteT) / 1000)) + ' s';
         if (!RTC_OK) s += ' · P2P nepalaikomas';
         else if (fState) s += ' · P2P: ' + fState;
+        if (RTC_OK && nextRtcAt > Date.now() && fState && !/laukiama|jungiamasi/.test(fState)) s += ' · kitas bandymas po ' + Math.ceil((nextRtcAt - Date.now()) / 1000) + ' s';
+        s += ' · ntfy šiandien ' + sentToday() + '/' + DAY_LIMIT;
       }
     } else {
       s = own ? 'Jutiklis ' + hz + ' Hz' + (own.za != null ? ' · Z kompasas' : ' · Z giroskopas') : 'Nėra jutiklio duomenų';
       if (mode === 'master') {
         var np = openPeers();
         if (np) s += ' · P2P sekėjų: ' + np + ' (iki 20 Hz)';
-        var left = Math.max(0, Math.ceil((nextSendAt - Date.now()) / 1000));
-        if (lastQT && Date.now() - lastQT < 120000) s += ' · ntfy kas ' + (sendInterval() / 1000) + ' s' + (left ? ' (' + left + ')' : '');
-        else if (!np) s += ' · laukiama sekėjų';
+        if (!np) s += ' · laukiama sekėjų';
         if (mState) s += ' · P2P: ' + mState;
         s += ' · ntfy šiandien ' + sentToday() + '/' + DAY_LIMIT;
       }
@@ -437,8 +437,6 @@
     chan = P.net.channel('r' + room);
     chan.onStatus(function (ok) {
       online = ok; dirty = true;
-      if (ok && mode === 'follow') ask();
-      if (ok && mode === 'master') wantSend = true;
     });
     chan.on(onMsg);
   }
@@ -457,20 +455,9 @@
   function onMsg(d, msg) {
     if (!d || typeof d !== 'object') return;
     var from = msg && typeof msg.from === 'string' ? msg.from : '';
-    if (mode === 'follow' && d.k === 's') {
-      if (applyRemote(d) && !fOpen) Ponas.tone(880, { dur: 0.05, vol: 0.05 });
-    } else if (mode === 'follow' && d.k === 'a' && chan && d.to === chan.me) {
-      onAnswer(d);
-    } else if (mode === 'master') {
-      if (d.k === 'q') { wantSend = true; lastQT = Date.now(); }
-      else if (d.k === 'o' && from) onOffer(d, from);
-      else if (d.k === 'c' && d.c === 'cal') { calibrate(); }
-    }
-  }
-  function ask() {                         // follower: "send me the current value"
-    if (!chan || Date.now() - lastAskT < 20000) return;
-    lastAskT = Date.now();
-    chan.send({ k: 'q' }).then(ntfyOk);
+    // ntfy carries only the WebRTC handshake; data never goes through it
+    if (mode === 'follow' && d.k === 'a' && chan && d.to === chan.me) onAnswer(d);
+    else if (mode === 'master' && d.k === 'o' && from) onOffer(d, from);
   }
   function snap() {
     return {
@@ -489,19 +476,6 @@
   function tick() {
     if (P.paused) return;
     var now = Date.now();
-    if (mode === 'master' && chan && own && now >= nextSendAt && lastQT && now - lastQT < 120000 && sentToday() < DAY_LIMIT - 50) {
-      var cur = snap();
-      if (wantSend || changed(cur, lastSent)) {
-        wantSend = false; lastSent = cur;
-        nextSendAt = now + sendInterval();
-        sentToday(); sentLog.n++; P.save('sent', sentLog);
-        chan.send(cur).then(function (ok) {
-          ntfyOk(ok);
-          if (!ok) { nextSendAt = Date.now() + 15000; wantSend = true; }  // 429 / offline: back off
-        });
-      }
-    }
-    if (mode === 'follow' && online && !fOpen && (!remote || now - remoteT > 60000 || now - lastAskT > 90000)) ask();
     if (mode === 'follow' && online && !fOpen && now >= nextRtcAt) rtcStart();
     if (mode === 'follow' && fOpen && now - lastPingT > 2000) ping();
     if (now - rxT0 >= 2000) { rxHz = Math.round(rxCount * 1000 / (now - rxT0 || 1)); rxCount = 0; rxT0 = now; }
@@ -544,7 +518,7 @@
       });
     });
   }
-  function backoff() { return [15000, 30000, 60000][rtcTries - 1] || 300000; }
+  function backoff() { return [20000, 60000, 180000][rtcTries - 1] || 600000; }   // 2 ntfy msgs per try
   function rtcStop() {
     if (fpc) { try { fpc.close(); } catch (e) { /* ignore */ } }
     fpc = fdc = null; fOpen = false;
@@ -579,6 +553,7 @@
           fState = 'laukiama master';
           var sdp = slimSdp(pc.localDescription.sdp);
           if (sdp.length > SDP_MAX) { fState = 'prisijungimo aprašas per didelis (' + sdp.length + ' B)'; return; }
+          countNtfy();
           chan.send({ k: 'o', sdp: sdp }).then(function (ok) {
             ntfyOk(ok);
             if (fpc !== pc) return;
@@ -604,10 +579,11 @@
     lastPingT = Date.now();
     if (fdc && fOpen) try { fdc.send(JSON.stringify({ k: 'p', t: performance.now() })); } catch (e) { /* ignore */ }
   }
-  function followerCmd(c) {
-    if (fOpen && fdc) { try { fdc.send(JSON.stringify({ k: 'c', c: c })); return; } catch (e) { /* fall back */ } }
-    if (chan) chan.send({ k: 'c', c: c });
+  function followerCmd(c) {                // only over the direct link
+    if (fOpen && fdc) { try { fdc.send(JSON.stringify({ k: 'c', c: c })); return true; } catch (e) { /* closed */ } }
+    return false;
   }
+  function countNtfy() { sentToday(); sentLog.n++; P.save('sent', sentLog); dirty = true; }
 
   // master: answer offers, then stream at up to 20 Hz to every open channel
   var mState = '';                          // master: last handshake event, shown in the status line
@@ -654,7 +630,7 @@
       .then(function () { return gathered(pc); })
       .then(function () {
         if (chan && peers[from] === peer) {
-          sentToday(); sentLog.n++; P.save('sent', sentLog);
+          countNtfy();
           chan.send({ k: 'a', to: from, sdp: slimSdp(pc.localDescription.sdp) }).then(function (ok) {
             ntfyOk(ok);
             mState = ok ? 'atsakyta, jungiamasi…' : 'ntfy atmetė atsakymą';
@@ -699,7 +675,7 @@
     });
   }
   btn('bZero', function () {
-    if (mode === 'follow') { followerCmd('cal'); Ponas.tone(660, { dur: 0.1 }); }
+    if (mode === 'follow') { if (followerCmd('cal')) Ponas.tone(660, { dur: 0.1 }); else Ponas.tone(260, { dur: 0.2 }); }
     else calibrate();
   });
   btn('bClear', function () {
