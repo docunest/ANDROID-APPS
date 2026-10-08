@@ -44,11 +44,16 @@
 
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   th { font-size: 11px; font-weight: 600; color: #78909C; text-align: right; padding: 0 4px; }
-  td { font-size: var(--fs); text-align: right; padding: 2px 4px; white-space: nowrap; }
+  td { font-size: var(--fs); text-align: right; padding: 1px 4px; white-space: nowrap; }
   td.ax { text-align: left; font-weight: 800; font-size: calc(var(--fs) * 1.15); color: #33691E; }
   td.rel { font-weight: 800; font-size: calc(var(--fs) * 1.15); }
+  tr.dif td { border-top: 1px solid #C5E1A5; }
+  tr.dif td.ax { font-size: calc(var(--fs) * .85); }
+  tr.dif td.ax small { display: block; font-size: 10px; font-weight: 600; color: #78909C; }
+  tr.dif td.rel { color: #4E342E; }
   #sum { font-size: calc(var(--fs) * .8); color: #4E342E; line-height: 1.35; }
   #sum b { color: #3E2723; }
+  #sum .warn { color: #E65100; }
   #status { font-size: 12px; color: #546E7A; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 22px; }
   #room { display: none; align-items: center; gap: 4px; }
   #room.show { display: flex; }
@@ -93,16 +98,18 @@
   </div>
   <div id="right">
     <table>
-      <tr><th></th><th>Absoliutus</th><th>Nuo nulio</th></tr>
+      <tr><th></th><th>Absoliutus</th><th>Kalibruota</th></tr>
       <tr><td class="ax">X</td><td id="ax"></td><td class="rel" id="rx"></td></tr>
       <tr><td class="ax">Y</td><td id="ay"></td><td class="rel" id="ry"></td></tr>
       <tr><td class="ax">Z</td><td id="az"></td><td class="rel" id="rz"></td></tr>
+      <tr class="dif"><td class="ax">Išilgai<small>4,9 m</small></td><td id="dlWhich"></td><td class="rel" id="dl"></td></tr>
+      <tr class="dif"><td class="ax">Skersai<small>2,2 m</small></td><td id="dwWhich"></td><td class="rel" id="dw"></td></tr>
     </table>
     <div id="sum"></div>
     <div id="status"><span id="room">Kambarys <input id="roomIn" type="number" inputmode="numeric" min="1" max="9999"></span><span id="stat"></span></div>
     <div id="btns">
-      <button class="b" id="bZero">Nulis</button>
-      <button class="b" id="bClear">Absoliutus</button>
+      <button class="b" id="bZero">Kalibruoti<small id="bZeroS">1/2: pradėti</small></button>
+      <button class="b" id="bClear">Atskaita<small id="bClearS">ratai</small></button>
       <button class="b" id="bMode">Režimas<small id="bModeS">vietinis</small></button>
       <button class="b" id="bSwap">⟳ Telefonas<small id="bSwapS">viršus → kablys</small></button>
     </div>

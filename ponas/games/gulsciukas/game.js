@@ -13,7 +13,11 @@
  * axle 2.3 m from the rear. "Right" = right side when standing behind it, facing the hitch.
  * The phone lies flat in the caravan; ⟳ tells which way its top edge points (hitch/right/rear/left).
  * Heights of 7 points (4 corner legs, 2 wheels, hitch) come from the plane h = e·SE + n·SN;
- * "kelti" = how much to raise each point so all are level with the highest one (rigid body).
+ * Reference ("Atskaita"): 'wheels' (default) — the higher wheel stays put, the lower wheel is raised,
+ * the hitch goes up or down (jockey wheel), corners move by what the plane says; 'top' — every point
+ * is raised to the highest one. Calibration ("Kalibruoti") = 2 readings with the phone turned 180°
+ * on the same spot: the average is the phone's own offset (camera bump, sensor bias), the surface
+ * tilt cancels out, so it works right on the caravan floor.
  *
  * Remote: modes local / master / follower over Ponas.net (ntfy.sh). Free ntfy.sh: ~1 msg per 5 s
  * per device and 250 msgs per day per IP, so the master sends only when the angle changed,
@@ -43,7 +47,9 @@
   // ---------- state ----------
   var mode = P.load('mode', 'local'); if (MODES.indexOf(mode) < 0) mode = 'local';
   var room = String(P.load('room', '1'));
-  var zero = P.load('zero', null);           // {b, g, a} or null = absolute
+  var zero = P.load('cal', null);            // phone offset {b, g, a} from calibration, or null
+  var calStep = 0, calFirst = null;          // 1 = first reading taken, waiting for the 180° one
+  var refMode = P.load('ref', 'wheels') === 'top' ? 'top' : 'wheels';
   var orient = P.load('orient', 0) | 0;      // phone top edge: 0 hitch, 1 right, 2 rear, 3 left
   if (orient < 0 || orient > 3) orient = 0;
 
@@ -221,11 +227,14 @@
     // heights and how much to raise
     var hs = [], i, sl = r ? slopes(r, v ? v.orient : orient) : null;
     for (i = 0; i < POINTS.length; i++) hs.push(sl ? POINTS[i][0] * sl.se + POINTS[i][1] * sl.sn : 0);
-    var mx = Math.max.apply(null, hs), mn = Math.min.apply(null, hs), flat = mx - mn < 0.0005;
+    // target height everything is brought to: the higher wheel, or the highest point
+    var target = refMode === 'top' ? Math.max.apply(null, hs) : Math.max(hs[3], hs[4]);
+    var ch = hs.map(function (h) { return target - h; });     // + raise, − lower
+    var big = Math.max.apply(null, ch.map(Math.abs));
     for (i = 0; i < POINTS.length; i++) {
-      var el = $('p' + i), pt = POINTS[i], raise = mx - hs[i];
-      el.textContent = !r ? '—' : (raise < 0.0005 ? '0.0' : '↑' + cm(raise));
-      el.className = 'pt' + (!r ? '' : flat || raise < 0.0005 ? ' ok' : hs[i] === mn ? ' hi' : '');
+      var el = $('p' + i), pt = POINTS[i], d = ch[i];
+      el.textContent = !r ? '—' : Math.abs(d) < 0.0005 ? '0.0' : (d > 0 ? '↑' : '↓') + cm(Math.abs(d));
+      el.className = 'pt' + (!r ? '' : Math.abs(d) < 0.0005 ? ' ok' : big >= 0.0005 && Math.abs(d) === big ? ' hi' : '');
       var q = scr(pt[0], pt[1]), hw = el.offsetWidth / 2, hh = el.offsetHeight / 2, ox = 0, oy = 0;
       if (pt[0] !== 0) {
         var sg = pt[0] > 0 ? 1 : -1;
@@ -254,7 +263,7 @@
     var r = v ? rel(v) : null;
     var sl = drawCaravan(v, r);
     if (!v) {
-      ['ax', 'ay', 'az', 'rx', 'ry', 'rz'].forEach(function (id) { $(id).textContent = '—'; });
+      ['ax', 'ay', 'az', 'rx', 'ry', 'rz', 'dl', 'dw', 'dlWhich', 'dwWhich'].forEach(function (id) { $(id).textContent = '—'; });
       $('sum').textContent = '';
     } else {
       $('ax').textContent = fmtDeg(v.b);
@@ -264,10 +273,22 @@
       $('ry').textContent = fmtDeg(r.y);
       $('rz').textContent = r.z == null ? '—' : fmtDeg(r.z);
       var fb = sl.sn * BOX_L, lr = -sl.se * BOX_W;   // front − rear, left − right
-      $('sum').innerHTML = 'Išilgai (4,9 m): <b>' + (Math.abs(fb) < 0.0005 ? 'lygu' : (fb > 0 ? 'priekis' : 'galas') + ' aukščiau ' + cm(Math.abs(fb)) + ' cm') +
-        '</b><br>Skersai (2,2 m): <b>' + (Math.abs(lr) < 0.0005 ? 'lygu' : (lr > 0 ? 'kairė' : 'dešinė') + ' aukščiau ' + cm(Math.abs(lr)) + ' cm') + '</b>';
+      var pitch = Math.atan(Math.abs(sl.sn)) * 180 / Math.PI, roll = Math.atan(Math.abs(sl.se)) * 180 / Math.PI;
+      var cs = mode === 'follow' ? v.calStep : calStep;
+      // differences along (front − rear over 4.9 m) and across (left − right over 2.2 m)
+      $('dl').textContent = cm(Math.abs(fb)) + ' cm';
+      $('dw').textContent = cm(Math.abs(lr)) + ' cm';
+      $('dlWhich').textContent = (Math.abs(fb) < 0.0005 ? 'lygu' : (fb > 0 ? 'priekis ↑' : 'galas ↑')) + ' ' + pitch.toFixed(2) + '°';
+      $('dwWhich').textContent = (Math.abs(lr) < 0.0005 ? 'lygu' : (lr > 0 ? 'kairė ↑' : 'dešinė ↑')) + ' ' + roll.toFixed(2) + '°';
+      $('sum').innerHTML = cs
+        ? '<b class="warn">Kalibravimas: apsuk telefoną 180° toje pačioje vietoje ir dar kartą spausk „Kalibruoti“.</b>'
+        : v.zero ? '' : '<span class="warn">Nekalibruota: telefono kreivumas gali pridėti kelis cm. Spausk „Kalibruoti“.</span>';
     }
     $('bSwapS').textContent = ORIENT_LT[v && mode === 'follow' ? v.orient : orient];
+    var calNow = mode === 'follow' ? (v ? v.calStep : 0) : calStep, calOk = mode === 'follow' ? v && v.zero : zero;
+    $('bZeroS').textContent = calNow ? '2/2: apsukus 180°' : calOk ? 'kalibruota ✓' : '1/2: pradėti';
+    $('bClearS').textContent = refMode === 'top' ? 'aukščiausias' : 'ratai';
+    $('legend').textContent = (refMode === 'top' ? '↑ kelti, cm · 0.0 = aukščiausias taškas' : '↑ kelti / ↓ nuleisti, cm · 0.0 = aukštesnis ratas');
     renderStatus();
   }
 
@@ -326,6 +347,7 @@
         b: d.b, g: d.g, a: typeof d.a === 'number' ? d.a : 0,
         za: typeof d.za === 'number' ? d.za : null,
         zero: d.z && typeof d.z.b === 'number' ? { b: d.z.b, g: d.z.g, a: d.z.a || 0 } : null,
+        calStep: d.cs === 1 ? 1 : 0,
         orient: d.o === 1 || d.o === 2 || d.o === 3 ? d.o : 0
       };
       remoteT = Date.now(); dirty = true;
@@ -341,8 +363,7 @@
     } else if (mode === 'master') {
       if (d.k === 'q') { wantSend = true; lastQT = Date.now(); }
       else if (d.k === 'o' && from) onOffer(d, from);
-      else if (d.k === 'c' && d.c === 'zero') { setZero(); }
-      else if (d.k === 'c' && d.c === 'clear') { clearZero(); }
+      else if (d.k === 'c' && d.c === 'cal') { calibrate(); }
     }
   }
   function ask() {                         // follower: "send me the current value"
@@ -353,7 +374,7 @@
   function snap() {
     return {
       k: 's', b: r2(own.b), g: r2(own.g), a: r2(own.a), za: own.za == null ? null : r2(own.za),
-      z: zero ? { b: r2(zero.b), g: r2(zero.g), a: r2(zero.a) } : null, o: orient
+      z: zero ? { b: r2(zero.b), g: r2(zero.g), a: r2(zero.a) } : null, o: orient, cs: calStep
     };
   }
   function changed(a, b, th) {
@@ -361,7 +382,7 @@
     th = th || MIN_CHANGE;
     if (Math.abs(a.b - b.b) >= th || Math.abs(a.g - b.g) >= th) return true;
     if (Math.abs(wrap180(a.a - b.a)) >= th * 10) return true;
-    if (JSON.stringify(a.z) !== JSON.stringify(b.z) || a.o !== b.o) return true;
+    if (JSON.stringify(a.z) !== JSON.stringify(b.z) || a.o !== b.o || a.cs !== b.cs) return true;
     return false;
   }
   function tick() {
@@ -477,8 +498,7 @@
         var m; try { m = JSON.parse(ev.data); } catch (x) { return; }
         if (!m) return;
         if (m.k === 'p' && typeof m.t === 'number') { try { dc.send(JSON.stringify({ k: 'P', t: m.t })); } catch (x) { /* ignore */ } }
-        else if (m.k === 'c' && m.c === 'zero') setZero();
-        else if (m.k === 'c' && m.c === 'clear') clearZero();
+        else if (m.k === 'c' && m.c === 'cal') calibrate();
       };
     };
     pc.onconnectionstatechange = function () {
@@ -507,15 +527,21 @@
   }
 
   // ---------- buttons ----------
-  function setZero() {
+  // two-position (reversal) calibration: reading = surface tilt + offset; turned 180° = −tilt + offset
+  function calibrate() {
     if (!own) return;
-    zero = { b: own.b, g: own.g, a: own.a };
-    P.save('zero', zero); wantSend = true; dirty = true;
-    Ponas.tone(660, { dur: 0.12 }); Ponas.tone(990, { delay: 0.1, dur: 0.15 });
-  }
-  function clearZero() {
-    zero = null; P.save('zero', null); wantSend = true; dirty = true;
-    Ponas.tone(520, { dur: 0.12 });
+    if (calStep === 0) {
+      calFirst = { b: own.b, g: own.g };
+      calStep = 1;
+      Ponas.tone(660, { dur: 0.12 });
+    } else {
+      zero = { b: (calFirst.b + own.b) / 2, g: (calFirst.g + own.g) / 2, a: own.a };
+      calStep = 0; calFirst = null;
+      P.save('cal', zero);
+      orient = (orient + 2) % 4; P.save('orient', orient);   // the phone now lies turned 180°
+      Ponas.tone(660, { dur: 0.12 }); Ponas.tone(990, { delay: 0.1, dur: 0.15 });
+    }
+    wantSend = true; lastP2P = null; dirty = true;
   }
   function btn(id, fn) {
     $(id).addEventListener('pointerdown', function (e) {
@@ -525,12 +551,13 @@
     });
   }
   btn('bZero', function () {
-    if (mode === 'follow') { followerCmd('zero'); Ponas.tone(660, { dur: 0.1 }); }
-    else setZero();
+    if (mode === 'follow') { followerCmd('cal'); Ponas.tone(660, { dur: 0.1 }); }
+    else calibrate();
   });
   btn('bClear', function () {
-    if (mode === 'follow') { followerCmd('clear'); Ponas.tone(520, { dur: 0.1 }); }
-    else clearZero();
+    refMode = refMode === 'top' ? 'wheels' : 'top';
+    P.save('ref', refMode); dirty = true;
+    Ponas.tone(600, { dur: 0.1 });
   });
   btn('bMode', function () {
     mode = MODES[(MODES.indexOf(mode) + 1) % MODES.length];
@@ -557,8 +584,7 @@
     $('bModeS').textContent = MODE_LT[mode];
     $('room').classList.toggle('show', mode !== 'local');
     $('bSwap').classList.toggle('off', mode === 'follow');
-    $('bClear').innerHTML = 'Absoliutus<small>be nulio</small>';
-    $('bZero').innerHTML = 'Nulis<small>' + (mode === 'follow' ? 'master’yje' : 'nuo čia') + '</small>';
+    calStep = 0; calFirst = null;
     lastSent = null; nextSendAt = 0; lastAskT = 0;
     openChannel();
     later(checkSensor, 1500);
