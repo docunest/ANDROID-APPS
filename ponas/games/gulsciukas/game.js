@@ -9,8 +9,11 @@
  *   X = beta  (rotation around device x): + when the TOP edge of the device goes up
  *   Y = gamma (rotation around device y): + when the RIGHT edge goes down (left edge up)
  *   Z = alpha (rotation around the screen normal)
- * Plate 6 × 2.2 m: by default its 6 m side lies along the device's long (y) axis, so X tilts
- * the 6 m side and Y the 2.2 m side; ⇄ swaps that.
+ * Caravan model (top view, metres): box 4.9 × 2.2, hitch 7.2 m from the rear (on the centre line),
+ * axle 2.3 m from the rear. "Right" = right side when standing behind it, facing the hitch.
+ * The phone lies flat in the caravan; ⟳ tells which way its top edge points (hitch/right/rear/left).
+ * Heights of 7 points (4 corner legs, 2 wheels, hitch) come from the plane h = e·SE + n·SN;
+ * "kelti" = how much to raise each point so all are level with the highest one (rigid body).
  *
  * Remote: modes local / master / follower over Ponas.net (ntfy.sh). Free ntfy.sh: ~1 msg per 5 s
  * per device and 250 msgs per day per IP, so the master sends only when the angle changed,
@@ -21,7 +24,15 @@
   var P = window.Ponas;
   var $ = function (id) { return document.getElementById(id); };
 
-  var L_LONG = 6.0, L_SHORT = 2.2;          // plate, metres
+  var BOX_L = 4.9, BOX_W = 2.2, HITCH_N = 7.2, AXLE_N = 2.3;   // caravan, metres (n from rear)
+  var ORIENT_LT = ['viršus → kablys', 'viršus → dešinė', 'viršus → galas', 'viršus → kairė'];
+  var POINTS = [                             // [e (right +), n (forward from rear), name]
+    [0, HITCH_N, 'kablys'],
+    [-BOX_W / 2, BOX_L, 'priekis kairė'], [BOX_W / 2, BOX_L, 'priekis dešinė'],
+    [-BOX_W / 2, AXLE_N, 'ratas kairė'], [BOX_W / 2, AXLE_N, 'ratas dešinė'],
+    [-BOX_W / 2, 0, 'galas kairė'], [BOX_W / 2, 0, 'galas dešinė']
+  ];
+  var N_MID = HITCH_N / 2;                   // drawing centre along the caravan
   var SEND_MS = 5000;                        // ntfy.sh free: 1 request / 5 s sustained
   var DAY_LIMIT = 250;                       // ntfy.sh free: messages / day / IP
   var MIN_CHANGE = 0.02;                     // degrees; below this the master doesn't resend
@@ -33,7 +44,8 @@
   var mode = P.load('mode', 'local'); if (MODES.indexOf(mode) < 0) mode = 'local';
   var room = String(P.load('room', '1'));
   var zero = P.load('zero', null);           // {b, g, a} or null = absolute
-  var swap = !!P.load('swap', false);        // true: 6 m side along the device's short (x) axis
+  var orient = P.load('orient', 0) | 0;      // phone top edge: 0 hitch, 1 right, 2 rear, 3 left
+  if (orient < 0 || orient > 3) orient = 0;
 
   var own = null;                            // smoothed local sensor {b, g, a, za, src}
   var lastEvT = 0, hz = 0, evCount = 0, hzT0 = 0;
@@ -51,11 +63,7 @@
   function today() { var d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
   function sentToday() { if (sentLog.d !== today()) sentLog = { d: today(), n: 0 }; return sentLog.n; }
   function fmtDeg(v, dec) { if (v == null || isNaN(v)) return '—'; var s = v.toFixed(dec == null ? 2 : dec); return (v > 0 && dec !== 1 ? '+' : '') + s + '°'; }
-  function fmtMm(m) {
-    var mm = m * 1000, a = Math.abs(mm);
-    var s = a >= 1000 ? (a / 1000).toFixed(2) + ' m' : a >= 100 ? a.toFixed(0) + ' mm' : a.toFixed(1) + ' mm';
-    return (mm > 0.05 ? '+' : mm < -0.05 ? '−' : '') + s;
-  }
+  function cm(m) { return (Math.abs(m) < 0.0005 ? 0 : m * 100).toFixed(1); }   // metres -> "12.3" (cm)
 
   // ---------- sensors ----------
   function onOrient(e) {
@@ -149,7 +157,7 @@
   function view() {
     if (mode === 'follow') return remote;
     if (!own) return null;
-    return { b: own.b, g: own.g, a: own.a, za: own.za, src: own.src, zero: zero, swap: swap, dims: plateDevDims(swap) };
+    return { b: own.b, g: own.g, a: own.a, za: own.za, src: own.src, zero: zero, orient: orient };
   }
   function rel(v) {
     var z = v.zero;
@@ -160,8 +168,8 @@
     };
   }
 
-  // ---------- layout of the plate drawing ----------
-  var box = { w: 0, h: 0, pw: 0, ph: 0, s: 1 };
+  // ---------- caravan drawing ----------
+  var box = { w: 0, h: 0 };
   function screenAngle() {
     var a = (screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle
       : (typeof window.orientation === 'number' ? window.orientation : 0);
@@ -173,89 +181,81 @@
     var sx = dx * c - dy * s, sy = dx * s + dy * c;
     return [sx, -sy];
   }
-  // Is the device's long side its y axis? (phones: yes; tablets that are landscape by nature: no)
-  var longY = null;
-  function longIsY() {
-    // while the on-screen keyboard is open (room number) the window shape lies: keep the last answer
-    if (longY !== null && document.activeElement && document.activeElement.tagName === 'INPUT') return longY;
-    var a = screenAngle(), w = window.innerWidth, h = window.innerHeight;
-    longY = (a % 180 === 0) === (h >= w);
-    return longY;
-  }
-  // plate metres along [device x, device y]: 6 m along the device's long side unless swapped
-  function plateDevDims(sw) {
-    var alongY = longIsY() !== !!sw;
-    return alongY ? [L_SHORT, L_LONG] : [L_LONG, L_SHORT];
-  }
   function layout() {
     var el = $('left');
     box.w = el.clientWidth; box.h = el.clientHeight;
     dirty = true;
   }
-
-  function drawPlate(v, r) {
-    var d = v && v.dims ? v.dims : plateDevDims(swap);
-    var sd = toScreen(d[0], d[1]);
-    var mw = Math.abs(sd[0]), mh = Math.abs(sd[1]);   // metres across / down the screen
-    var wide = mw >= mh;
-    var padX = wide ? 14 : 70, padY = wide ? 34 : 14;  // room for corner labels on the thin side
-    var s = Math.min((box.w - 2 * padX) / mw, (box.h - 2 * padY) / mh);
-    var pw = mw * s, ph = mh * s, cx = box.w / 2, cy = box.h / 2;
-    var pl = $('plate').style;
-    pl.left = (cx - pw / 2) + 'px'; pl.top = (cy - ph / 2) + 'px'; pl.width = pw + 'px'; pl.height = ph + 'px';
-    var rr = Math.max(28, Math.min(pw, ph) * 0.42);
-    var ring = $('ring').style;
-    ring.width = ring.height = 2 * rr + 'px'; ring.left = (cx - rr) + 'px'; ring.top = (cy - rr) + 'px';
-    var br = rr * 0.28, bub = $('bubble');
-    bub.style.width = bub.style.height = 2 * br + 'px';
-    bub.style.left = (cx - br) + 'px'; bub.style.top = (cy - br) + 'px';
-
-    // corners: heights relative to the lowest corner
-    var corners = [[-1, 1], [1, 1], [1, -1], [-1, -1]];
-    var hs = [], i;
-    var tx = r ? Math.tan(r.x * Math.PI / 180) : 0, ty = r ? Math.tan(r.y * Math.PI / 180) : 0;
-    for (i = 0; i < 4; i++) {
-      var dx = corners[i][0] * d[0] / 2, dy = corners[i][1] * d[1] / 2;
-      hs.push(dy * tx - dx * ty);           // top up with +X, left up with +Y
+  // slopes of the caravan plane: SE (per metre to the right), SN (per metre forward)
+  function slopes(r, o) {
+    var tX = Math.tan(r.x * Math.PI / 180), tY = Math.tan(r.y * Math.PI / 180);
+    var th = o * Math.PI / 2, sn = Math.round(Math.sin(th)), cs = Math.round(Math.cos(th));
+    // phone frame: dy = e·sinθ + n·cosθ, dx = e·cosθ − n·sinθ; h = dy·tanX − dx·tanY
+    return { se: sn * tX - cs * tY, sn: cs * tX + sn * tY };
+  }
+  // how the drawing is turned on screen (clockwise degrees of "forward" from screen-up)
+  function drawAngle(v) {
+    if (mode === 'follow') return box.w > box.h * 1.3 ? 90 : 0;   // no physical link: just fit it
+    var th = orient * Math.PI / 2;
+    var fs = toScreen(-Math.round(Math.sin(th)), Math.round(Math.cos(th)));  // caravan forward, in device frame
+    return norm360(Math.round(Math.atan2(fs[0], -fs[1]) * 180 / Math.PI));
+  }
+  var lastPhi = null, lastScale = 0, lastBox = '';
+  function drawCaravan(v, r) {
+    var phi = drawAngle(v), along = phi % 180 === 0;
+    var Wm = 2.8, Hm = HITCH_N + 0.5;          // drawing size in metres (wheels stick out a bit)
+    var padCross = 2 * 66, padAlong = 2 * 24;   // room for the labels
+    var s = along ? Math.min((box.w - padCross) / Wm, (box.h - padAlong) / Hm)
+                  : Math.min((box.w - padAlong) / Hm, (box.h - padCross) / Wm);
+    s = Math.max(8, s);
+    var cx = box.w / 2, cy = box.h / 2;
+    var key = phi + '|' + s.toFixed(2) + '|' + box.w + 'x' + box.h;
+    if (key !== lastBox) {
+      lastBox = key;
+      $('car').setAttribute('transform', 'translate(' + cx + ' ' + cy + ') rotate(' + phi + ') scale(' + s + ')');
     }
-    var mn = Math.min.apply(null, hs), mx = Math.max.apply(null, hs);
-    for (i = 0; i < 4; i++) {
-      var c = $('c' + i);
-      var p = toScreen(corners[i][0] * d[0] / 2 * s, corners[i][1] * d[1] / 2 * s);
-      var ox = wide ? 0 : (p[0] < 0 ? -38 : 38), oy = wide ? (p[1] < 0 ? -18 : 18) : 0;
-      c.style.left = (cx + p[0] + ox) + 'px'; c.style.top = (cy + p[1] + oy) + 'px';
-      if (!r) { c.textContent = ''; c.className = 'cl'; continue; }
-      var h = hs[i] - mn;
-      c.textContent = h < 0.00005 ? '0' : fmtMm(h);
-      c.className = 'cl' + (mx - mn > 0.0005 ? (hs[i] === mx ? ' hi' : hs[i] === mn ? ' lo' : '') : '');
-      // keep the label inside the panel
-      var hw = c.offsetWidth / 2 + 2, lx0 = parseFloat(c.style.left);
-      c.style.left = Math.max(hw, Math.min(box.w - hw, lx0)) + 'px';
+    var rad = phi * Math.PI / 180, c = Math.cos(rad), sn = Math.sin(rad);
+    function scr(e, n) { var x = e, y = -(n - N_MID); return [cx + s * (x * c - y * sn), cy + s * (x * sn + y * c)]; }
+    var eDir = [c, sn], fDir = [sn, -c];
+
+    // heights and how much to raise
+    var hs = [], i, sl = r ? slopes(r, v ? v.orient : orient) : null;
+    for (i = 0; i < POINTS.length; i++) hs.push(sl ? POINTS[i][0] * sl.se + POINTS[i][1] * sl.sn : 0);
+    var mx = Math.max.apply(null, hs), mn = Math.min.apply(null, hs), flat = mx - mn < 0.0005;
+    for (i = 0; i < POINTS.length; i++) {
+      var el = $('p' + i), pt = POINTS[i], raise = mx - hs[i];
+      el.textContent = !r ? '—' : (raise < 0.0005 ? '0.0' : '↑' + cm(raise));
+      el.className = 'pt' + (!r ? '' : flat || raise < 0.0005 ? ' ok' : hs[i] === mn ? ' hi' : '');
+      var q = scr(pt[0], pt[1]), hw = el.offsetWidth / 2, hh = el.offsetHeight / 2, ox = 0, oy = 0;
+      if (pt[0] !== 0) {
+        var sg = pt[0] > 0 ? 1 : -1;
+        ox = sg * eDir[0] * (hw + 0.2 * s + 6); oy = sg * eDir[1] * (hh + 0.2 * s + 6);
+      } else { ox = fDir[0] * (hw + 0.15 * s + 6); oy = fDir[1] * (hh + 0.15 * s + 6); }
+      var lx = Math.max(hw + 1, Math.min(box.w - hw - 1, q[0] + ox));
+      var ly = Math.max(hh + 1, Math.min(box.h - hh - 1, q[1] + oy));
+      el.style.transform = 'translate(' + (lx - hw).toFixed(1) + 'px,' + (ly - hh).toFixed(1) + 'px)';
     }
 
-    // bubble drifts to the HIGH side: gradient of height in the device frame = (-tanY, tanX)
-    var ox2 = 0, oy2 = 0, ok = false;
-    if (r) {
-      var gx = -r.y, gy = r.x, mag = Math.sqrt(gx * gx + gy * gy);
+    // bubble (inside the box, drifts to the HIGH side). Uphill direction in caravan metres = (SE, SN)
+    var bx = 0, by = 0, ok = false;
+    if (sl) {
+      var ge = Math.atan(sl.se) * 180 / Math.PI, gn = Math.atan(sl.sn) * 180 / Math.PI;
+      var mag = Math.sqrt(ge * ge + gn * gn);
       ok = mag < 0.1;
-      if (mag > 1e-6) {
-        var f = (rr - br) * (mag / (mag + 1.5)) / mag;   // ~half way at 1.5°
-        var q = toScreen(gx * f, gy * f); ox2 = q[0]; oy2 = q[1];
-      }
+      if (mag > 1e-6) { var f = 0.55 * (mag / (mag + 1.5)) / mag; bx = ge * f; by = -gn * f; }
     }
-    bub.style.transform = 'translate(' + ox2.toFixed(1) + 'px,' + oy2.toFixed(1) + 'px)';
-    bub.classList.toggle('ok', ok);
+    $('bubble').setAttribute('transform', 'translate(' + bx.toFixed(3) + ' ' + by.toFixed(3) + ')');
+    $('bubble').setAttribute('class', ok ? 'ok' : '');
+    return sl;
   }
 
   function render() {
     var v = view();
     var r = v ? rel(v) : null;
-    drawPlate(v, r);
-    var sw = v ? v.swap : swap;
-    var dd = v && v.dims ? v.dims : plateDevDims(swap);
-    var lx = dd[1], ly = dd[0];  // X tilts the side along device y, Y the side along device x
+    var sl = drawCaravan(v, r);
     if (!v) {
-      ['ax', 'ay', 'az', 'rx', 'ry', 'rz', 'hx', 'hy', 'hz'].forEach(function (id) { $(id).textContent = '—'; });
+      ['ax', 'ay', 'az', 'rx', 'ry', 'rz'].forEach(function (id) { $(id).textContent = '—'; });
+      $('sum').textContent = '';
     } else {
       $('ax').textContent = fmtDeg(v.b);
       $('ay').textContent = fmtDeg(v.g);
@@ -263,11 +263,11 @@
       $('rx').textContent = fmtDeg(r.x);
       $('ry').textContent = fmtDeg(r.y);
       $('rz').textContent = r.z == null ? '—' : fmtDeg(r.z);
-      $('hx').innerHTML = fmtMm(lx * Math.tan(r.x * Math.PI / 180)) + ' <small>/' + String(lx).replace('.', ',') + ' m ↑ viršus</small>';
-      $('hy').innerHTML = fmtMm(-ly * Math.tan(r.y * Math.PI / 180)) + ' <small>/' + String(ly).replace('.', ',') + ' m → dešinė</small>';
-      $('hz').innerHTML = r.z == null ? '—' : '↔ ' + fmtMm(Math.abs(lx * Math.sin(r.z * Math.PI / 180))).replace('+', '') + ' <small>/' + String(lx).replace('.', ',') + ' m</small>';
+      var fb = sl.sn * BOX_L, lr = -sl.se * BOX_W;   // front − rear, left − right
+      $('sum').innerHTML = 'Išilgai (4,9 m): <b>' + (Math.abs(fb) < 0.0005 ? 'lygu' : (fb > 0 ? 'priekis' : 'galas') + ' aukščiau ' + cm(Math.abs(fb)) + ' cm') +
+        '</b><br>Skersai (2,2 m): <b>' + (Math.abs(lr) < 0.0005 ? 'lygu' : (lr > 0 ? 'kairė' : 'dešinė') + ' aukščiau ' + cm(Math.abs(lr)) + ' cm') + '</b>';
     }
-    $('bSwapS').textContent = sw ? '6 m skersai' : '6 m išilgai';
+    $('bSwapS').textContent = ORIENT_LT[v && mode === 'follow' ? v.orient : orient];
     renderStatus();
   }
 
@@ -326,8 +326,7 @@
         b: d.b, g: d.g, a: typeof d.a === 'number' ? d.a : 0,
         za: typeof d.za === 'number' ? d.za : null,
         zero: d.z && typeof d.z.b === 'number' ? { b: d.z.b, g: d.z.g, a: d.z.a || 0 } : null,
-        swap: !!d.sw,
-        dims: Array.isArray(d.d) && d.d.length === 2 && d.d.every(function (n) { return n === L_LONG || n === L_SHORT; }) ? d.d : null
+        orient: d.o === 1 || d.o === 2 || d.o === 3 ? d.o : 0
       };
       remoteT = Date.now(); dirty = true;
       return true;
@@ -354,7 +353,7 @@
   function snap() {
     return {
       k: 's', b: r2(own.b), g: r2(own.g), a: r2(own.a), za: own.za == null ? null : r2(own.za),
-      z: zero ? { b: r2(zero.b), g: r2(zero.g), a: r2(zero.a) } : null, sw: swap ? 1 : 0, d: plateDevDims(swap)
+      z: zero ? { b: r2(zero.b), g: r2(zero.g), a: r2(zero.a) } : null, o: orient
     };
   }
   function changed(a, b, th) {
@@ -362,7 +361,7 @@
     th = th || MIN_CHANGE;
     if (Math.abs(a.b - b.b) >= th || Math.abs(a.g - b.g) >= th) return true;
     if (Math.abs(wrap180(a.a - b.a)) >= th * 10) return true;
-    if (JSON.stringify(a.z) !== JSON.stringify(b.z) || a.sw !== b.sw || String(a.d) !== String(b.d)) return true;
+    if (JSON.stringify(a.z) !== JSON.stringify(b.z) || a.o !== b.o) return true;
     return false;
   }
   function tick() {
@@ -541,7 +540,7 @@
   });
   btn('bSwap', function () {
     if (mode === 'follow') return;
-    swap = !swap; P.save('swap', swap); wantSend = true; dirty = true;
+    orient = (orient + 1) % 4; P.save('orient', orient); wantSend = true; dirty = true;
     Ponas.tone(600, { dur: 0.1 });
   });
   var roomIn = $('roomIn');

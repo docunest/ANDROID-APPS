@@ -17,19 +17,25 @@
   #left { position: relative; flex: 1 1 40%; min-width: 0; min-height: 0; overflow: hidden; }
   #right { flex: 1 1 60%; min-width: 0; min-height: 0; display: flex; flex-direction: column;
     justify-content: space-evenly; padding: 0 8px 6px 4px; box-sizing: border-box; }
-  @media (orientation: portrait) { #left { flex: 1 1 42%; } #right { flex: 1 1 58%; } }
+  @media (orientation: portrait) { #left { flex: 1 1 47%; } #right { flex: 1 1 53%; } }
 
-  #plate { position: absolute; background: #D7CCC8; border: 3px solid #8D6E63; border-radius: 6px; box-sizing: border-box; }
-  #ring { position: absolute; border-radius: 50%; border: 2px solid #558B2F; background: #DCEDC8; }
-  #ring::after { content: ''; position: absolute; left: 50%; top: 50%; width: 30%; height: 30%;
-    transform: translate(-50%, -50%); border-radius: 50%; border: 2px dashed #558B2F; }
-  #bubble { position: absolute; border-radius: 50%; background: #FFEB3B; box-shadow: inset 0 -3px 0 #FBC02D;
-    will-change: transform; }
-  #bubble.ok { background: #66BB6A; box-shadow: inset 0 -3px 0 #2E7D32; }
-  .cl { position: absolute; font-size: calc(var(--fs) * .8); font-weight: 700; white-space: nowrap;
-    transform: translate(-50%, -50%); background: #fffd; border-radius: 6px; padding: 1px 4px; }
-  .cl.hi { color: #C62828; } .cl.lo { color: #1565C0; }
-
+  #cv { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #cv .body { fill: #ECEFF1; stroke: #546E7A; }
+  #cv .bar { fill: none; stroke: #455A64; stroke-linejoin: round; }
+  #cv .hitch { fill: #455A64; }
+  #cv .wheel { fill: #37474F; }
+  #cv .leg { fill: #FB8C00; }
+  #cv .win { fill: #B3E5FC; }
+  #cv .ring { fill: #DCEDC8; stroke: #558B2F; }
+  #cv .ring0 { fill: none; stroke: #558B2F; stroke-dasharray: .06 .05; }
+  #bubble circle { fill: #FFEB3B; stroke: #F9A825; }
+  #bubble.ok circle { fill: #66BB6A; stroke: #2E7D32; }
+  .pt { position: absolute; left: 0; top: 0; font-size: calc(var(--fs) * .85); font-weight: 800; white-space: nowrap;
+    background: #fffe; border: 2px solid #B0BEC5; border-radius: 8px; padding: 1px 5px; color: #37474F;
+    font-variant-numeric: tabular-nums; will-change: transform; }
+  .pt.ok { border-color: #43A047; color: #2E7D32; }
+  .pt.hi { border-color: #E53935; color: #C62828; }
+  #legend { position: absolute; left: 6px; bottom: 4px; font-size: 11px; color: #607D8B; pointer-events: none; }
   #perm { position: absolute; inset: 8px; display: none; flex-direction: column; align-items: center;
     justify-content: center; gap: 10px; text-align: center; background: #fffe; border-radius: 14px; font-size: var(--fs); }
   #perm.show { display: flex; }
@@ -41,8 +47,8 @@
   td { font-size: var(--fs); text-align: right; padding: 2px 4px; white-space: nowrap; }
   td.ax { text-align: left; font-weight: 800; font-size: calc(var(--fs) * 1.15); color: #33691E; }
   td.rel { font-weight: 800; font-size: calc(var(--fs) * 1.15); }
-  td.rise { font-weight: 700; color: #4E342E; }
-  td.rise small { display: block; font-weight: 400; color: #8D6E63; font-size: 10px; line-height: 1; }
+  #sum { font-size: calc(var(--fs) * .8); color: #4E342E; line-height: 1.35; }
+  #sum b { color: #3E2723; }
   #status { font-size: 12px; color: #546E7A; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 22px; }
   #room { display: none; align-items: center; gap: 4px; }
   #room.show { display: flex; }
@@ -62,25 +68,43 @@
 <div id="top"><span id="dot"></span><span id="modeLbl">Vietinis</span></div>
 <div id="game">
   <div id="left">
-    <div id="plate"></div>
-    <div id="ring"></div>
-    <div id="bubble"></div>
-    <div class="cl" id="c0"></div><div class="cl" id="c1"></div><div class="cl" id="c2"></div><div class="cl" id="c3"></div>
+    <!-- caravan top view in metres: x = right, y = −(forward − 3.6); rear at y=3.6, hitch at y=−3.6 -->
+    <svg id="cv" xmlns="http://www.w3.org/2000/svg">
+      <g id="car" vector-effect="non-scaling-stroke">
+        <path class="bar" d="M-0.75 -1.3 L0 -3.45 L0.75 -1.3" stroke-width="0.09"/>
+        <circle class="hitch" cx="0" cy="-3.55" r="0.14"/>
+        <rect class="wheel" x="-1.36" y="1.0" width="0.24" height="0.6" rx="0.06"/>
+        <rect class="wheel" x="1.12" y="1.0" width="0.24" height="0.6" rx="0.06"/>
+        <rect class="body" x="-1.1" y="-1.3" width="2.2" height="4.9" rx="0.22" stroke-width="0.06"/>
+        <rect class="win" x="-0.7" y="-1.22" width="1.4" height="0.16" rx="0.05"/>
+        <rect class="leg" x="-1.08" y="-1.28" width="0.24" height="0.24" rx="0.04"/>
+        <rect class="leg" x="0.84" y="-1.28" width="0.24" height="0.24" rx="0.04"/>
+        <rect class="leg" x="-1.08" y="3.34" width="0.24" height="0.24" rx="0.04"/>
+        <rect class="leg" x="0.84" y="3.34" width="0.24" height="0.24" rx="0.04"/>
+        <circle class="ring" cx="0" cy="1.15" r="0.75" stroke-width="0.04"/>
+        <circle class="ring0" cx="0" cy="1.15" r="0.24" stroke-width="0.03"/>
+        <g transform="translate(0 1.15)"><g id="bubble"><circle r="0.2" stroke-width="0.04"/></g></g>
+      </g>
+    </svg>
+    <div class="pt" id="p0"></div><div class="pt" id="p1"></div><div class="pt" id="p2"></div><div class="pt" id="p3"></div>
+    <div class="pt" id="p4"></div><div class="pt" id="p5"></div><div class="pt" id="p6"></div>
+    <div id="legend">↑ kiek kelti, cm</div>
     <div id="perm"><div id="permTxt">Reikia leidimo naudoti judesio jutiklius</div><button id="permBtn">Leisti jutiklius</button></div>
   </div>
   <div id="right">
     <table>
-      <tr><th></th><th>Absoliutus</th><th>Nuo nulio</th><th>Pakilimas</th></tr>
-      <tr><td class="ax">X</td><td id="ax"></td><td class="rel" id="rx"></td><td class="rise" id="hx"></td></tr>
-      <tr><td class="ax">Y</td><td id="ay"></td><td class="rel" id="ry"></td><td class="rise" id="hy"></td></tr>
-      <tr><td class="ax">Z</td><td id="az"></td><td class="rel" id="rz"></td><td class="rise" id="hz"></td></tr>
+      <tr><th></th><th>Absoliutus</th><th>Nuo nulio</th></tr>
+      <tr><td class="ax">X</td><td id="ax"></td><td class="rel" id="rx"></td></tr>
+      <tr><td class="ax">Y</td><td id="ay"></td><td class="rel" id="ry"></td></tr>
+      <tr><td class="ax">Z</td><td id="az"></td><td class="rel" id="rz"></td></tr>
     </table>
+    <div id="sum"></div>
     <div id="status"><span id="room">Kambarys <input id="roomIn" type="number" inputmode="numeric" min="1" max="9999"></span><span id="stat"></span></div>
     <div id="btns">
       <button class="b" id="bZero">Nulis</button>
       <button class="b" id="bClear">Absoliutus</button>
       <button class="b" id="bMode">Režimas<small id="bModeS">vietinis</small></button>
-      <button class="b" id="bSwap">⇄<small id="bSwapS">6 m išilgai</small></button>
+      <button class="b" id="bSwap">⟳ Telefonas<small id="bSwapS">viršus → kablys</small></button>
     </div>
   </div>
 </div>
