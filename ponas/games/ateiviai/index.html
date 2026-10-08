@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Ateiviai</title>
+<style>
+  body { background: linear-gradient(#0D1137, #283593); font-family: sans-serif; }
+  #sky { position: fixed; left: 0; top: 0; width: 2px; height: 2px; border-radius: 50%; background: transparent; pointer-events: none; }
+  #stars { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; z-index: 30; }
+  .star { width: 28px; height: 28px; background: #ffffff40;
+    clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+    transition: transform .3s; }
+  .star.on { background: #FFC107; transform: scale(1.15); }
+
+  #game { position: fixed; left: 0; right: 0; top: 72px; bottom: 0; overflow: hidden; touch-action: none; }
+  #swarm { position: absolute; left: 0; top: 0; will-change: transform; }
+  .alien { position: absolute; transition: transform .25s ease-out, opacity .25s ease-out; }
+  .alien svg { width: 100%; height: 100%; display: block; }
+  .alien.pop { transform: scale(1.6); opacity: 0; }
+  #swarm .b, #swarm.f2 .a { display: none; }
+  #swarm.f2 .b { display: inline; }
+  #swarm.jump { transition: transform .5s ease-out; }
+
+  #ship { position: absolute; left: 0; top: 0; will-change: transform; }
+  #ship svg { width: 100%; height: 100%; display: block; }
+  #ship.wobble svg { animation: wobble .5s; }
+  #ring { position: absolute; inset: -18%; border-radius: 50%; border: 5px solid #FFEB3B; opacity: 0; pointer-events: none; }
+  #ship.hint #ring { animation: ring 1s ease-out 3; }
+  .shot { position: absolute; left: 0; top: 0; width: 8px; height: 22px; margin-left: -4px; border-radius: 4px;
+    background: linear-gradient(#FFF59D, #FF9800); display: none; will-change: transform; }
+
+  .spark { position: fixed; width: 16px; height: 16px; background: #FFD54F; pointer-events: none; z-index: 40;
+    clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+    transition: transform .6s ease-out, opacity .6s ease-out; }
+  @keyframes ring { 0% { transform: scale(.8); opacity: 1; } 100% { transform: scale(1.5); opacity: 0; } }
+  @keyframes wobble { 0%, 100% { transform: rotate(0); } 30% { transform: rotate(-10deg); } 70% { transform: rotate(10deg); } }
+</style>
+</head>
+<body>
+<div id="sky"></div>
+<div id="stars"></div>
+<div id="game">
+  <div id="swarm"></div>
+  <div class="shot"></div><div class="shot"></div><div class="shot"></div>
+  <div id="ship"><div id="ring"></div></div>
+</div>
+<script src="ponas.js"></script>
+<script src="laikas.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

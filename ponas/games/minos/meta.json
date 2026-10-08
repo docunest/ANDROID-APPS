@@ -1,0 +1,8 @@
+{
+  "title": "Minos",
+  "icon": "icon.png",
+  "color": "#FF8F00",
+  "order": 100,
+  "version": "1",
+  "enabled": true
+}
