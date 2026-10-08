@@ -67,6 +67,9 @@
   #sum { font-size: calc(var(--fs) * .8); color: #4E342E; line-height: 1.35; }
   #sum b { color: #3E2723; }
   #sum .warn { color: #E65100; }
+  #sum .err { color: #C62828; font-weight: 700; }
+  #sum .ok { color: #2E7D32; }
+  #sum .calb { color: #1565C0; }
   #status { font-size: 12px; color: #546E7A; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 22px; }
   #room { display: none; align-items: center; gap: 4px; }
   #room.show { display: flex; }
@@ -139,14 +142,14 @@
     <div id="sum"></div>
     <div id="status"><span id="room">Kambarys <input id="roomIn" type="number" inputmode="numeric" min="1" max="9999"></span><span id="stat"></span></div>
     <div id="btns">
-      <button class="b" id="bZero">Kalibruoti<small id="bZeroS">1/2: pradėti</small></button>
-      <button class="b" id="bClear">Atskaita<small id="bClearS">ratai</small></button>
-      <button class="b" id="bMode">Režimas<small id="bModeS">vietinis</small></button>
+      <button class="b" id="bZero"><span id="bZeroT">Kalibruoti</span><small id="bZeroS">pradėti</small></button>
+      <button class="b" id="bClear"><span id="bClearT">Atskaita</span><small id="bClearS">ratai</small></button>
+      <button class="b" id="bMode"><span id="bModeT">Režimas</span><small id="bModeS">vietinis</small></button>
       <button class="b" id="bSwap">⟳ Telefonas<small id="bSwapS">viršus → kablys</small></button>
     </div>
   </div>
 </div>
 <script src="ponas.js"></script>
-<script src="game.js?v=8"></script>
+<script src="game.js?v=9"></script>
 </body>
 </html>

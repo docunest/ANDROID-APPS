@@ -15,9 +15,10 @@
  * Heights of 7 points (4 corner legs, 2 wheels, hitch) come from the plane h = e·SE + n·SN;
  * Reference ("Atskaita"): 'wheels' (default) — the higher wheel stays put, the lower wheel is raised,
  * the hitch goes up or down (jockey wheel), corners move by what the plane says; 'top' — every point
- * is raised to the highest one. Calibration ("Kalibruoti") = 2 readings with the phone turned 180°
- * on the same spot: the average is the phone's own offset (camera bump, sensor bias), the surface
- * tilt cancels out, so it works right on the caravan floor.
+ * is raised to the highest one. Calibration: 3–5 readings on the same spot, the phone turned by any
+ * angle between them (the gyro measures how much). Least squares fit of
+ *   X_i = −sin ψ_i·Gx + cos ψ_i·Gy + Ob,   −Y_i = cos ψ_i·Gx + sin ψ_i·Gy − Og
+ * (G = surface gradient, O = phone's own offset). Bad fit or too little rotation → error.
  *
  * Remote: modes local / master / follower. Angles, calibration and commands go ONLY over a direct
  * WebRTC data channel. ntfy.sh (Ponas.net) is used just for the handshake: one offer from the
@@ -48,7 +49,9 @@
   var mode = P.load('mode', 'local'); if (MODES.indexOf(mode) < 0) mode = 'local';
   var room = String(P.load('room', '1'));
   var zero = P.load('cal', null);            // phone offset {b, g, a} from calibration, or null
-  var calStep = 0, calFirst = null;          // 1 = first reading taken, waiting for the 180° one
+  var calOn = false, calPts = [], calMsg = '', calMsgT = 0, calErr = false;
+  var CAL_MAX = 5, CAL_MIN = 3, CAL_RMS = 0.07, CAL_WORST = 0.15, CAL_STILL = 0.06, CAL_TURN = 20;
+  var raw = [];                              // last ~1.2 s of raw readings {t, b, g, a}
   var refMode = P.load('ref', 'wheels') === 'top' ? 'top' : 'wheels';
   var VIEWS = ['top', 'back', 'side'], VIEW_LT = { top: 'iš viršaus', back: 'iš galo', side: 'iš šono (kairės)' };
   var viewMode = P.load('view', 'top'); if (VIEWS.indexOf(viewMode) < 0) viewMode = 'top';
@@ -94,6 +97,9 @@
       own.a = norm360(own.a + k * wrap180(a - own.a));
     }
     if (za != null) { own.za = za; own.src = 'kompasas'; }
+    own.noAlpha = e.alpha == null;
+    raw.push({ t: now, b: e.beta, g: e.gamma, a: a });
+    while (raw.length && now - raw[0].t > 1200) raw.shift();
     hidePerm();
     dirty = true;
   }
@@ -367,20 +373,36 @@
       $('rz').textContent = r.z == null ? '—' : fmtDeg(r.z);
       var fb = sl.sn * BOX_L, lr = -sl.se * BOX_W;   // front − rear, left − right
       var pitch = Math.atan(Math.abs(sl.sn)) * 180 / Math.PI, roll = Math.atan(Math.abs(sl.se)) * 180 / Math.PI;
-      var cs = mode === 'follow' ? v.calStep : calStep;
       // differences along (front − rear over 4.9 m) and across (left − right over 2.2 m)
       $('dl').textContent = cm(Math.abs(fb)) + ' cm';
       $('dw').textContent = cm(Math.abs(lr)) + ' cm';
       $('dlWhich').textContent = (Math.abs(fb) < 0.0005 ? 'lygu' : (fb > 0 ? 'priekis ↑' : 'galas ↑')) + ' ' + pitch.toFixed(2) + '°';
       $('dwWhich').textContent = (Math.abs(lr) < 0.0005 ? 'lygu' : (lr > 0 ? 'kairė ↑' : 'dešinė ↑')) + ' ' + roll.toFixed(2) + '°';
-      $('sum').innerHTML = cs
-        ? '<b class="warn">Kalibravimas: apsuk telefoną 180° toje pačioje vietoje ir dar kartą spausk „Kalibruoti“.</b>'
-        : v.zero ? '' : '<span class="warn">Nekalibruota: telefono kreivumas gali pridėti kelis cm. Spausk „Kalibruoti“.</span>';
+      var cN = mode === 'follow' ? v.calN : (calOn ? calPts.length : -1);
+      var cM = mode === 'follow' ? v.calMsg : (calMsg && Date.now() - calMsgT < 60000 ? calMsg : '');
+      var cE = mode === 'follow' ? v.calErr : calErr;
+      var cT = mode === 'follow' ? v.calTurn : Math.round(turnedSinceLast());
+      var html = '';
+      if (cN >= 0) {
+        html = '<b class="calb">Kalibravimas: taškų ' + cN + '/' + CAL_MAX + (cN ? ' · pasukta nuo paskutinio ' + cT + '°' : '') + '</b><br>' +
+          (cN === 0 ? 'Padėk telefoną ant tvirto plokščio paviršiaus ir spausk „Fiksuoti“.'
+            : 'Pasuk telefoną (pvz., ~90°) toje pačioje vietoje, palauk sekundę ir spausk „Fiksuoti“.' + (cN >= CAL_MIN ? ' Arba „Baigti“.' : ''));
+      }
+      if (cM) html += (html ? '<br>' : '') + '<span class="' + (cE ? 'err' : 'ok') + '">' + cM + '</span>';
+      if (!html && !v.zero) html = '<span class="warn">Nekalibruota: telefono kreivumas gali pridėti kelis cm. Spausk „Kalibruoti“.</span>';
+      $('sum').innerHTML = html;
     }
     $('bSwapS').textContent = ORIENT_LT[v && mode === 'follow' ? v.orient : orient];
-    var calNow = mode === 'follow' ? (v ? v.calStep : 0) : calStep, calOk = mode === 'follow' ? v && v.zero : zero;
-    $('bZeroS').textContent = calNow ? '2/2: apsukus 180°' : calOk ? 'kalibruota ✓' : '1/2: pradėti';
-    $('bClearS').textContent = refMode === 'top' ? 'aukščiausias' : 'ratai';
+    var calOk = mode === 'follow' ? v && v.zero : zero, inCal = calibrating();
+    var nNow = mode === 'follow' ? (v ? v.calN : -1) : (calOn ? calPts.length : -1);
+    $('bZeroT').textContent = inCal ? 'Fiksuoti' : 'Kalibruoti';
+    $('bZeroS').textContent = inCal ? 'taškas ' + (nNow + 1) + '/' + CAL_MAX : calOk ? 'kalibruota ✓' : 'pradėti';
+    $('bClearT').textContent = inCal ? 'Baigti' : 'Atskaita';
+    $('bClearS').textContent = inCal ? 'kai ≥' + CAL_MIN + ' taškai' : refMode === 'top' ? 'aukščiausias' : 'ratai';
+    $('bClear').classList.toggle('off', inCal && nNow < CAL_MIN);
+    $('bModeT').textContent = inCal ? 'Atšaukti' : 'Režimas';
+    $('bModeS').textContent = inCal ? 'kalibravimą' : MODE_LT[mode];
+    $('bSwap').classList.toggle('off', mode === 'follow' || inCal);
     if (viewMode === 'top') $('legend').textContent = (refMode === 'top' ? '↑ kelti, cm · 0.0 = aukščiausias taškas' : '↑ kelti / ↓ nuleisti, cm · 0.0 = aukštesnis ratas');
     renderStatus();
   }
@@ -446,7 +468,10 @@
         b: d.b, g: d.g, a: typeof d.a === 'number' ? d.a : 0,
         za: typeof d.za === 'number' ? d.za : null,
         zero: d.z && typeof d.z.b === 'number' ? { b: d.z.b, g: d.z.g, a: d.z.a || 0 } : null,
-        calStep: d.cs === 1 ? 1 : 0,
+        calN: typeof d.cn === 'number' ? d.cn : -1,
+        calMsg: typeof d.cm === 'string' ? d.cm.slice(0, 300) : '',
+        calErr: d.ce === 1,
+        calTurn: typeof d.ct === 'number' ? d.ct : 0,
         orient: d.o === 1 || d.o === 2 || d.o === 3 ? d.o : 0
       };
       remoteT = Date.now(); dirty = true;
@@ -462,7 +487,9 @@
   function snap() {
     return {
       k: 's', b: r2(own.b), g: r2(own.g), a: r2(own.a), za: own.za == null ? null : r2(own.za),
-      z: zero ? { b: r2(zero.b), g: r2(zero.g), a: r2(zero.a) } : null, o: orient, cs: calStep
+      z: zero ? { b: r2(zero.b), g: r2(zero.g), a: r2(zero.a) } : null, o: orient, cn: calOn ? calPts.length : -1,
+      cm: calMsg && Date.now() - calMsgT < 60000 ? calMsg : '', ce: calErr ? 1 : 0,
+      ct: calOn ? Math.round(turnedSinceLast()) : 0
     };
   }
   function changed(a, b, th) {
@@ -470,7 +497,7 @@
     th = th || MIN_CHANGE;
     if (Math.abs(a.b - b.b) >= th || Math.abs(a.g - b.g) >= th) return true;
     if (Math.abs(wrap180(a.a - b.a)) >= th * 10) return true;
-    if (JSON.stringify(a.z) !== JSON.stringify(b.z) || a.o !== b.o || a.cs !== b.cs) return true;
+    if (JSON.stringify(a.z) !== JSON.stringify(b.z) || a.o !== b.o || a.cn !== b.cn || a.cm !== b.cm || a.ct !== b.ct) return true;
     return false;
   }
   function tick() {
@@ -615,7 +642,9 @@
         var m; try { m = JSON.parse(ev.data); } catch (x) { return; }
         if (!m) return;
         if (m.k === 'p' && typeof m.t === 'number') { try { dc.send(JSON.stringify({ k: 'P', t: m.t })); } catch (x) { /* ignore */ } }
-        else if (m.k === 'c' && m.c === 'cal') calibrate();
+        else if (m.k === 'c' && m.c === 'calfix') calFix();
+        else if (m.k === 'c' && m.c === 'calend') calFinish();
+        else if (m.k === 'c' && m.c === 'calcancel') calCancel();
       };
     };
     pc.onconnectionstatechange = function () {
@@ -651,22 +680,102 @@
   }
 
   // ---------- buttons ----------
-  // two-position (reversal) calibration: reading = surface tilt + offset; turned 180° = −tilt + offset
-  function calibrate() {
-    if (!own) return;
-    if (calStep === 0) {
-      calFirst = { b: own.b, g: own.g };
-      calStep = 1;
-      Ponas.tone(660, { dur: 0.12 });
-    } else {
-      zero = { b: (calFirst.b + own.b) / 2, g: (calFirst.g + own.g) / 2, a: own.a };
-      calStep = 0; calFirst = null;
-      P.save('cal', zero);
-      orient = (orient + 2) % 4; P.save('orient', orient);   // the phone now lies turned 180°
-      Ponas.tone(660, { dur: 0.12 }); Ponas.tone(990, { delay: 0.1, dur: 0.15 });
-    }
-    wantSend = true; lastP2P = null; dirty = true;
+  // ---------- calibration: 3–5 points, phone turned by any angle on the same spot ----------
+  function sample() {                      // mean of the last second of raw readings
+    var now = performance.now(), pts = raw.filter(function (r) { return now - r.t <= 1000; });
+    if (pts.length < 8) return null;
+    var mb = 0, mg = 0, a0 = pts[0].a, ma = 0;
+    pts.forEach(function (r) { mb += r.b; mg += r.g; ma += wrap180(r.a - a0); });
+    mb /= pts.length; mg /= pts.length; ma = norm360(a0 + ma / pts.length);
+    var sd = 0;
+    pts.forEach(function (r) { sd = Math.max(sd, Math.abs(r.b - mb), Math.abs(r.g - mg)); });
+    return { b: mb, g: mg, a: ma, sd: sd };
   }
+  function setCalMsg(t, err) { calMsg = t; calErr = !!err; calMsgT = Date.now(); dirty = true; lastP2P = null; }
+  function turnedSinceLast() { return calPts.length && own ? Math.abs(wrap180(own.a - calPts[calPts.length - 1].a)) : 0; }
+  function calStart() {
+    if (!own) { setCalMsg('Nėra jutiklio duomenų', true); return; }
+    calOn = true; calPts = [];
+    setCalMsg('');
+    calFix();
+  }
+  function calFix() {
+    if (!calOn) return calStart();
+    var smp = sample();
+    if (!smp) { setCalMsg('Nėra jutiklio duomenų', true); Ponas.tone(260, { dur: 0.2 }); return; }
+    if (own && own.noAlpha) { calOn = false; calPts = []; setCalMsg('KLAIDA: šis įrenginys nepraneša, kiek pasuktas (alpha), todėl kalibruoti negalima.', true); return; }
+    if (smp.sd > CAL_STILL) { setCalMsg('Telefonas juda (±' + smp.sd.toFixed(2) + '°). Palauk sekundę ir spausk dar kartą.', true); Ponas.tone(260, { dur: 0.2 }); return; }
+    if (calPts.length) {
+      var tr = Math.abs(wrap180(smp.a - calPts[calPts.length - 1].a));
+      if (tr < CAL_TURN) { setCalMsg('Pasukta tik ' + tr.toFixed(0) + '°. Pasuk bent ' + CAL_TURN + '° nuo paskutinio taško.', true); Ponas.tone(260, { dur: 0.2 }); return; }
+    }
+    calPts.push(smp);
+    setCalMsg('');
+    Ponas.tone(660 + calPts.length * 60, { dur: 0.1 });
+    if (calPts.length >= CAL_MAX) calFinish();
+  }
+  function calCancel() { calOn = false; calPts = []; setCalMsg('Kalibravimas atšauktas'); Ponas.tone(400, { dur: 0.12 }); }
+
+  // least squares for [Gx, Gy, c1, c2]; dir = +1 / −1 (sign of alpha vs physical rotation)
+  function calSolve(pts, dir) {
+    var A = [], y = [], i, j, k;
+    var a0 = pts[0].a;
+    pts.forEach(function (p) {
+      var ps = dir * wrap180(p.a - a0) * Math.PI / 180, c = Math.cos(ps), sn = Math.sin(ps);
+      A.push([c, sn, 1, 0]); y.push(-p.g);
+      A.push([-sn, c, 0, 1]); y.push(p.b);
+    });
+    var N = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], r = [0, 0, 0, 0];
+    for (i = 0; i < A.length; i++) for (j = 0; j < 4; j++) { r[j] += A[i][j] * y[i]; for (k = 0; k < 4; k++) N[j][k] += A[i][j] * A[i][k]; }
+    for (j = 0; j < 4; j++) {               // Gauss–Jordan with partial pivoting
+      var piv = j;
+      for (i = j + 1; i < 4; i++) if (Math.abs(N[i][j]) > Math.abs(N[piv][j])) piv = i;
+      if (Math.abs(N[piv][j]) < 1e-9) return null;
+      var t = N[j]; N[j] = N[piv]; N[piv] = t; t = r[j]; r[j] = r[piv]; r[piv] = t;
+      for (i = 0; i < 4; i++) if (i !== j) {
+        var f = N[i][j] / N[j][j];
+        for (k = j; k < 4; k++) N[i][k] -= f * N[j][k];
+        r[i] -= f * r[j];
+      }
+    }
+    var x = r.map(function (v, q) { return v / N[q][q]; });
+    var ss = 0, worst = 0;
+    for (i = 0; i < A.length; i++) {
+      var e = A[i][0] * x[0] + A[i][1] * x[1] + A[i][2] * x[2] + A[i][3] * x[3] - y[i];
+      ss += e * e; worst = Math.max(worst, Math.abs(e));
+    }
+    return { ob: x[3], og: -x[2], tilt: Math.sqrt(x[0] * x[0] + x[1] * x[1]), rms: Math.sqrt(ss / A.length), worst: worst, dir: dir };
+  }
+  function calFinish() {
+    if (!calOn) return;
+    if (calPts.length < CAL_MIN) { setCalMsg('Reikia bent ' + CAL_MIN + ' taškų (dabar ' + calPts.length + ').', true); Ponas.tone(260, { dur: 0.2 }); return; }
+    // how well the rotations cover the circle: 0 = evenly spread, 1 = all the same way
+    var sx = 0, sy = 0;
+    calPts.forEach(function (p) { sx += Math.cos(p.a * Math.PI / 180); sy += Math.sin(p.a * Math.PI / 180); });
+    var spread = Math.sqrt(sx * sx + sy * sy) / calPts.length;
+    calOn = false;
+    if (spread > 0.6) {
+      calPts = [];
+      setCalMsg('KLAIDA: per mažai pasukta – taškai turi apeiti didžiąją rato dalį (pvz., kas ~90°). Senas kalibravimas paliktas.', true);
+      Ponas.tone(220, { dur: 0.35 }); return;
+    }
+    var f1 = calSolve(calPts, 1), f2 = calSolve(calPts, -1);
+    var fit = !f1 ? f2 : !f2 ? f1 : (f1.rms <= f2.rms ? f1 : f2);
+    var n = calPts.length;
+    calPts = [];
+    if (!fit) { setCalMsg('KLAIDA: nepavyko apskaičiuoti. Senas kalibravimas paliktas.', true); Ponas.tone(220, { dur: 0.35 }); return; }
+    if (fit.rms > CAL_RMS || fit.worst > CAL_WORST) {
+      setCalMsg('KLAIDA: taškai nesueina (vidutinis nuokrypis ' + fit.rms.toFixed(2) + '°, didžiausias ' + fit.worst.toFixed(2) +
+        '°). Paviršius nelygus arba telefonas pasislinko. Senas kalibravimas paliktas.', true);
+      Ponas.tone(220, { dur: 0.35 }); return;
+    }
+    zero = { b: fit.ob, g: fit.og, a: own ? own.a : 0 };
+    P.save('cal', zero);
+    setCalMsg('Kalibruota iš ' + n + ' taškų: telefono paklaida X ' + fmtDeg(fit.ob) + ', Y ' + fmtDeg(fit.og) +
+      ', neatitikimas ' + fit.rms.toFixed(2) + '°. Dabar padėk telefoną matavimui ir nustatyk ⟳ Telefonas.');
+    Ponas.tone(660, { dur: 0.12 }); Ponas.tone(990, { delay: 0.1, dur: 0.15 });
+  }
+
   function btn(id, fn) {
     $(id).addEventListener('pointerdown', function (e) {
       e.preventDefault();
@@ -674,23 +783,27 @@
       fn();
     });
   }
-  btn('bZero', function () {
-    if (mode === 'follow') { if (followerCmd('cal')) Ponas.tone(660, { dur: 0.1 }); else Ponas.tone(260, { dur: 0.2 }); }
-    else calibrate();
-  });
+  function remoteOr(cmd, fn) {
+    if (mode === 'follow') { if (followerCmd(cmd)) Ponas.tone(660, { dur: 0.08 }); else Ponas.tone(260, { dur: 0.2 }); }
+    else fn();
+  }
+  function calibrating() { return mode === 'follow' ? !!(remote && remote.calN >= 0) : calOn; }
+  btn('bZero', function () { remoteOr('calfix', calFix); });
   btn('bClear', function () {
+    if (calibrating()) { remoteOr('calend', calFinish); return; }
     refMode = refMode === 'top' ? 'wheels' : 'top';
     P.save('ref', refMode); dirty = true;
     Ponas.tone(600, { dur: 0.1 });
   });
   btn('bMode', function () {
+    if (calibrating()) { remoteOr('calcancel', calCancel); return; }
     mode = MODES[(MODES.indexOf(mode) + 1) % MODES.length];
     P.save('mode', mode);
     applyMode();
     Ponas.tone(740, { dur: 0.1 });
   });
   btn('bSwap', function () {
-    if (mode === 'follow') return;
+    if (mode === 'follow' || calOn) return;
     orient = (orient + 1) % 4; P.save('orient', orient); wantSend = true; dirty = true;
     Ponas.tone(600, { dur: 0.1 });
   });
@@ -712,10 +825,8 @@
 
   function applyMode() {
     $('modeLbl').textContent = mode === 'local' ? 'Vietinis' : (mode === 'master' ? 'Master' : 'Sekėjas') + ' · kambarys ' + room;
-    $('bModeS').textContent = MODE_LT[mode];
     $('room').classList.toggle('show', mode !== 'local');
-    $('bSwap').classList.toggle('off', mode === 'follow');
-    calStep = 0; calFirst = null;
+    calOn = false; calPts = [];
     lastSent = null; nextSendAt = 0; lastAskT = 0;
     openChannel();
     later(checkSensor, 1500);
