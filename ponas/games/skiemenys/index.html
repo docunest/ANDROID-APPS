@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Skiemenys</title>
+<style>
+  body { background: linear-gradient(#E6F4CF, #F7FBEA); font-family: Georgia, 'Times New Roman', serif; color: #4E342E;
+    --nav: min(25vmin, 96px); }
+
+  #game { position: fixed; top: 72px; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; }
+
+  #stage { flex: 1 1 auto; min-height: 0; display: grid; align-items: center; justify-items: center;
+    grid-template-columns: auto 1fr auto; grid-template-areas: "prev card next"; gap: 2vmin; padding: 0 2vmin 10px; }
+  @media (orientation: portrait) {
+    #stage { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr auto;
+      grid-template-areas: "card card" "prev next"; padding: 0 4vmin 1vmin; }
+  }
+  #prev { grid-area: prev; } #next { grid-area: next; }
+  .nav { width: var(--nav); height: var(--nav); border-radius: 50%; border: 0; padding: 0;
+    display: flex; align-items: center; justify-content: center; box-shadow: 0 6px 0 #00000022;
+    transition: transform .12s; }
+  .nav:active { transform: scale(.9); }
+  .nav svg { width: 56%; height: 56%; }
+  #prev { background: #FFB74D; } #next { background: #66BB6A; }
+
+  #card { grid-area: card; width: 100%; max-width: 440px; height: 100%; max-height: 210px;
+    background: #fff; border-radius: 34px; box-shadow: 0 8px 0 #00000018;
+    display: flex; align-items: center; justify-content: center; gap: 4vmin; }
+  #card span { font-weight: 800; line-height: 1.2; font-size: min(28vmin, 120px); white-space: nowrap; }
+  #up { color: #FF7043; } #lo { color: #6D4C41; }
+  #card.pop { animation: pop .35s ease-out; }
+
+  /* position strips (display only): the 12 vowels, and the 20 consonants of the current vowel */
+  #strips { flex: 0 0 auto; padding: 0 8px 8px; pointer-events: none; }
+  #vows { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; margin-bottom: 5px; }
+  #cons { display: grid; grid-template-columns: repeat(20, 1fr); gap: 3px; }
+  @media (orientation: portrait) { #cons { grid-template-columns: repeat(10, 1fr); gap: 4px; } #strips { padding-bottom: 12px; } }
+  .cell { text-align: center; border-radius: 7px; background: #ffffffaa; font-weight: 700; font-size: 13px;
+    padding: 4px 0; color: #8D6E63; transition: transform .2s, background-color .2s; }
+  @media (orientation: portrait) { .cell { font-size: 17px; padding: 5px 0; } }
+  .vow { background: #FFE0B2; color: #E65100; font-size: 15px; }
+  .cell.done { background: #C8E6C9; color: #2E7D32; }
+  .cell.cur { background: #FF7043; color: #fff; transform: scale(1.12); }
+
+  @keyframes pop { 0% { transform: scale(.85); opacity: .5; } 60% { transform: scale(1.04); opacity: 1; } 100% { transform: scale(1); } }
+</style>
+</head>
+<body>
+<div id="game">
+  <div id="stage">
+    <button class="nav" id="prev" aria-label="back">
+      <svg viewBox="0 0 24 24"><path d="M15 4L7 12l8 8" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div id="card"><span id="up">BA</span><span id="lo">ba</span></div>
+    <button class="nav" id="next" aria-label="next">
+      <svg viewBox="0 0 24 24"><path d="M9 4l8 8-8 8" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
+  <div id="strips"><div id="vows"></div><div id="cons"></div></div>
+</div>
+<!-- ponas.js is added by tools/build-site.mjs: pause/close buttons, ▶ start overlay, sound, storage. -->
+<script src="ponas.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
