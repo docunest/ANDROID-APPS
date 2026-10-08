@@ -15,10 +15,11 @@
  * Heights of 7 points (4 corner legs, 2 wheels, hitch) come from the plane h = e·SE + n·SN;
  * Reference ("Atskaita"): 'wheels' (default) — the higher wheel stays put, the lower wheel is raised,
  * the hitch goes up or down (jockey wheel), corners move by what the plane says; 'top' — every point
- * is raised to the highest one. Calibration: 3–5 readings on the same spot, the phone turned by any
- * angle between them (the gyro measures how much). Least squares fit of
- *   X_i = −sin ψ_i·Gx + cos ψ_i·Gy + Ob,   −Y_i = cos ψ_i·Gx + sin ψ_i·Gy − Og
- * (G = surface gradient, O = phone's own offset). Bad fit or too little rotation → error.
+ * is raised to the highest one. Calibration: 4–5 readings on the same spot, the phone turned by any
+ * angle between them. Turning the phone flat rotates the surface tilt seen by the phone, so the
+ * readings (−Y, X) lie on a CIRCLE: centre = the phone's own offset, radius = surface tilt.
+ * We fit that circle (no need to know the turn angles: alpha is unreliable near steel/magnets).
+ * Points off the circle, or too little of the circle covered → error, old calibration kept.
  *
  * Remote: modes local / master / follower. Angles, calibration and commands go ONLY over a direct
  * WebRTC data channel. ntfy.sh (Ponas.net) is used just for the handshake: one offer from the
@@ -50,7 +51,8 @@
   var room = String(P.load('room', '1'));
   var zero = P.load('cal', null);            // phone offset {b, g, a} from calibration, or null
   var calOn = false, calPts = [], calMsg = '', calMsgT = 0, calErr = false;
-  var CAL_MAX = 5, CAL_MIN = 3, CAL_RMS = 0.07, CAL_WORST = 0.15, CAL_STILL = 0.06, CAL_TURN = 20;
+  var CAL_MAX = 5, CAL_MIN = 4, CAL_RMS = 0.05, CAL_WORST = 0.10, CAL_STILL = 0.06, CAL_TURN = 15;
+  var CAL_LEVEL = 0.10, CAL_COVER = 150;     // degrees
   var raw = [];                              // last ~1.2 s of raw readings {t, b, g, a}
   var refMode = P.load('ref', 'wheels') === 'top' ? 'top' : 'wheels';
   var VIEWS = ['top', 'back', 'side'], VIEW_LT = { top: 'iš viršaus', back: 'iš galo', side: 'iš šono (kairės)' };
@@ -716,63 +718,69 @@
   }
   function calCancel() { calOn = false; calPts = []; setCalMsg('Kalibravimas atšauktas'); Ponas.tone(400, { dur: 0.12 }); }
 
-  // least squares for [Gx, Gy, c1, c2]; dir = +1 / −1 (sign of alpha vs physical rotation)
-  function calSolve(pts, dir) {
-    var A = [], y = [], i, j, k;
-    var a0 = pts[0].a;
-    pts.forEach(function (p) {
-      var ps = dir * wrap180(p.a - a0) * Math.PI / 180, c = Math.cos(ps), sn = Math.sin(ps);
-      A.push([c, sn, 1, 0]); y.push(-p.g);
-      A.push([-sn, c, 0, 1]); y.push(p.b);
+  // circle through the points (Kåsa least squares): x²+y² + D·x + E·y + F = 0
+  function circleFit(P2) {
+    var n = P2.length, S = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], r = [0, 0, 0], i, j, k;
+    P2.forEach(function (p) {
+      var row = [p[0], p[1], 1], z = -(p[0] * p[0] + p[1] * p[1]);
+      for (j = 0; j < 3; j++) { r[j] += row[j] * z; for (k = 0; k < 3; k++) S[j][k] += row[j] * row[k]; }
     });
-    var N = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], r = [0, 0, 0, 0];
-    for (i = 0; i < A.length; i++) for (j = 0; j < 4; j++) { r[j] += A[i][j] * y[i]; for (k = 0; k < 4; k++) N[j][k] += A[i][j] * A[i][k]; }
-    for (j = 0; j < 4; j++) {               // Gauss–Jordan with partial pivoting
+    for (j = 0; j < 3; j++) {
       var piv = j;
-      for (i = j + 1; i < 4; i++) if (Math.abs(N[i][j]) > Math.abs(N[piv][j])) piv = i;
-      if (Math.abs(N[piv][j]) < 1e-9) return null;
-      var t = N[j]; N[j] = N[piv]; N[piv] = t; t = r[j]; r[j] = r[piv]; r[piv] = t;
-      for (i = 0; i < 4; i++) if (i !== j) {
-        var f = N[i][j] / N[j][j];
-        for (k = j; k < 4; k++) N[i][k] -= f * N[j][k];
-        r[i] -= f * r[j];
-      }
+      for (i = j + 1; i < 3; i++) if (Math.abs(S[i][j]) > Math.abs(S[piv][j])) piv = i;
+      if (Math.abs(S[piv][j]) < 1e-12) return null;
+      var t = S[j]; S[j] = S[piv]; S[piv] = t; t = r[j]; r[j] = r[piv]; r[piv] = t;
+      for (i = 0; i < 3; i++) if (i !== j) { var f = S[i][j] / S[j][j]; for (k = j; k < 3; k++) S[i][k] -= f * S[j][k]; r[i] -= f * r[j]; }
     }
-    var x = r.map(function (v, q) { return v / N[q][q]; });
-    var ss = 0, worst = 0;
-    for (i = 0; i < A.length; i++) {
-      var e = A[i][0] * x[0] + A[i][1] * x[1] + A[i][2] * x[2] + A[i][3] * x[3] - y[i];
+    var D = r[0] / S[0][0], E = r[1] / S[1][1], F = r[2] / S[2][2];
+    var cx = -D / 2, cy = -E / 2, rr = cx * cx + cy * cy - F;
+    if (!(rr > 0)) return null;
+    var R = Math.sqrt(rr), ss = 0, worst = 0, ang = [];
+    P2.forEach(function (p) {
+      var e = Math.hypot(p[0] - cx, p[1] - cy) - R;
       ss += e * e; worst = Math.max(worst, Math.abs(e));
-    }
-    return { ob: x[3], og: -x[2], tilt: Math.sqrt(x[0] * x[0] + x[1] * x[1]), rms: Math.sqrt(ss / A.length), worst: worst, dir: dir };
+      ang.push(Math.atan2(p[1] - cy, p[0] - cx) * 180 / Math.PI);
+    });
+    ang.sort(function (x, y) { return x - y; });
+    var gap = 360 - (ang[n - 1] - ang[0]);
+    for (i = 1; i < n; i++) gap = Math.max(gap, ang[i] - ang[i - 1]);
+    return { cx: cx, cy: cy, R: R, rms: Math.sqrt(ss / n), worst: worst, cover: 360 - gap };
   }
+  function calFail(t) { calPts = []; setCalMsg('KLAIDA: ' + t + ' Senas kalibravimas paliktas.', true); Ponas.tone(220, { dur: 0.35 }); }
   function calFinish() {
     if (!calOn) return;
     if (calPts.length < CAL_MIN) { setCalMsg('Reikia bent ' + CAL_MIN + ' taškų (dabar ' + calPts.length + ').', true); Ponas.tone(260, { dur: 0.2 }); return; }
-    // how well the rotations cover the circle: 0 = evenly spread, 1 = all the same way
-    var sx = 0, sy = 0;
-    calPts.forEach(function (p) { sx += Math.cos(p.a * Math.PI / 180); sy += Math.sin(p.a * Math.PI / 180); });
-    var spread = Math.sqrt(sx * sx + sy * sy) / calPts.length;
     calOn = false;
-    if (spread > 0.6) {
-      calPts = [];
-      setCalMsg('KLAIDA: per mažai pasukta – taškai turi apeiti didžiąją rato dalį (pvz., kas ~90°). Senas kalibravimas paliktas.', true);
-      Ponas.tone(220, { dur: 0.35 }); return;
-    }
-    var f1 = calSolve(calPts, 1), f2 = calSolve(calPts, -1);
-    var fit = !f1 ? f2 : !f2 ? f1 : (f1.rms <= f2.rms ? f1 : f2);
     var n = calPts.length;
-    calPts = [];
-    if (!fit) { setCalMsg('KLAIDA: nepavyko apskaičiuoti. Senas kalibravimas paliktas.', true); Ponas.tone(220, { dur: 0.35 }); return; }
-    if (fit.rms > CAL_RMS || fit.worst > CAL_WORST) {
-      setCalMsg('KLAIDA: taškai nesueina (vidutinis nuokrypis ' + fit.rms.toFixed(2) + '°, didžiausias ' + fit.worst.toFixed(2) +
-        '°). Paviršius nelygus arba telefonas pasislinko. Senas kalibravimas paliktas.', true);
-      Ponas.tone(220, { dur: 0.35 }); return;
+    var P2 = calPts.map(function (p) { return [-p.g, p.b]; });   // (−Y, X)
+    var mx = 0, my = 0, dmax = 0, i, j;
+    P2.forEach(function (p) { mx += p[0] / n; my += p[1] / n; });
+    for (i = 0; i < n; i++) for (j = i + 1; j < n; j++) dmax = Math.max(dmax, Math.hypot(P2[i][0] - P2[j][0], P2[i][1] - P2[j][1]));
+    var ob, og, info;
+    if (dmax < CAL_LEVEL) {
+      // the readings barely move: the surface itself is level, so the offset is just their mean.
+      // Needs real turning between the points, otherwise a tilted surface would look level.
+      var sx = 0, sy = 0;
+      calPts.forEach(function (p) { sx += Math.cos(p.a * Math.PI / 180); sy += Math.sin(p.a * Math.PI / 180); });
+      if (Math.hypot(sx, sy) / n > 0.6) return calFail('per mažai pasukta – suk telefoną aplink visą ratą (pvz., kas ~90°).');
+      ob = my; og = -mx;
+      info = 'paviršius beveik lygus, taškų sklaida ' + dmax.toFixed(2) + '°';
+    } else {
+      var c = circleFit(P2);
+      if (!c) return calFail('nepavyko apskaičiuoti.');
+      if (c.cover < CAL_COVER) return calFail('per mažai pasukta – taškai apima tik ' + Math.round(c.cover) + '° rato, reikia ≥' + CAL_COVER + '°. Suk telefoną aplink visą ratą.');
+      if (c.rms > CAL_RMS || c.worst > CAL_WORST) {
+        return calFail('taškai nesueina (vidutinis nuokrypis ' + c.rms.toFixed(2) + '°, didžiausias ' + c.worst.toFixed(2) +
+          '°). Paviršius nelygus arba telefonas pasislinko.');
+      }
+      ob = c.cy; og = -c.cx;
+      info = 'paviršiaus pokrypis ' + c.R.toFixed(2) + '°, neatitikimas ' + c.rms.toFixed(2) + '°';
     }
-    zero = { b: fit.ob, g: fit.og, a: own ? own.a : 0 };
+    calPts = [];
+    zero = { b: ob, g: og, a: own ? own.a : 0 };
     P.save('cal', zero);
-    setCalMsg('Kalibruota iš ' + n + ' taškų: telefono paklaida X ' + fmtDeg(fit.ob) + ', Y ' + fmtDeg(fit.og) +
-      ', neatitikimas ' + fit.rms.toFixed(2) + '°. Dabar padėk telefoną matavimui ir nustatyk ⟳ Telefonas.');
+    setCalMsg('Kalibruota iš ' + n + ' taškų: telefono paklaida X ' + fmtDeg(ob) + ', Y ' + fmtDeg(og) + ' (' + info +
+      '). Dabar padėk telefoną matavimui ir nustatyk ⟳ Telefonas.');
     Ponas.tone(660, { dur: 0.12 }); Ponas.tone(990, { delay: 0.1, dur: 0.15 });
   }
 
