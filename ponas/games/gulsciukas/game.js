@@ -274,17 +274,24 @@
   function renderStatus() {
     var s = '';
     if (mode === 'follow') {
-      if (!remote) s = online ? 'Laukiama master įrenginio…' : 'Jungiamasi…';
-      else s = 'Master duomenys prieš ' + Math.max(0, Math.round((Date.now() - remoteT) / 1000)) + ' s';
+      if (fOpen) s = 'P2P tiesiogiai · ' + rxHz + ' Hz · vėlinimas ~' + Math.max(1, Math.round(rttMs / 2)) + ' ms';
+      else {
+        if (!remote) s = online ? 'Laukiama master įrenginio…' : 'Jungiamasi…';
+        else s = 'ntfy · master duomenys prieš ' + Math.max(0, Math.round((Date.now() - remoteT) / 1000)) + ' s';
+        if (!RTC_OK) s += ' · P2P nepalaikomas';
+        else if (fState) s += ' · P2P: ' + fState;
+      }
     } else {
       s = own ? 'Jutiklis ' + hz + ' Hz' + (own.za != null ? ' · Z kompasas' : ' · Z giroskopas') : 'Nėra jutiklio duomenų';
       if (mode === 'master') {
+        var np = openPeers();
+        if (np) s += ' · P2P sekėjų: ' + np + ' (iki 20 Hz)';
         var left = Math.max(0, Math.ceil((nextSendAt - Date.now()) / 1000));
-        s += ' · siunčia kas ' + (sendInterval() / 1000) + ' s' + (left ? ' (' + left + ')' : '') + ' · šiandien ' + sentToday() + '/' + DAY_LIMIT;
+        if (!np || Date.now() - lastQT < 120000) s += ' · ntfy kas ' + (sendInterval() / 1000) + ' s' + (left ? ' (' + left + ')' : '') + ' · šiandien ' + sentToday() + '/' + DAY_LIMIT;
       }
     }
     $('stat').textContent = s;
-    $('dot').className = mode === 'local' ? '' : 'show' + (online ? ' on' : '');
+    $('dot').className = mode === 'local' ? '' : 'show' + (online || fOpen || openPeers() ? ' on' : '');
   }
 
   function loop(t) {
@@ -302,6 +309,7 @@
   }
   function openChannel() {
     if (chan) { chan.close(); chan = null; }
+    rtcReset();
     online = false; remote = null;
     if (mode === 'local') { dirty = true; return; }
     chan = P.net.channel('r' + room);
@@ -312,9 +320,8 @@
     });
     chan.on(onMsg);
   }
-  function onMsg(d) {
-    if (!d || typeof d !== 'object') return;
-    if (mode === 'follow' && d.k === 's' && typeof d.b === 'number' && typeof d.g === 'number') {
+  function applyRemote(d) {
+    if (typeof d.b !== 'number' || typeof d.g !== 'number') return false;
       remote = {
         b: d.b, g: d.g, a: typeof d.a === 'number' ? d.a : 0,
         za: typeof d.za === 'number' ? d.za : null,
@@ -323,9 +330,18 @@
         dims: Array.isArray(d.d) && d.d.length === 2 && d.d.every(function (n) { return n === L_LONG || n === L_SHORT; }) ? d.d : null
       };
       remoteT = Date.now(); dirty = true;
-      Ponas.tone(880, { dur: 0.05, vol: 0.05 });
+      return true;
+  }
+  function onMsg(d, msg) {
+    if (!d || typeof d !== 'object') return;
+    var from = msg && typeof msg.from === 'string' ? msg.from : '';
+    if (mode === 'follow' && d.k === 's') {
+      if (applyRemote(d) && !fOpen) Ponas.tone(880, { dur: 0.05, vol: 0.05 });
+    } else if (mode === 'follow' && d.k === 'a' && chan && d.to === chan.me) {
+      onAnswer(d);
     } else if (mode === 'master') {
-      if (d.k === 'q') wantSend = true;
+      if (d.k === 'q') { wantSend = true; lastQT = Date.now(); }
+      else if (d.k === 'o' && from) onOffer(d, from);
       else if (d.k === 'c' && d.c === 'zero') { setZero(); }
       else if (d.k === 'c' && d.c === 'clear') { clearZero(); }
     }
@@ -341,17 +357,18 @@
       z: zero ? { b: r2(zero.b), g: r2(zero.g), a: r2(zero.a) } : null, sw: swap ? 1 : 0, d: plateDevDims(swap)
     };
   }
-  function changed(a, b) {
+  function changed(a, b, th) {
     if (!b) return true;
-    if (Math.abs(a.b - b.b) >= MIN_CHANGE || Math.abs(a.g - b.g) >= MIN_CHANGE) return true;
-    if (Math.abs(wrap180(a.a - b.a)) >= 0.2) return true;
+    th = th || MIN_CHANGE;
+    if (Math.abs(a.b - b.b) >= th || Math.abs(a.g - b.g) >= th) return true;
+    if (Math.abs(wrap180(a.a - b.a)) >= th * 10) return true;
     if (JSON.stringify(a.z) !== JSON.stringify(b.z) || a.sw !== b.sw || String(a.d) !== String(b.d)) return true;
     return false;
   }
   function tick() {
     if (P.paused) return;
     var now = Date.now();
-    if (mode === 'master' && chan && own && now >= nextSendAt) {
+    if (mode === 'master' && chan && own && now >= nextSendAt && (openPeers() === 0 || now - lastQT < 120000)) {
       var cur = snap();
       if (wantSend || changed(cur, lastSent)) {
         wantSend = false; lastSent = cur;
@@ -362,8 +379,132 @@
         });
       }
     }
-    if (mode === 'follow' && online && (!remote || now - remoteT > 60000)) ask();
+    if (mode === 'follow' && online && !fOpen && (!remote || now - remoteT > 60000)) ask();
+    if (mode === 'follow' && online && !fOpen && now >= nextRtcAt) rtcStart();
+    if (mode === 'follow' && fOpen && now - lastPingT > 2000) ping();
+    if (now - rxT0 >= 2000) { rxHz = Math.round(rxCount * 1000 / (now - rxT0 || 1)); rxCount = 0; rxT0 = now; }
     dirty = true;   // refresh "prieš N s" / countdown
+  }
+
+  // ---------- direct link: WebRTC data channel; ntfy carries only the handshake ----------
+  // No trickle ICE: each side waits for candidate gathering and sends ONE ntfy message
+  // (offer / answer), so a connection costs 2 messages of the 250/day budget.
+  // ICE_SERVERS is empty: works on the same Wi-Fi or phone hotspot. Across different networks a
+  // STUN server would be needed — that is a new network host (ask before adding).
+  var ICE_SERVERS = [];
+  var RTC_OK = typeof window.RTCPeerConnection === 'function';
+  var MAX_PEERS = 4;
+  var peers = {};                          // master: follower id -> {pc, dc, open}
+  var fpc = null, fdc = null, fOpen = false, fState = '', rtcTries = 0, nextRtcAt = 0;
+  var rttMs = 0, lastPingT = 0, rxCount = 0, rxHz = 0, rxT0 = 0;
+  var lastP2P = null, lastP2PT = 0, lastQT = 0;
+
+  function newPc() { return new RTCPeerConnection({ iceServers: ICE_SERVERS }); }
+  function gathered(pc) {
+    return new Promise(function (res) {
+      if (pc.iceGatheringState === 'complete') return res();
+      var t = setTimeout(res, 3000);
+      pc.addEventListener('icegatheringstatechange', function () {
+        if (pc.iceGatheringState === 'complete') { clearTimeout(t); res(); }
+      });
+    });
+  }
+  function backoff() { return [15000, 30000, 60000][rtcTries - 1] || 300000; }
+  function rtcStop() {
+    if (fpc) { try { fpc.close(); } catch (e) { /* ignore */ } }
+    fpc = fdc = null; fOpen = false;
+  }
+  function rtcReset() {
+    rtcStop(); fState = ''; rtcTries = 0; nextRtcAt = Date.now() + 800; rttMs = 0;
+    for (var k in peers) { try { peers[k].pc.close(); } catch (e) { /* ignore */ } }
+    peers = {}; lastP2P = null;
+  }
+
+  // follower: offer a data channel to whoever is master in this room
+  function rtcStart() {
+    if (!RTC_OK || !chan) return;
+    rtcStop();
+    rtcTries++; fState = 'jungiamasi'; nextRtcAt = Date.now() + backoff(); dirty = true;
+    var pc = fpc = newPc();
+    var dc = fdc = pc.createDataChannel('lvl', { ordered: false, maxRetransmits: 0 });
+    dc.onopen = function () { if (fpc !== pc) return; fOpen = true; fState = 'p2p'; rtcTries = 0; dirty = true; ping(); };
+    dc.onclose = function () {
+      if (fpc !== pc) return;
+      fOpen = false; fState = 'nutrūko, jungiamasi iš naujo'; nextRtcAt = Date.now() + 3000; dirty = true;
+    };
+    dc.onmessage = function (e) { onP2P(e.data); };
+    pc.onconnectionstatechange = function () {
+      if (fpc === pc && pc.connectionState === 'failed') { fOpen = false; fState = 'nepavyko (kiti tinklai?)'; dirty = true; }
+    };
+    pc.createOffer()
+      .then(function (o) { return pc.setLocalDescription(o); })
+      .then(function () { return gathered(pc); })
+      .then(function () {
+        if (fpc === pc && chan) { fState = 'laukiama master'; chan.send({ k: 'o', sdp: pc.localDescription.sdp }); }
+      })
+      .catch(function () { if (fpc === pc) fState = 'klaida'; });
+  }
+  function onAnswer(d) {
+    if (!fpc || typeof d.sdp !== 'string' || fpc.signalingState !== 'have-local-offer') return;
+    fState = 'jungiamasi tiesiogiai';
+    fpc.setRemoteDescription({ type: 'answer', sdp: d.sdp }).catch(function () { fState = 'klaida'; });
+  }
+  function onP2P(raw) {
+    var d; try { d = JSON.parse(raw); } catch (e) { return; }
+    if (!d || typeof d !== 'object') return;
+    if (d.k === 's') { if (applyRemote(d)) rxCount++; }
+    else if (d.k === 'P' && typeof d.t === 'number') rttMs = performance.now() - d.t;
+  }
+  function ping() {
+    lastPingT = Date.now();
+    if (fdc && fOpen) try { fdc.send(JSON.stringify({ k: 'p', t: performance.now() })); } catch (e) { /* ignore */ }
+  }
+  function followerCmd(c) {
+    if (fOpen && fdc) { try { fdc.send(JSON.stringify({ k: 'c', c: c })); return; } catch (e) { /* fall back */ } }
+    if (chan) chan.send({ k: 'c', c: c });
+  }
+
+  // master: answer offers, then stream at up to 20 Hz to every open channel
+  function onOffer(d, from) {
+    if (!RTC_OK || typeof d.sdp !== 'string' || d.sdp.length > 3600) return;
+    if (peers[from]) { try { peers[from].pc.close(); } catch (e) { /* ignore */ } delete peers[from]; }
+    if (Object.keys(peers).length >= MAX_PEERS) return;
+    var pc = newPc(), peer = peers[from] = { pc: pc, dc: null, open: false };
+    pc.ondatachannel = function (e) {
+      var dc = peer.dc = e.channel;
+      dc.onopen = function () { peer.open = true; lastP2P = null; dirty = true; };
+      dc.onclose = function () { peer.open = false; if (peers[from] === peer) delete peers[from]; dirty = true; };
+      dc.onmessage = function (ev) {
+        var m; try { m = JSON.parse(ev.data); } catch (x) { return; }
+        if (!m) return;
+        if (m.k === 'p' && typeof m.t === 'number') { try { dc.send(JSON.stringify({ k: 'P', t: m.t })); } catch (x) { /* ignore */ } }
+        else if (m.k === 'c' && m.c === 'zero') setZero();
+        else if (m.k === 'c' && m.c === 'clear') clearZero();
+      };
+    };
+    pc.onconnectionstatechange = function () {
+      if ((pc.connectionState === 'failed' || pc.connectionState === 'closed') && peers[from] === peer) { delete peers[from]; dirty = true; }
+    };
+    pc.setRemoteDescription({ type: 'offer', sdp: d.sdp })
+      .then(function () { return pc.createAnswer(); })
+      .then(function (a) { return pc.setLocalDescription(a); })
+      .then(function () { return gathered(pc); })
+      .then(function () {
+        if (chan && peers[from] === peer) {
+          sentToday(); sentLog.n++; P.save('sent', sentLog);
+          chan.send({ k: 'a', to: from, sdp: pc.localDescription.sdp });
+        }
+      })
+      .catch(function () { if (peers[from] === peer) delete peers[from]; });
+  }
+  function openPeers() { var n = 0; for (var k in peers) if (peers[k].open) n++; return n; }
+  function p2pBroadcast(now) {
+    if (!own || !openPeers()) return;
+    var cur = snap();
+    if (!changed(cur, lastP2P, 0.005) && now - lastP2PT < 1000) return;   // heartbeat 1 Hz when still
+    lastP2P = cur; lastP2PT = now;
+    var msg = JSON.stringify(cur);
+    for (var k in peers) if (peers[k].open) { try { peers[k].dc.send(msg); } catch (e) { /* ignore */ } }
   }
 
   // ---------- buttons ----------
@@ -385,11 +526,11 @@
     });
   }
   btn('bZero', function () {
-    if (mode === 'follow') { if (chan) chan.send({ k: 'c', c: 'zero' }); Ponas.tone(660, { dur: 0.1 }); }
+    if (mode === 'follow') { followerCmd('zero'); Ponas.tone(660, { dur: 0.1 }); }
     else setZero();
   });
   btn('bClear', function () {
-    if (mode === 'follow') { if (chan) chan.send({ k: 'c', c: 'clear' }); Ponas.tone(520, { dur: 0.1 }); }
+    if (mode === 'follow') { followerCmd('clear'); Ponas.tone(520, { dur: 0.1 }); }
     else clearZero();
   });
   btn('bMode', function () {
@@ -437,7 +578,11 @@
 
   // ---------- lifecycle ----------
   function later(fn, ms) { timers.push(setTimeout(fn, ms)); }
-  function startTimers() { timers.push(setInterval(tick, 250)); startLoop(); }
+  function startTimers() {
+    timers.push(setInterval(tick, 250));
+    timers.push(setInterval(function () { if (!P.paused && mode === 'master') p2pBroadcast(Date.now()); }, 50));
+    startLoop();
+  }
   function stopTimers() {
     timers.forEach(function (t) { clearTimeout(t); clearInterval(t); });
     timers = [];
