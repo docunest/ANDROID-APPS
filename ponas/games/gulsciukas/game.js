@@ -403,6 +403,7 @@
         var left = Math.max(0, Math.ceil((nextSendAt - Date.now()) / 1000));
         if (lastQT && Date.now() - lastQT < 120000) s += ' · ntfy kas ' + (sendInterval() / 1000) + ' s' + (left ? ' (' + left + ')' : '');
         else if (!np) s += ' · laukiama sekėjų';
+        if (mState) s += ' · P2P: ' + mState;
         s += ' · ntfy šiandien ' + sentToday() + '/' + DAY_LIMIT;
       }
     }
@@ -520,6 +521,19 @@
   var rttMs = 0, lastPingT = 0, rxCount = 0, rxHz = 0, rxT0 = 0;
   var lastP2P = null, lastP2PT = 0, lastQT = 0;
 
+  // Keep the handshake message small (ntfy body must stay under ~3.8 KB): drop TCP candidates,
+  // keep at most 6 UDP candidates, drop end-of-candidates / ice-options lines.
+  function slimSdp(sdp) {
+    var n = 0;
+    return sdp.split('\r\n').filter(function (l) {
+      if (/^a=candidate:/.test(l)) {
+        if (/ tcp /i.test(l)) return false;
+        return ++n <= 6;
+      }
+      return !/^a=(end-of-candidates|ice-options)/.test(l);
+    }).join('\r\n');
+  }
+  var SDP_MAX = 3500;
   function newPc() { return new RTCPeerConnection({ iceServers: ICE_SERVERS }); }
   function gathered(pc) {
     return new Promise(function (res) {
@@ -538,7 +552,7 @@
   function rtcReset() {
     rtcStop(); fState = ''; rtcTries = 0; nextRtcAt = Date.now() + 800; rttMs = 0;
     for (var k in peers) { try { peers[k].pc.close(); } catch (e) { /* ignore */ } }
-    peers = {}; lastP2P = null;
+    peers = {}; lastP2P = null; mState = '';
   }
 
   // follower: offer a data channel to whoever is master in this room
@@ -563,7 +577,14 @@
       .then(function () {
         if (fpc === pc && chan) {
           fState = 'laukiama master';
-          chan.send({ k: 'o', sdp: pc.localDescription.sdp }).then(function (ok) { ntfyOk(ok); if (!ok && fpc === pc) fState = 'ntfy atmetė prisijungimą'; });
+          var sdp = slimSdp(pc.localDescription.sdp);
+          if (sdp.length > SDP_MAX) { fState = 'prisijungimo aprašas per didelis (' + sdp.length + ' B)'; return; }
+          chan.send({ k: 'o', sdp: sdp }).then(function (ok) {
+            ntfyOk(ok);
+            if (fpc !== pc) return;
+            fState = ok ? 'laukiama master atsakymo (išsiųsta ' + new Date().toLocaleTimeString('lt-LT') + ')' : 'ntfy atmetė prisijungimą';
+            dirty = true;
+          });
         }
       })
       .catch(function () { if (fpc === pc) fState = 'klaida'; });
@@ -589,14 +610,30 @@
   }
 
   // master: answer offers, then stream at up to 20 Hz to every open channel
+  var mState = '';                          // master: last handshake event, shown in the status line
+  function prunePeers() {                   // forget peers that never opened within 30 s
+    var now = Date.now();
+    for (var k in peers) {
+      if (!peers[k].open && now - peers[k].t > 30000) { try { peers[k].pc.close(); } catch (e) { /* ignore */ } delete peers[k]; }
+    }
+  }
   function onOffer(d, from) {
-    if (!RTC_OK || typeof d.sdp !== 'string' || d.sdp.length > 3600) return;
+    if (!RTC_OK) { mState = 'gautas prašymas, bet P2P nepalaikomas'; return; }
+    if (typeof d.sdp !== 'string' || d.sdp.length > 3800) { mState = 'gautas netinkamas prašymas'; return; }
+    mState = 'gautas prisijungimo prašymas'; dirty = true;
+    prunePeers();
     if (peers[from]) { try { peers[from].pc.close(); } catch (e) { /* ignore */ } delete peers[from]; }
-    if (Object.keys(peers).length >= MAX_PEERS) return;
-    var pc = newPc(), peer = peers[from] = { pc: pc, dc: null, open: false };
+    if (Object.keys(peers).length >= MAX_PEERS) {       // still full: drop the oldest one that isn't open
+      var old = null;
+      for (var k in peers) if (!peers[k].open && (!old || peers[k].t < peers[old].t)) old = k;
+      if (!old) { mState = 'per daug sekėjų (max ' + MAX_PEERS + ')'; return; }
+      try { peers[old].pc.close(); } catch (e) { /* ignore */ }
+      delete peers[old];
+    }
+    var pc = newPc(), peer = peers[from] = { pc: pc, dc: null, open: false, t: Date.now() };
     pc.ondatachannel = function (e) {
       var dc = peer.dc = e.channel;
-      dc.onopen = function () { peer.open = true; lastP2P = null; dirty = true; };
+      dc.onopen = function () { peer.open = true; lastP2P = null; mState = ''; dirty = true; };
       dc.onclose = function () { peer.open = false; if (peers[from] === peer) delete peers[from]; dirty = true; };
       dc.onmessage = function (ev) {
         var m; try { m = JSON.parse(ev.data); } catch (x) { return; }
@@ -606,7 +643,10 @@
       };
     };
     pc.onconnectionstatechange = function () {
-      if ((pc.connectionState === 'failed' || pc.connectionState === 'closed') && peers[from] === peer) { delete peers[from]; dirty = true; }
+      if ((pc.connectionState === 'failed' || pc.connectionState === 'closed') && peers[from] === peer) {
+        if (pc.connectionState === 'failed') mState = 'tiesioginis ryšys nepavyko (skirtingi tinklai?)';
+        delete peers[from]; dirty = true;
+      }
     };
     pc.setRemoteDescription({ type: 'offer', sdp: d.sdp })
       .then(function () { return pc.createAnswer(); })
@@ -615,10 +655,14 @@
       .then(function () {
         if (chan && peers[from] === peer) {
           sentToday(); sentLog.n++; P.save('sent', sentLog);
-          chan.send({ k: 'a', to: from, sdp: pc.localDescription.sdp }).then(ntfyOk);
+          chan.send({ k: 'a', to: from, sdp: slimSdp(pc.localDescription.sdp) }).then(function (ok) {
+            ntfyOk(ok);
+            mState = ok ? 'atsakyta, jungiamasi…' : 'ntfy atmetė atsakymą';
+            dirty = true;
+          });
         }
       })
-      .catch(function () { if (peers[from] === peer) delete peers[from]; });
+      .catch(function () { mState = 'nepavyko sukurti atsakymo'; if (peers[from] === peer) delete peers[from]; });
   }
   function openPeers() { var n = 0; for (var k in peers) if (peers[k].open) n++; return n; }
   function p2pBroadcast(now) {
