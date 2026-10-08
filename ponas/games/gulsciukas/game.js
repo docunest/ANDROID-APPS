@@ -401,9 +401,12 @@
         var np = openPeers();
         if (np) s += ' · P2P sekėjų: ' + np + ' (iki 20 Hz)';
         var left = Math.max(0, Math.ceil((nextSendAt - Date.now()) / 1000));
-        if (!np || Date.now() - lastQT < 120000) s += ' · ntfy kas ' + (sendInterval() / 1000) + ' s' + (left ? ' (' + left + ')' : '') + ' · šiandien ' + sentToday() + '/' + DAY_LIMIT;
+        if (lastQT && Date.now() - lastQT < 120000) s += ' · ntfy kas ' + (sendInterval() / 1000) + ' s' + (left ? ' (' + left + ')' : '');
+        else if (!np) s += ' · laukiama sekėjų';
+        s += ' · ntfy šiandien ' + sentToday() + '/' + DAY_LIMIT;
       }
     }
+    if (mode !== 'local') s += ntfyWarn();
     $('stat').textContent = s;
     $('dot').className = mode === 'local' ? '' : 'show' + (online || fOpen || openPeers() ? ' on' : '');
   }
@@ -417,6 +420,10 @@
   function startLoop() { if (!raf) raf = requestAnimationFrame(loop); }
 
   // ---------- remote ----------
+  // ntfy.sh refuses (429) once the daily 250 per IP is used up; show it plainly
+  var ntfyFailT = 0;
+  function ntfyOk(ok) { if (!ok) { ntfyFailT = Date.now(); dirty = true; } else ntfyFailT = 0; }
+  function ntfyWarn() { return ntfyFailT && Date.now() - ntfyFailT < 120000 ? ' · ⚠ ntfy atmeta žinutes (dienos limitas 250/IP?)' : ''; }
   function sendInterval() {
     var n = sentToday();
     return n >= DAY_LIMIT - 10 ? 60000 : n >= 200 ? 15000 : SEND_MS;
@@ -462,7 +469,7 @@
   function ask() {                         // follower: "send me the current value"
     if (!chan || Date.now() - lastAskT < 20000) return;
     lastAskT = Date.now();
-    chan.send({ k: 'q' });
+    chan.send({ k: 'q' }).then(ntfyOk);
   }
   function snap() {
     return {
@@ -481,18 +488,19 @@
   function tick() {
     if (P.paused) return;
     var now = Date.now();
-    if (mode === 'master' && chan && own && now >= nextSendAt && (openPeers() === 0 || now - lastQT < 120000)) {
+    if (mode === 'master' && chan && own && now >= nextSendAt && lastQT && now - lastQT < 120000 && sentToday() < DAY_LIMIT - 50) {
       var cur = snap();
       if (wantSend || changed(cur, lastSent)) {
         wantSend = false; lastSent = cur;
         nextSendAt = now + sendInterval();
         sentToday(); sentLog.n++; P.save('sent', sentLog);
         chan.send(cur).then(function (ok) {
+          ntfyOk(ok);
           if (!ok) { nextSendAt = Date.now() + 15000; wantSend = true; }  // 429 / offline: back off
         });
       }
     }
-    if (mode === 'follow' && online && !fOpen && (!remote || now - remoteT > 60000)) ask();
+    if (mode === 'follow' && online && !fOpen && (!remote || now - remoteT > 60000 || now - lastAskT > 90000)) ask();
     if (mode === 'follow' && online && !fOpen && now >= nextRtcAt) rtcStart();
     if (mode === 'follow' && fOpen && now - lastPingT > 2000) ping();
     if (now - rxT0 >= 2000) { rxHz = Math.round(rxCount * 1000 / (now - rxT0 || 1)); rxCount = 0; rxT0 = now; }
@@ -553,7 +561,10 @@
       .then(function (o) { return pc.setLocalDescription(o); })
       .then(function () { return gathered(pc); })
       .then(function () {
-        if (fpc === pc && chan) { fState = 'laukiama master'; chan.send({ k: 'o', sdp: pc.localDescription.sdp }); }
+        if (fpc === pc && chan) {
+          fState = 'laukiama master';
+          chan.send({ k: 'o', sdp: pc.localDescription.sdp }).then(function (ok) { ntfyOk(ok); if (!ok && fpc === pc) fState = 'ntfy atmetė prisijungimą'; });
+        }
       })
       .catch(function () { if (fpc === pc) fState = 'klaida'; });
   }
@@ -604,7 +615,7 @@
       .then(function () {
         if (chan && peers[from] === peer) {
           sentToday(); sentLog.n++; P.save('sent', sentLog);
-          chan.send({ k: 'a', to: from, sdp: pc.localDescription.sdp });
+          chan.send({ k: 'a', to: from, sdp: pc.localDescription.sdp }).then(ntfyOk);
         }
       })
       .catch(function () { if (peers[from] === peer) delete peers[from]; });
