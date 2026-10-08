@@ -1,0 +1,9 @@
+{
+  "title": "Gulsčiukas",
+  "icon": "icon.png",
+  "color": "#43A047",
+  "order": 90,
+  "version": "1",
+  "network": ["ntfy.sh"],
+  "enabled": true
+}
