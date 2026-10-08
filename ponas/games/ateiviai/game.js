@@ -33,7 +33,7 @@
   var waves = P.load('waves', 0), stars = P.load('stars', 0);
   var W = 640, H = 300, cols = 7, rows = 2, s = 40, sp = 56, vsp = 50, ss = 70, shipTop = 0;
   var aliens = [], alive = 0, total = 0, gx = 0, gy = 0, dir = 1, frame = false;
-  var shipX = 320, targetX = 320, holding = false, lastShot = 0, shots = [];
+  var shipX = 320, targetX = 320, holding = false, lastShot = 0, shots = [], pending = 0;
   var running = false, raf = 0, stepT = 0, busy = false, lastT = 0;
   var timers = [], hintTimer = 0, hints = 0, lastFire = 0;
 
@@ -112,6 +112,14 @@
     setShip();
   });
 
+  // ---- no browser zoom: fast repeated taps must never be read as double-tap / pinch zoom ----
+  ['touchstart', 'touchend', 'touchmove'].forEach(function (t) {
+    document.addEventListener(t, function (e) { if (e.cancelable) e.preventDefault(); }, { passive: false });
+  });
+  ['dblclick', 'gesturestart', 'gesturechange'].forEach(function (t) {
+    document.addEventListener(t, function (e) { e.preventDefault(); }, { passive: false });
+  });
+
   // ---- input ----
   function pointerX(e) { return e.clientX; }
   game.addEventListener('pointerdown', function (e) {
@@ -119,7 +127,7 @@
     if (P.paused || L.blocked) return;
     try { game.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     holding = true; targetX = pointerX(e);
-    lastShot = 0; armHint();
+    pending = performance.now(); lastShot = 0; armHint();
   });
   game.addEventListener('pointermove', function (e) { if (holding) targetX = pointerX(e); });
   function up() { holding = false; }
@@ -142,7 +150,8 @@
     targetX = Math.max(ss / 2, Math.min(W - ss / 2, targetX));
     shipX += (targetX - shipX) * Math.min(1, dt * 14);
     setShip();
-    if (holding && !busy && t - lastShot > 380) fire(t);
+    if (pending && !busy && (Math.abs(targetX - shipX) < ss / 3 || t - pending > 250)) { pending = 0; fire(t); }
+    else if (holding && !pending && !busy && t - lastShot > 380) fire(t);
     var speed = H * 1.4;
     for (var i = shots.length - 1; i >= 0; i--) {
       var sh = shots[i];
@@ -196,7 +205,7 @@
     armHint();
   }
   function stopRun() {
-    running = false; holding = false;
+    running = false; holding = false; pending = 0;
     cancelAnimationFrame(raf); clearTimeout(stepT); clearTimeout(hintTimer);
     timers.forEach(clearTimeout); timers = [];
     if (busy) { busy = false; drawStars(); newWave(); }
