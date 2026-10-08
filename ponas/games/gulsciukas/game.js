@@ -99,19 +99,49 @@
     $('perm').classList.add('show');
   }
   function hidePerm() { $('perm').classList.remove('show'); }
-  // A real click is needed for iOS (pointerdown on touch doesn't count as a user gesture).
-  $('permBtn').addEventListener('click', function () {
-    if (!needsPerm) return;
-    DeviceOrientationEvent.requestPermission().then(function (r) {
-      if (r === 'granted') { listen(); later(checkSensor, 1500); }
-      else showPerm('Leidimas nesuteiktas. Safari nustatymuose leiskite „Motion & Orientation“.', false);
-    }).catch(function () { showPerm('Nepavyko gauti leidimo. Bandykite dar kartą.', true); });
-  });
+  // iOS 13+: the permission prompt only opens from a real user gesture (touchend / click —
+  // pointerdown on touch doesn't count). So we ask on the very first tap (the ▶ start tap),
+  // and the "Leisti jutiklius" button asks again if that didn't work.
+  var permState = needsPerm ? 'ask' : 'none';   // ask | pending | granted | denied | none
+  function requestPerm() {
+    if (!needsPerm || permState === 'pending' || permState === 'granted') return;
+    permState = 'pending';
+    var asks = [DeviceOrientationEvent.requestPermission()];
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+      asks.push(DeviceMotionEvent.requestPermission().catch(function () { return 'granted'; }));
+    }
+    Promise.all(asks).then(function (r) {
+      if (r[0] === 'granted') { permState = 'granted'; listen(); later(checkSensor, 1500); }
+      else { permState = 'denied'; showPerm('Leidimas nesuteiktas. Uždarykite ir vėl atidarykite puslapį, arba Nustatymai → Safari → „Motion & Orientation Access“.', true); }
+    }).catch(function () { permState = 'ask'; showPerm('Reikia leidimo naudoti judesio jutiklius', true); });
+  }
+  function onGesture() { if (permState === 'ask') requestPerm(); }
+  document.addEventListener('touchend', onGesture, true);
+  document.addEventListener('click', onGesture, true);
+  $('permBtn').addEventListener('click', function () { permState = permState === 'pending' ? 'pending' : 'ask'; requestPerm(); });
+
+  // Android Chrome has no prompt: motion sensors are allowed by default, but can be blocked per site.
+  function androidBlocked(cb) {
+    try {
+      if (!navigator.permissions || !navigator.permissions.query) return cb(false);
+      navigator.permissions.query({ name: 'accelerometer' }).then(function (s) { cb(s.state === 'denied'); }, function () { cb(false); });
+    } catch (e) { cb(false); }
+  }
   function checkSensor() {
     if (own || mode === 'follow') { hidePerm(); return; }
-    if (needsPerm) showPerm('Reikia leidimo naudoti judesio jutiklius', true);
-    else if (!window.isSecureContext) showPerm('Jutikliai veikia tik per https://', false);
-    else showPerm('Šis įrenginys nesiunčia giroskopo duomenų (kompiuteris?). Galite naudoti režimą „sekėjas“.', false);
+    if (needsPerm) {
+      if (permState !== 'pending') showPerm(permState === 'denied'
+        ? 'Leidimas nesuteiktas. Uždarykite ir vėl atidarykite puslapį, arba Nustatymai → Safari → „Motion & Orientation Access“.'
+        : 'Reikia leidimo naudoti judesio jutiklius', true);
+      return;
+    }
+    if (!window.isSecureContext) { showPerm('Jutikliai veikia tik per https://', false); return; }
+    androidBlocked(function (blocked) {
+      if (own) return;
+      showPerm(blocked
+        ? 'Judesio jutikliai užblokuoti šiai svetainei. Chrome: ⋮ → Nustatymai → Svetainės nustatymai → Judesio jutikliai → Leisti, tada perkraukite puslapį.'
+        : 'Šis įrenginys nesiunčia giroskopo duomenų (kompiuteris?). Galite naudoti režimą „sekėjas“.', false);
+    });
   }
 
   // ---------- what is shown ----------
