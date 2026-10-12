@@ -1,7 +1,7 @@
 // Skiemenys — a calm lesson: every consonant + vowel syllable in order, as an uppercase + lowercase
 // pair (BA ba, CA ca, ČA ča … ŽŪ žū). All 20 consonants with the first vowel (A), then all with the
 // second vowel (Ą), and so on up to Ū: 240 syllables. The big arrows step forward / back; the strips
-// underneath show which vowel and which consonant we're on. No score, nothing to get wrong.
+// underneath show which vowel and which consonant we're on, and can be tapped to jump. No score, nothing to get wrong.
 // The place is remembered, so closing the game and coming back continues where it stopped.
 (function () {
   'use strict';
@@ -28,6 +28,23 @@
   var consCells = CONS.map(function (C) {
     var c = document.createElement('div'); c.className = 'cell'; c.textContent = C + C.toLowerCase();
     consEl.appendChild(c); return c;
+  });
+
+  // Tap a vowel to jump to that vowel (keeping the consonant), tap a consonant to jump to it
+  // (keeping the vowel): two taps reach any syllable, e.g. E then B = BE, U then M = MU.
+  vowCells.forEach(function (c, k) {
+    c.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      if (P.paused) return;
+      n = k * CONS.length + (n % CONS.length); show(true); chime();
+    });
+  });
+  consCells.forEach(function (c, k) {
+    c.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      if (P.paused) return;
+      n = Math.floor(n / CONS.length) * CONS.length + k; show(true); chime();
+    });
   });
 
   function parts() { return { v: Math.floor(n / CONS.length), c: n % CONS.length }; }

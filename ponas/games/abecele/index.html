@@ -32,13 +32,13 @@
   #up { color: #FF7043; } #lo { color: #6D4C41; }
   #card.pop { animation: pop .35s ease-out; }
 
-  /* progress strip: every pair in order, current one lit (display only) */
+  /* progress strip: every pair in order, current one lit, tap any to jump to it */
   #strip { flex: 0 0 auto; display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px;
-    padding: 0 8px 8px; pointer-events: none; }
+    padding: 0 8px 8px; }
   @media (orientation: portrait) { #strip { grid-template-columns: repeat(8, 1fr); gap: 4px; padding: 0 8px 12px; } }
   .cell { text-align: center; border-radius: 8px; background: #ffffffaa; font-weight: 700; font-size: 15px;
-    padding: 4px 0; color: #8D6E63; transition: transform .2s, background-color .2s; }
-  @media (orientation: portrait) { .cell { font-size: 19px; padding: 6px 0; } }
+    padding: 7px 0; cursor: pointer; color: #8D6E63; transition: transform .2s, background-color .2s; }
+  @media (orientation: portrait) { .cell { font-size: 19px; padding: 9px 0; } }
   .cell.done { background: #C8E6C9; color: #2E7D32; }
   .cell.cur { background: #FF7043; color: #fff; transform: scale(1.12); }
 

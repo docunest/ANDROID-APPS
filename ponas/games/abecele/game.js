@@ -1,7 +1,7 @@
 // Abėcėlė — a calm lesson: every Lithuanian letter in alphabet order, as an uppercase + lowercase
 // pair (Aa, Ąą, Bb … Žž). The big arrows step forward / back through the alphabet and the current
 // pair is shown large. The strip underneath shows all 32 pairs with the current one lit.
-// Nothing to get wrong: no score, no stars.
+// Tap any pair in the strip to jump to it. Nothing to get wrong: no score, no stars.
 (function () {
   'use strict';
   var P = window.Ponas;
@@ -22,6 +22,14 @@
     c.textContent = L + L.toLowerCase();
     stripEl.appendChild(c);
     cells.push(c);
+  });
+
+  cells.forEach(function (c, k) {   // tap any pair in the strip to jump straight to it
+    c.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      if (P.paused) return;
+      i = k; show(); chime();
+    });
   });
 
   function chime() {
