@@ -1,6 +1,12 @@
 package com.docunest.dock
 
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageInstaller
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import org.json.JSONArray
 import java.io.File
 import java.net.HttpURLConnection
@@ -10,6 +16,8 @@ import java.net.URL
  * Self-update: GitHub Actions publishes every build as a release tagged
  * "dock-v<build>" in [BuildConfig.UPDATE_REPO] with dock.apk attached. If a
  * newer one exists, download it and `pm install -r` it as root — no prompt.
+ * Without root (a phone) Android's installer is used: one tap the first
+ * time, silent afterwards on Android 12+.
  * The app restarts itself afterwards (BootReceiver: MY_PACKAGE_REPLACED).
  */
 object Updater {
@@ -51,7 +59,47 @@ object Updater {
         // pm can't always read app-private files: stage in /data/local/tmp.
         val staged = "/data/local/tmp/dock-update.apk"
         val ok = Root.run("cp '${file.absolutePath}' $staged", "chmod 644 $staged", "pm install -r -d $staged", "rm -f $staged")
-        file.delete()
-        return if (ok) "Updated to build ${rel.build}" else "Install failed (root?) — build ${rel.build} is available"
+        if (ok) {
+            file.delete()
+            return "Updated to build ${rel.build}"
+        }
+        // No root (a phone): Android's own installer. First time = one "Update"
+        // tap; after that Android 12+ lets the app update itself silently.
+        return try {
+            installWithoutRoot(context, file)
+        } finally {
+            file.delete()
+        }
+    }
+
+    private fun installWithoutRoot(context: Context, apk: File): String {
+        if (!context.packageManager.canRequestPackageInstalls()) {
+            UpdateReceiver.notify(
+                context, "Allow Dock to update itself",
+                "Tap, then switch on \"Allow from this source\" (once).",
+                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")),
+            )
+            return "Needs permission to install updates — see the notification"
+        }
+        val installer = context.packageManager.packageInstaller
+        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+            setAppPackageName(context.packageName)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+            }
+        }
+        val id = installer.createSession(params)
+        installer.openSession(id).use { session ->
+            session.openWrite("dock.apk", 0, apk.length()).use { out ->
+                apk.inputStream().use { it.copyTo(out) }
+                session.fsync(out)
+            }
+            val result = PendingIntent.getBroadcast(
+                context, id, Intent(context, UpdateReceiver::class.java),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
+            )
+            session.commit(result.intentSender)
+        }
+        return "Installing update…"
     }
 }

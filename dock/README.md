@@ -25,7 +25,7 @@ docunest/MapPal `lib/dock/`).
 3. Open **Dock** → ⚙ → **Grant all with root** (overlay + location + battery whitelist in one go), then **Show button**.
 4. ⚙ → **Server**: your MapPal address (e.g. `https://xxx.vercel.app`) → **Save + test**. The token is pre-filled.
 
-After that it **updates itself**: every push to `dock/` builds a new release, and the app installs it silently with root (`pm install -r`) on start and every 3 h (⚙ → Check now to force). Signing key `dock/dock.keystore` is committed on purpose so every build installs over the previous one.
+After that it **updates itself** — silently on the rooted head unit; on a phone without root Android shows one "Update" tap the first time (after allowing "install unknown apps" for Dock once), and on Android 12+ later updates are silent too: every push to `dock/` builds a new release, and the app installs it silently with root (`pm install -r`) on start and every 3 h (⚙ → Check now to force). Signing key `dock/dock.keystore` is committed on purpose so every build installs over the previous one.
 
 Set repo variable `MAPPAL_URL` (Settings → Secrets and variables → Actions → Variables) to bake the server address into builds.
 
