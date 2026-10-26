@@ -1,0 +1,44 @@
+name: Dock APK
+
+# Builds the car dock app and publishes it as release "dock-v<run>" with
+# dock.apk attached. The app on the (rooted) head unit polls these releases
+# and installs newer builds by itself (dock/app/.../Updater.kt).
+on:
+  push:
+    paths:
+      - "dock/**"
+      - ".github/workflows/dock.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build APK
+        working-directory: dock
+        run: ./gradlew assembleRelease --no-daemon -PbuildNumber=${{ github.run_number }} -PserverUrl="${{ vars.MAPPAL_URL }}"
+
+      - name: Publish release (the head unit installs it by itself)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp dock/app/build/outputs/apk/release/app-release.apk dock.apk
+          gh release create "dock-v${{ github.run_number }}" dock.apk \
+            --target "${{ github.sha }}" \
+            --title "Dock build ${{ github.run_number }}" \
+            --notes "Branch ${{ github.ref_name }}, commit ${{ github.sha }}. Installed automatically on the head unit within ~3 h (or Settings → Check now)."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dock-apk
+          path: dock.apk
