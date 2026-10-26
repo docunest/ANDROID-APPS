@@ -368,6 +368,21 @@ class DockService : Service() {
             })
         }
         root.addView(gap())
+        // Debug (temporary): every Waze method as a button.
+        root.addView(bigButton("🧪", Palette.CARD_HI, 16f) {
+            hideCard()
+            startActivity(
+                Intent(this, NavTestActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).apply {
+                    if (item.lat != null && item.lng != null) {
+                        putExtra(NavTestActivity.EXTRA_LAT, item.lat); putExtra(NavTestActivity.EXTRA_LNG, item.lng)
+                    }
+                    putExtra(NavTestActivity.EXTRA_TITLE, item.title)
+                    putExtra(NavTestActivity.EXTRA_ADDRESS, item.address)
+                    putExtra(NavTestActivity.EXTRA_URL, item.resolvedUrl ?: item.sourceUrl)
+                },
+            )
+        })
+        root.addView(gap())
         root.addView(bigButton("✕", Palette.CARD, 18f) {
             hideCard()
             Sync.patch(item.id, JSONObject().put("seen", true))

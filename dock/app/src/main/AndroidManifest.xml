@@ -60,6 +60,11 @@
             </intent-filter>
         </receiver>
 
+        <activity
+            android:name=".NavTestActivity"
+            android:exported="false"
+            android:label="Waze test" />
+
         <receiver
             android:name=".UpdateReceiver"
             android:exported="false" />
