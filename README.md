@@ -3,3 +3,4 @@
 | App | What |
 |---|---|
 | [`dock/`](dock/README.md) | Car head-unit floating dock: app shortcuts, press-and-slide menu, places sent from the phone (MapPal backend), self-updating via GitHub releases. |
+| [`ponas/`](ponas/README.md) | Kid-tablet home screen whose tiles are small offline HTML/JS learning games (Lithuanian). Games publish to GitHub Pages, which is also the iPhone web app: https://docunest.github.io/ANDROID-APPS/ponas/. Add or change games from your phone with the `ponas-game` skill. |

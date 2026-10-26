@@ -1,0 +1,9 @@
+{
+  "title": "Linkėjimai",
+  "icon": "icon.png",
+  "color": "#EF5350",
+  "order": 30,
+  "version": "1",
+  "network": ["ntfy.sh"],
+  "enabled": true
+}

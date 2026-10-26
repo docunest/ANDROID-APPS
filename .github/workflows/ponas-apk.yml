@@ -1,0 +1,53 @@
+name: Ponas APK
+
+# Builds the Ponas kid-tablet app and publishes it as release "ponas-v<run>" with ponas.apk
+# attached. Signed with the committed ponas/ponas.keystore, so every build installs over the
+# last one. Game changes never need this: they go through ponas-pages.yml.
+on:
+  push:
+    paths:
+      - "ponas/android/**"
+      - "ponas/ponas.keystore"
+      - ".github/workflows/ponas-apk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ponas/android
+    env:
+      PONAS_VERSION_CODE: ${{ github.run_number }}
+      PONAS_VERSION_NAME: 0.2.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build APK
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/ponas.apk"
+          cd "$GITHUB_WORKSPACE"
+          gh release create "ponas-v${{ github.run_number }}" ponas.apk \
+            --target "${{ github.sha }}" \
+            --title "Ponas build ${{ github.run_number }}" \
+            --notes "Branch ${{ github.ref_name }}, commit ${{ github.sha }}. Install with: adb install -r ponas.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ponas-apk
+          path: ponas.apk

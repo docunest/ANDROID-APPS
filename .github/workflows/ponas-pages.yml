@@ -1,0 +1,59 @@
+name: Ponas games
+
+# Validates every game and publishes https://docunest.github.io/ANDROID-APPS/ponas/ :
+# the iPhone/browser web app and manifest.json, which the tablet syncs from.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ponas/games/**"
+      - "ponas/sdk/**"
+      - "ponas/tools/**"
+      - "ponas/web/**"
+      - ".github/workflows/ponas-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # git history gives each game its "updated" date
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build site (validates every game)
+        run: |
+          node ponas/tools/build-site.mjs --out _site/ponas
+          # Repo root of the Pages site just points to Ponas (other apps may get pages later).
+          printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=ponas/"><a href="ponas/">Ponas</a>\n' > _site/index.html
+          touch _site/.nojekyll
+          find _site -type f | sort
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
