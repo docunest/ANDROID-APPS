@@ -16,7 +16,7 @@ docunest/MapPal `lib/dock/`).
 - **Places list**: newest/unseen first, then pinned, then recently used — all history kept. Tap the **name** = navigate (Waze; set Google Maps as default in ⚙ if ever wanted). Small **G** = this once in Google Maps. 🗺 = show on map. Long-press = pin / delete / open original link.
 - **Map** (OpenStreetMap, no Google services needed): tap a pin → Drive. **Long-press anywhere** → drop a pin → Drive. Faded pins were found by name search (approximate).
 - **★ Save this spot**: one tap saves the GPS position; MapPal names it (nearest campsite/beach/viewpoint from OSM, else the address). Works offline — syncs when there's signal.
-- Links sent while the car was off arrive within seconds of switching on: the app starts on boot, polls every 20 s and immediately on wake / network.
+- Links sent while the car was off arrive within seconds of switching on: the app starts on boot and keeps a long-poll open to MapPal (server answers the moment something arrives, ~1 s), re-asking at once on wake / network.
 
 ## First install (once)
 
@@ -46,5 +46,7 @@ Token: MapPal `lib/dock/auth.ts` (`DEFAULT_DOCK_TOKEN`), or the
 4. In Google Maps: open a place → Share → **Send to car**.
 
 **Android phone**: install **HTTP Shortcuts** (free) → new shortcut → Method POST, URL as above, Request body *Custom text*, Content-Type `application/json`, body `{"text": "{shared text}"}` (insert the "shared text" variable) → in shortcut settings enable **Show in share menu**. Then Google Maps → Share → HTTP Shortcuts → Send to car.
+
+Without "display over other apps" (e.g. a phone) new places arrive as a notification with a **Drive** button instead of the on-screen card. The server address is built in (`https://map-pal-mike-base.vercel.app`); change it in ⚙ if MapPal moves.
 
 **Browser fallback**: `https://<mappal>/dock` (logged in) — paste a link, see/delete history.

@@ -13,6 +13,7 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.drawable.Icon
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Build
@@ -50,6 +51,7 @@ class DockService : Service() {
     private val main = Handler(Looper.getMainLooper())
     private val storeListener: () -> Unit = { refreshBadge() }
     private var netCallback: ConnectivityManager.NetworkCallback? = null
+    private var syncing = false
 
     private val wakeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -88,26 +90,30 @@ class DockService : Service() {
             return START_NOT_STICKY
         }
         startInForeground()
-        if (!Settings.canDrawOverlays(this)) {
-            if (rootTried) return START_STICKY
-            rootTried = true
-            // Rooted head unit: grant ourselves (off the main thread — su can take a while), then retry.
-            Thread {
-                if (Root.grantAll(this)) {
-                    prefs.rootGranted = true
-                    main.post { start(this) }
-                }
-            }.start()
-            return START_STICKY
-        }
-        if (bubble == null && Settings.canDrawOverlays(this)) {
-            addBubble()
+        // Polling runs whether or not the button can be drawn — a phone without
+        // "display over other apps" still gets new places (as a notification).
+        if (!syncing) {
+            syncing = true
             Store.addListener(storeListener)
-            Sync.onNewLinks = { showCard(it) }
+            Sync.onNewLinks = { if (bubble != null) showCard(it) else notifyNew(it) }
             Sync.start(this)
             registerWakeups()
             main.postDelayed(updateLoop, 30_000L)
             main.post(locationLoop)
+        }
+        if (!Settings.canDrawOverlays(this)) {
+            if (!rootTried) {
+                rootTried = true
+                // Rooted head unit: grant ourselves (off the main thread — su can take a while), then retry.
+                Thread {
+                    if (Root.grantAll(this)) {
+                        prefs.rootGranted = true
+                        main.post { start(this) }
+                    }
+                }.start()
+            }
+        } else if (bubble == null) {
+            addBubble()
         } else if (intent?.action == ACTION_RELAYOUT) {
             relayoutBubble()
         }
@@ -378,6 +384,28 @@ class DockService : Service() {
         main.postDelayed({ Sync.patch(item.id, JSONObject().put("seen", true)) }, 15_000L)
     }
 
+    /** No overlay (e.g. a phone): new places as a heads-up notification with one-tap Drive. */
+    private fun notifyNew(fresh: List<Item>) {
+        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        nm.createNotificationChannel(NotificationChannel(PLACES_CHANNEL, "New places from phone", NotificationManager.IMPORTANCE_HIGH))
+        val open = PendingIntent.getActivity(
+            this, 3, Intent(this, DockActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE,
+        )
+        for (item in fresh.take(3)) {
+            val n = Notification.Builder(this, PLACES_CHANNEL)
+                .setSmallIcon(R.drawable.ic_dock)
+                .setContentTitle("📍 " + item.title)
+                .setContentText(listOfNotNull(item.address, if (item.approximate) "approximate" else null).joinToString(" · ").ifBlank { "New place from phone" })
+                .setContentIntent(open)
+                .setAutoCancel(true)
+            Nav.intentFor(this, item)?.let { drive ->
+                val pi = PendingIntent.getActivity(this, item.id.hashCode(), drive, PendingIntent.FLAG_IMMUTABLE)
+                n.addAction(Notification.Action.Builder(Icon.createWithResource(this, R.drawable.ic_dock), "Drive", pi).build())
+            }
+            runCatching { nm.notify(item.id.hashCode(), n.build()) }
+        }
+    }
+
     private fun hideCard() {
         card?.let { runCatching { wm.removeView(it) } }
         card = null
@@ -399,6 +427,7 @@ class DockService : Service() {
 
     companion object {
         private const val CHANNEL = "dock"
+        private const val PLACES_CHANNEL = "places"
         private const val NOTIFICATION_ID = 1
         const val ACTION_STOP = "com.docunest.dock.STOP"
         const val ACTION_RELAYOUT = "com.docunest.dock.RELAYOUT"

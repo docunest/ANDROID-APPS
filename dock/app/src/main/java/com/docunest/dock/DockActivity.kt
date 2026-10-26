@@ -57,6 +57,13 @@ class DockActivity : Activity() {
         }
         Sync.init(this)
         build()
+        val missing = buildList {
+            if (!Locator.hasPermission(this@DockActivity)) add(android.Manifest.permission.ACCESS_FINE_LOCATION)
+            if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) add(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), 7)
     }
 
     override fun onResume() {
@@ -77,8 +84,8 @@ class DockActivity : Activity() {
                 }
             }
         }
-        // First run on the head unit: make sure the button is running.
-        if (Settings.canDrawOverlays(this)) DockService.start(this)
+        // Make sure the dock service (polling + button) is running.
+        DockService.start(this)
     }
 
     override fun onPause() {

@@ -12,14 +12,21 @@ class Api(context: Context) {
 
     class HttpError(val code: Int, message: String) : IOException(message)
 
-    fun call(method: String, path: String, body: JSONObject? = null): JSONObject {
+    fun call(
+        method: String,
+        path: String,
+        body: JSONObject? = null,
+        readTimeoutMs: Int = 40_000,
+        onOpen: ((HttpURLConnection) -> Unit)? = null,
+    ): JSONObject {
         val base = prefs.serverUrl.trimEnd('/')
         if (base.isBlank()) throw IOException("Server address not set (Settings)")
         val conn = URL(base + path).openConnection() as HttpURLConnection
         try {
             conn.requestMethod = method
             conn.connectTimeout = 10_000
-            conn.readTimeout = 40_000
+            conn.readTimeout = readTimeoutMs
+            onOpen?.invoke(conn)
             conn.setRequestProperty("Authorization", "Bearer ${prefs.token}")
             conn.setRequestProperty("Accept", "application/json")
             if (body != null) {
