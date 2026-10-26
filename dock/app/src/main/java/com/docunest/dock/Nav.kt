@@ -13,6 +13,19 @@ object Nav {
         if (ok) Sync.patch(item.id, JSONObject().put("opened", true))
     }
 
+    /** First intent that would navigate there with the usual app (for a notification button). */
+    fun intentFor(context: Context, item: Item): Intent? {
+        val pkg = if (Prefs(context).defaultNav == Prefs.NAV_GMAPS) Apps.GMAPS else Apps.WAZE
+        val uri = when {
+            item.lat != null && item.lng != null && pkg == Apps.WAZE -> "https://waze.com/ul?ll=${item.lat},${item.lng}&navigate=yes"
+            item.lat != null && item.lng != null -> "google.navigation:q=${item.lat},${item.lng}"
+            pkg == Apps.WAZE -> "https://waze.com/ul?q=${Uri.encode(item.title)}&navigate=yes"
+            else -> "google.navigation:q=${Uri.encode(item.title)}"
+        }
+        val i = view(uri, pkg)
+        return if (i.resolveActivity(context.packageManager) != null) i else view(item.resolvedUrl ?: item.sourceUrl ?: return null, null)
+    }
+
     fun goTo(context: Context, lat: Double, lng: Double, app: String = Prefs(context).defaultNav) {
         start(context, app, lat, lng, null, null)
     }

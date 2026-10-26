@@ -8,18 +8,26 @@ import org.json.JSONObject
 import java.util.UUID
 
 /**
- * Keeps [Store] in step with MapPal. Polls every [POLL_MS] while the dock
- * runs, and right away when the head unit wakes or gets signal — links sent
- * while the car was off arrive within seconds of switching it on.
- * (Vercel can't hold a socket open; a short poll is the same experience.)
+ * Keeps [Store] in step with MapPal while the dock runs. Long-poll: the
+ * server holds each request until something changes (~1 s from phone to
+ * car) and sets the rhythm; asked again at once on wake / network back, so
+ * links sent while the car was off arrive as soon as it's online.
  */
 object Sync {
-    const val POLL_MS = 20_000L
     private const val FULL_SYNC_MS = 30 * 60_000L
+    /** Used only if the server doesn't say (older server) — it normally sets the rhythm. */
+    private const val FALLBACK_DELAY_MS = 20_000L
 
+    // Writes (bookmarks, seen/opened) never wait behind a long-poll.
     private val thread = HandlerThread("dock-sync").apply { start() }
     private val worker = Handler(thread.looper)
-    private var running = false
+    private val pollThread = HandlerThread("dock-poll").apply { start() }
+    private val poller = Handler(pollThread.looper)
+    @Volatile private var running = false
+    @Volatile private var liveConn: java.net.HttpURLConnection? = null
+    @Volatile private var interrupted = false
+    @Volatile private var uploading = false
+    private var failures = 0
     private lateinit var app: Context
 
     /** Called with links nobody has looked at yet (pop-up). */
@@ -31,10 +39,17 @@ object Sync {
         Store.init(app)
     }
 
+    /**
+     * Long-poll loop: the server holds each request until something changes
+     * (or ~25 s pass) and says when to ask again, so a link sent from the
+     * phone reaches the car in about a second.
+     */
     private val loop = object : Runnable {
         override fun run() {
-            pollOnce()
-            if (running) worker.postDelayed(this, POLL_MS)
+            if (Store.all().any { it.pending }) uploadSoon()
+            val delay = pollOnce()
+            poller.removeCallbacks(this)
+            if (running) poller.postDelayed(this, delay)
         }
     }
 
@@ -42,41 +57,59 @@ object Sync {
         init(context)
         if (running) return
         running = true
-        worker.post(loop)
+        poller.post(loop)
     }
 
     fun stop() {
         running = false
-        worker.removeCallbacks(loop)
+        poller.removeCallbacks(loop)
+        liveConn?.disconnect()
     }
 
-    /** Poll now (woke up, signal back, panel opened). */
+    /** Ask now (woke up, signal back, panel opened): cut a waiting long-poll short. */
     fun pollSoon() {
         if (!::app.isInitialized) return
-        worker.removeCallbacks(loop)
-        worker.post(loop.takeIf { running } ?: Runnable { pollOnce() })
+        val c = liveConn
+        if (c != null) {
+            interrupted = true
+            Thread { runCatching { c.disconnect() } }.start()
+        } else {
+            poller.removeCallbacks(loop)
+            poller.post(if (running) loop else Runnable { pollOnce() })
+        }
     }
 
-    private fun pollOnce() {
+    /** One request; returns how long to wait before the next. */
+    private fun pollOnce(): Long {
         val api = Api(app)
         try {
-            uploadPending(api)
             val full = Store.lastSince == null || System.currentTimeMillis() - Store.lastFullSync > FULL_SYNC_MS
-            val q = if (full) "" else "?since=" + java.net.URLEncoder.encode(Store.lastSince, "UTF-8")
-            val res = api.call("GET", "/api/dock/items$q")
+            val q = if (full) "" else "?wait=1&since=" + java.net.URLEncoder.encode(Store.lastSince, "UTF-8")
+            val res = api.call("GET", "/api/dock/items$q", readTimeoutMs = 75_000) { liveConn = it }
+            liveConn = null
             val arr = res.getJSONArray("items")
             val items = (0 until arr.length()).map { Item.fromJson(arr.getJSONObject(it)) }
             val wasOffline = Store.status.startsWith("Offline") || Store.status.startsWith("Not synced")
             Store.merge(items, res.getString("now"), full)
+            Store.status = "Live ✓ ${java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date())}"
             if (wasOffline) Store.changed()
-            Store.status = "Synced ${java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date())}"
             announceNew()
+            failures = 0
+            return res.optJSONObject("next")?.optLong("delayMs", 0L) ?: FALLBACK_DELAY_MS
         } catch (e: Exception) {
+            liveConn = null
+            if (interrupted) {
+                interrupted = false
+                return 0L
+            }
             val status = "Offline: ${e.message ?: e.javaClass.simpleName}"
             if (status != Store.status) {
                 Store.status = status
                 Store.changed()
             }
+            // Back off while there's no signal; network-back wakes us early anyway.
+            failures++
+            return minOf(60_000L, 5_000L * failures)
         }
     }
 
@@ -85,6 +118,20 @@ object Sync {
         if (fresh.isEmpty()) return
         announced += fresh.map { it.id }
         onNewLinks?.let { cb -> android.os.Handler(android.os.Looper.getMainLooper()).post { cb(fresh) } }
+    }
+
+    private fun uploadSoon() {
+        if (uploading) return
+        uploading = true
+        worker.post {
+            try {
+                uploadPending(Api(app))
+            } catch (_: Exception) {
+                // No signal: the next loop round retries.
+            } finally {
+                uploading = false
+            }
+        }
     }
 
     private fun uploadPending(api: Api) {
@@ -124,7 +171,7 @@ object Sync {
             pending = true,
         )
         Store.put(item)
-        pollSoon()
+        uploadSoon()
         return item
     }
 

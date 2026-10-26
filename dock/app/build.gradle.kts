@@ -4,7 +4,8 @@ plugins {
 }
 
 // Baked-in defaults (CI passes them); both can be changed in the app.
-val serverUrl: String = (project.findProperty("serverUrl") as String?)?.trim().orEmpty()
+val serverUrl: String = (project.findProperty("serverUrl") as String?)?.trim()?.takeIf { it.isNotEmpty() }
+    ?: "https://map-pal-mike-base.vercel.app"
 // Each CI build gets a higher versionCode, so the self-updater knows it's newer.
 val buildNumber: Int = (project.findProperty("buildNumber") as String?)?.toIntOrNull() ?: 1
 
