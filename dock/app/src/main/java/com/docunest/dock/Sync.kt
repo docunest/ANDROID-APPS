@@ -66,12 +66,17 @@ object Sync {
             val res = api.call("GET", "/api/dock/items$q")
             val arr = res.getJSONArray("items")
             val items = (0 until arr.length()).map { Item.fromJson(arr.getJSONObject(it)) }
+            val wasOffline = Store.status.startsWith("Offline") || Store.status.startsWith("Not synced")
             Store.merge(items, res.getString("now"), full)
+            if (wasOffline) Store.changed()
             Store.status = "Synced ${java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date())}"
             announceNew()
         } catch (e: Exception) {
-            Store.status = "Offline: ${e.message ?: e.javaClass.simpleName}"
-            Store.changed()
+            val status = "Offline: ${e.message ?: e.javaClass.simpleName}"
+            if (status != Store.status) {
+                Store.status = status
+                Store.changed()
+            }
         }
     }
 
@@ -85,8 +90,15 @@ object Sync {
     private fun uploadPending(api: Api) {
         for (item in Store.all().filter { it.pending }) {
             val body = JSONObject().put("lat", item.lat).put("lng", item.lng).put("clientId", item.id)
-            val res = api.call("POST", "/api/dock/items", body)
-            Store.put(Item.fromJson(res.getJSONObject("item")))
+            try {
+                val res = api.call("POST", "/api/dock/items", body)
+                Store.put(Item.fromJson(res.getJSONObject("item")))
+            } catch (e: Api.HttpError) {
+                // Server refuses this one for good (4xx): keep it on the car only,
+                // don't let it block every later sync. Token errors still stop the poll.
+                if (e.code == 401 || e.code >= 500) throw e
+                Store.put(item.copy(pending = false, locatedBy = "gps"))
+            }
         }
     }
 

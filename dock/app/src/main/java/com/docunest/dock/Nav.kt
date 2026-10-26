@@ -25,8 +25,13 @@ object Nav {
             else if (url != null) intents += view(url, Apps.GMAPS)
             else if (q.isNotEmpty()) intents += view("google.navigation:q=$q", Apps.GMAPS)
         } else {
-            if (lat != null && lng != null) intents += view("https://waze.com/ul?ll=$lat,$lng&navigate=yes", Apps.WAZE)
-            else if (q.isNotEmpty()) intents += view("https://waze.com/ul?q=$q&navigate=yes", Apps.WAZE)
+            if (lat != null && lng != null) {
+                intents += view("waze://?ll=$lat,$lng&navigate=yes", Apps.WAZE)
+                intents += view("https://waze.com/ul?ll=$lat,$lng&navigate=yes", Apps.WAZE)
+            } else if (q.isNotEmpty()) {
+                intents += view("waze://?q=$q&navigate=yes", Apps.WAZE)
+                intents += view("https://waze.com/ul?q=$q&navigate=yes", Apps.WAZE)
+            }
         }
         // App missing or no coordinates: any map app, then the original link.
         if (lat != null && lng != null) intents += view("geo:$lat,$lng?q=$lat,$lng(${Uri.encode(title ?: "")})", null)

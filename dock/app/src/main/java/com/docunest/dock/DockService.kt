@@ -65,6 +65,14 @@ class DockService : Service() {
         }
     }
 
+    // Where the car is, for distances in the slide menu (the panel refreshes it too).
+    private val locationLoop = object : Runnable {
+        override fun run() {
+            Locator.current(this@DockService) { loc -> if (loc != null) DockActivity.lastLocation = loc }
+            main.postDelayed(this, 2 * 60_000L)
+        }
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -99,6 +107,7 @@ class DockService : Service() {
             Sync.start(this)
             registerWakeups()
             main.postDelayed(updateLoop, 30_000L)
+            main.post(locationLoop)
         } else if (intent?.action == ACTION_RELAYOUT) {
             relayoutBubble()
         }

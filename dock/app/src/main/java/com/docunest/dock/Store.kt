@@ -151,6 +151,7 @@ object Store {
     /** Merge a server page. A full sync also drops what was deleted on the server. */
     @Synchronized
     fun merge(server: List<Item>, now: String, full: Boolean) {
+        val before = items.values.toList()
         if (full) {
             val keep = items.values.filter { it.pending }
             items.clear()
@@ -168,6 +169,7 @@ object Store {
         }
         lastSince = now
         save()
-        changed()
+        // A quiet poll (nothing new) must not redraw the screen every 20 s.
+        if (items.values.toList() != before) changed()
     }
 }

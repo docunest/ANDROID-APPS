@@ -91,7 +91,11 @@ class DockActivity : Activity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        runCatching { myLocation?.disableMyLocation(); map.onPause(); map.onDetach() }
+        centeredOnce = false
         build()
+        map.onResume()
+        runCatching { myLocation?.enableMyLocation() }
         render()
     }
 
