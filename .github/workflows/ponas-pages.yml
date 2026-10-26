@@ -1,13 +1,16 @@
-name: Publish games
+name: Ponas games
 
+# Validates every game and publishes https://docunest.github.io/ANDROID-APPS/ponas/ :
+# the iPhone/browser web app and manifest.json, which the tablet syncs from.
 on:
   push:
     branches: [main]
     paths:
-      - "games/**"
-      - "sdk/**"
-      - "tools/**"
-      - ".github/workflows/pages.yml"
+      - "ponas/games/**"
+      - "ponas/sdk/**"
+      - "ponas/tools/**"
+      - "ponas/web/**"
+      - ".github/workflows/ponas-pages.yml"
   workflow_dispatch:
 
 permissions:
@@ -33,7 +36,10 @@ jobs:
 
       - name: Build site (validates every game)
         run: |
-          node tools/build-site.mjs --out _site
+          node ponas/tools/build-site.mjs --out _site/ponas
+          # Repo root of the Pages site just points to Ponas (other apps may get pages later).
+          printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=ponas/"><a href="ponas/">Ponas</a>\n' > _site/index.html
+          touch _site/.nojekyll
           find _site -type f | sort
 
       - uses: actions/configure-pages@v5

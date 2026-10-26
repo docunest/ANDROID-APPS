@@ -1,6 +1,6 @@
 ---
 name: ponas-game
-description: Create or change a small learning game for the Ponas kid tablet (repo eb07-lab/ponas-app) — Lithuanian, no reading needed, offline, built on sdk/ponas.js, validated, smoke-tested in both orientations and pushed to main.
+description: Create or change a small learning game for the Ponas kid tablet (folder ponas/ in repo docunest/ANDROID-APPS) — Lithuanian, no reading needed, offline, built on sdk/ponas.js, validated, smoke-tested in both orientations and pushed to main. Also playable as the iPhone web app.
 ---
 
 # Make a Ponas game
@@ -10,7 +10,9 @@ Ponas is a home screen for a young child's tablet. Every tile is a small offline
 from there. The player is a small child who **may not read yet**; any words are **Lithuanian**.
 The parent often asks from her phone, so keep the reply short and give her the link to try it.
 
-Repo rules live in `CLAUDE.md` — they win over anything here. This skill is the workflow.
+Ponas lives in **`ponas/`** of the ANDROID-APPS repo: every path below (`games/`, `templates/`,
+`tools/`, `sdk/`) is inside `ponas/`, so `cd ponas` first and run the commands from there.
+Repo rules live in `ponas/CLAUDE.md` — they win over anything here. This skill is the workflow.
 
 ## 1. Understand the ask (don't stall)
 
@@ -94,15 +96,16 @@ short Playwright script in the scratchpad.
 
 ## 6. Ship it
 
-Commit only `games/<id>/` (and anything the parent explicitly asked to change) straight to `main`
+Commit only `ponas/games/<id>/` (and anything the parent explicitly asked to change) straight to `main`
 with a short message like `Add game: Spalvos (tap the balloon of the named colour)`. Never commit
 `_site/`, `_shots/`, `node_modules/`. Push. (If the push is rejected, fetch and rebase first.)
 
 Reply to the parent in a few lines:
 - what the game is and how the child plays it (one or two sentences);
-- try it: https://eb07-lab.github.io/ponas-app/games/<id>/ (live ~1 min after **Publish games** is green);
+- try it: https://docunest.github.io/ANDROID-APPS/ponas/games/<id>/ (live ~1 min after the **Ponas games** action is green). On the
+  iPhone the game is also in the Ponas web app (pull down to refresh if it was open);
 - new game → on the tablet ⬇ → PIN → **Install**; changed game → updates itself within ~15 min
   or Parent menu → **Refresh games now**.
 
-Don't touch `android/`, `sdk/ponas.js`, `tools/` or the workflows unless explicitly asked — a
+Don't touch `ponas/android/`, `ponas/sdk/ponas.js`, `ponas/tools/`, `ponas/web/`, the workflows or `dock/` unless explicitly asked — a
 change to the SDK affects every game, and the app itself needs a new APK.

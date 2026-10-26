@@ -24,85 +24,34 @@ phone / Claude ──push──▶ GitHub main ──Actions──▶ GitHub Pag
   Pages site. That's the launcher, `manifest.json`, and each game with `ponas.js` and its own
   `game.json`. The tablet re-downloads a game only when its content hash changes.
 
-**Pages:** https://eb07-lab.github.io/ponas-app/ shows every game, with the same tiles as the
-tablet, for playing in any browser. https://eb07-lab.github.io/ponas-app/manifest.json is the
+**Pages:** https://docunest.github.io/ANDROID-APPS/ponas/ shows every game, with the same tiles as the
+tablet, for playing in any browser. https://docunest.github.io/ANDROID-APPS/ponas/manifest.json is the
 catalog the tablet reads.
 
 ---
 
 ## 1. One-time setup
 
-### 1a. Create the signing keystore
+Ponas lives in `ponas/` of **docunest/ANDROID-APPS** (moved from eb07-lab/ponas-app with its
+history). Two workflows at the repo root drive it:
 
-Android only installs an update if it is signed with **the same key** as the installed app.
-You create that key once, and CI uses it for every build.
+| Workflow | Runs when | Does |
+|---|---|---|
+| `ponas-pages.yml` ("Ponas games") | push to `main` touching `ponas/games`, `sdk`, `tools` or `web` | validates every game, publishes the web app + `manifest.json` to Pages |
+| `ponas-apk.yml` ("Ponas APK") | push touching `ponas/android/**` | builds the APK, publishes release `ponas-v<n>` with `ponas.apk` |
 
-`keytool` comes with a Java JDK, and your Mac doesn't have one. To get it:
-`brew install --cask temurin@17` installs the JDK. It's only needed for this step, and you can
-uninstall it afterwards.
+**Turn on GitHub Pages once:** GitHub → **docunest/ANDROID-APPS → Settings → Pages → Build and
+deployment → Source: GitHub Actions**. Then **Actions → Ponas games → Run workflow** on `main`.
+When it's green, https://docunest.github.io/ANDROID-APPS/ponas/manifest.json shows the catalog.
 
-```sh
-cd ~/Documents            # anywhere outside the repo
-keytool -genkeypair -v \
-  -storetype PKCS12 \
-  -keystore ponas-release.jks \
-  -alias ponas \
-  -keyalg RSA -keysize 4096 \
-  -validity 36500 \
-  -dname "CN=Ponas, O=eb07-lab, C=LT"
-```
+**Signing:** the key is `ponas/ponas.keystore`, committed on purpose like `dock/dock.keystore`, so
+every build (CI or local) installs over the last one and keeps the child's progress. No secrets
+needed. (The original app was a CI debug build, `lt.eb07.ponas.debug`, signed with a throwaway key;
+this one is `lt.eb07.ponas`.)
 
-It asks for a password. Choose a strong one and write it down. (With PKCS12 the key password
-is the same as the keystore password.)
-
-Copy the keystore to the clipboard as base64:
-
-```sh
-base64 -i ponas-release.jks | pbcopy
-```
-
-> ⚠️ **Back up `ponas-release.jks` and its password** in a password manager and one more safe
-> place. If you lose the key or it changes, updates **won't install**. You'd have to uninstall
-> Ponas, which also deletes the child's saved progress, and set everything up again. Never
-> commit the keystore; `.gitignore` already blocks `*.jks`.
-
-### 1b. Add the secrets
-
-GitHub → **eb07-lab/ponas-app → Settings → Secrets and variables → Actions → Secrets tab →
-Repository secrets → New repository secret**. (Not *Environment* secrets, not *Variables*, not
-Codespaces/Dependabot — the build can't see those.) Two are required:
-
-| Name                | Value                                        |
-|---------------------|----------------------------------------------|
-| `KEYSTORE_BASE64`   | paste the clipboard from `base64 … \| pbcopy` |
-| `KEYSTORE_PASSWORD` | the password you chose                       |
-| `KEY_ALIAS`         | optional — only if the alias isn't `ponas`   |
-| `KEY_PASSWORD`      | optional — defaults to `KEYSTORE_PASSWORD`   |
-
-Names are case-sensitive. Then run **Actions → Build APK → Run workflow** (adding secrets alone
-doesn't start a build). The step **Decode and check signing keystore** says exactly what's wrong
-if a secret doesn't fit (bad base64, wrong password, wrong alias).
-
-### 1c. Turn on GitHub Pages
-
-GitHub → **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-
-Then go to **Actions → Publish games → Run workflow**, on `main`. When it's green, open
-https://eb07-lab.github.io/ponas-app/manifest.json. You should see JSON with a `balionai` game.
-
-### 1d. Build the first APK
-
-After the secrets are added: **Actions → Build APK → Run workflow** (on `main`).
-When it's green, open the run and download the **ponas-apk** artifact. It's a zip; unzip it to
-get `app-release.apk`.
-
-To get a proper release with the APK attached, go to **Releases → Draft a new release**,
-create the tag `v0.1.0` and publish it. The workflow then builds and attaches
-`app-release.apk` to the release.
-
-Every build also produces **ponas-debug-apk**. It installs as a separate app
-(`lt.eb07.ponas.debug`, named "Ponas debug"), so it never conflicts with the release. The
-debug build has WebView debugging turned on (see Troubleshooting).
+**iPhone web app:** open https://docunest.github.io/ANDROID-APPS/ponas/ in Safari → Share →
+**Add to Home Screen**. It opens full screen like an app, and after the first open every game
+works offline. New and changed games appear the next time it's opened online.
 
 ---
 
@@ -166,14 +115,14 @@ they swipe the navigation bar in. To unpin, hold Back + Overview.
 
 ## 3. Phone workflow (adding or changing a game)
 
-1. On your phone, ask Claude (claude.ai/code, repo `eb07-lab/ponas-app`), for example: *"add a
+1. On your phone, ask Claude (claude.ai/code, repo `docunest/ANDROID-APPS`), for example: *"add a
    game in games/spalvos where the child taps the balloon of the colour they hear"*.
-2. Claude follows `CLAUDE.md`. It copies `templates/game`, builds the game and its icon, runs
+2. Claude follows `ponas/CLAUDE.md` and the `ponas-game` skill. It copies `templates/game`, builds the game and its icon, runs
    `node tools/build-site.mjs` and `node tools/smoke-test.mjs` (both orientations), and commits
    to `main`.
-3. **Actions → Publish games** runs, which takes about 1 minute. If a game breaks a rule (too
+3. **Actions → Ponas games** runs, which takes about 1 minute. If a game breaks a rule (too
    big, missing icon, external URL…), the run fails and nothing changes on the tablet.
-4. Try the game on your phone at https://eb07-lab.github.io/ponas-app/.
+4. Try the game on your phone at https://docunest.github.io/ANDROID-APPS/ponas/.
 5. **New game:** on the tablet, tap ⬇ → PIN → **Install**. **Changed game:** it updates by
    itself within about 15 minutes, or right away with parent menu → Refresh.
 6. You don't need the Mac, adb, or a new APK.
@@ -185,7 +134,7 @@ only about 1 message every 5 s per device after a short burst. That suits turn-b
 "send a picture", not fast real-time play.
 
 To try a game in a phone browser before the child sees it:
-https://eb07-lab.github.io/ponas-app/
+https://docunest.github.io/ANDROID-APPS/ponas/
 
 To hide a game without deleting it, set `"enabled": false` in its `meta.json`.
 
@@ -206,13 +155,13 @@ To hide a game without deleting it, set `"enabled": false` in its `meta.json`.
    `adb -s … shell ps -A | grep ponas`, the `lt.eb07.ponas:game` process disappears each time a
    game closes.
 5. **Multiplayer.** Open Linkėjimai on the tablet and
-   https://eb07-lab.github.io/ponas-app/games/linkejimai/ on your phone. Tap the heart on one
+   https://docunest.github.io/ANDROID-APPS/ponas/games/linkejimai/ on your phone. Tap the heart on one
    device and it pops up big on the other. The cloud icon turns solid when connected.
 6. **Offline.** Turn on airplane mode. Open Balionai again: it still works, with sound, and the
    stars from before are still there.
 7. **Update.** Turn airplane mode off. On GitHub (the phone is fine), change something visible,
    for example `"color"` in `games/balionai/meta.json` or the balloon colours in `game.js`.
-   Commit to `main` and wait for **Publish games** to go green.
+   Commit to `main` and wait for **Ponas games** to go green.
 8. **Tablet updates.** Open Parent menu → **Refresh games now**. You'll see a toast saying
    "Games are up to date", and the change shows up without reinstalling. The ⬇ Games screen and
    **Versions** show the new version.
@@ -231,26 +180,26 @@ To hide a game without deleting it, set `"enabled": false` in its `meta.json`.
 | Message | Meaning / fix |
 |---|---|
 | `Offline: no network connection` | Wi‑Fi or the hotspot is off. Games keep working; sync retries later. |
-| `Manifest download failed: … HTTP 404` | Pages isn't enabled or hasn't deployed yet. Check step 1c, and that https://eb07-lab.github.io/ponas-app/manifest.json opens. |
+| `Manifest download failed: … HTTP 404` | Pages isn't enabled or hasn't deployed yet. Check section 1 (Pages), and that https://docunest.github.io/ANDROID-APPS/ponas/manifest.json opens. |
 | `Manifest download failed: … UnknownHost / timeout` | The hotspot has no internet, or the connection is too slow. Try again. |
 | `<id>: … size N, expected M (Pages may still be deploying)` | The CDN is still serving old files. Wait 5–10 min and Refresh. The old version stays until then. |
-| `<id>: … checksum mismatch` | Same as above. If it keeps happening, re-run **Publish games**. |
-| New game doesn't appear | Check that **Actions → Publish games** is green. A red run means `build-site` rejected the game; the log says why. Also check `"enabled": true`. New games must be installed from ⬇ on the tablet; they never appear by themselves. |
+| `<id>: … checksum mismatch` | Same as above. If it keeps happening, re-run **Ponas games**. |
+| New game doesn't appear | Check that **Actions → Ponas games** is green. A red run means `build-site` rejected the game; the log says why. Also check `"enabled": true`. New games must be installed from ⬇ on the tablet; they never appear by themselves. |
 
-- **Pages URL:** it's always `https://eb07-lab.github.io/ponas-app/`. The address is set in
+- **Pages URL:** it's always `https://docunest.github.io/ANDROID-APPS/ponas/`. The address is set in
   `android/.../SyncManager.kt` (`BASE_URL`). If the repo is renamed or moved, that line needs
   to change, and so does the APK.
 - **adb port changed / "failed to connect":** the wireless-debugging port changes after every
   reboot. Read the new one in Developer options and run `adb connect 172.20.10.2:NEWPORT`. If
   you see "more than one device/emulator", add `-s 172.20.10.2:NEWPORT` to the command.
-- **`INSTALL_FAILED_UPDATE_INCOMPATIBLE`:** the APK was signed with a different key. Use the
-  original keystore. The only other fix is `adb uninstall lt.eb07.ponas`, which deletes the
-  child's progress.
+- **`INSTALL_FAILED_UPDATE_INCOMPATIBLE`:** the APK was signed with a different key. Build with
+  the committed `ponas/ponas.keystore`. The only other fix is `adb uninstall lt.eb07.ponas`, which
+  deletes the child's progress.
 - **A game closes by itself:** Android killed the WebView to free RAM. Ponas returns to the
   home screen instead of crashing. Make the game lighter (smaller images, fewer animations).
-- **Inspecting a game on the tablet:** install `ponas-debug.apk`, open the game in
-  "Ponas debug", then on the Mac open `chrome://inspect` in Chrome or Edge while adb is
-  connected.
+- **Inspecting a game on the tablet:** build `./gradlew assembleDebug` (installs as "Ponas debug"
+  next to Ponas), open the game there, then on the Mac open `chrome://inspect` in Chrome or Edge
+  while adb is connected.
 - **Tablet still shows an old game:** sync runs at most every 15 min. Use Refresh.
 - **Multiplayer doesn't connect:** the game needs `"network": ["ntfy.sh"]` in its `meta.json`,
   and the tablet needs internet access (not just Wi‑Fi). Too many messages in a row hit ntfy's
@@ -261,19 +210,21 @@ To hide a game without deleting it, set `"enabled": false` in its `meta.json`.
 ## Repo layout
 
 ```
-android/                     Kotlin shell app (Gradle, AGP 8.7, minSdk 26, targetSdk 34)
-games/<id>/                  one folder per game: index.html, meta.json, icon.png, …
-templates/game/              starter for new games (not published)
-sdk/ponas.js                 shared kit injected into every game (pause/close, overlays, storage, sound, ntfy)
-tools/build-site.mjs         validates games, builds _site/ (launcher, manifest.json, games)
-tools/smoke-test.mjs         headless test of every game in both orientations (needs Playwright)
-.github/workflows/pages.yml  publish games to GitHub Pages
-.github/workflows/android.yml build the APK (debug always, signed release with secrets)
-CLAUDE.md                    rules for Claude sessions editing this repo
-.claude/skills/ponas-game/   Claude skill: the step-by-step "make a game" workflow (shareable copy)
+ponas/android/               Kotlin shell app (Gradle, AGP 8.7, minSdk 26, targetSdk 34)
+ponas/games/<id>/            one folder per game: index.html, meta.json, icon.png, …
+ponas/templates/game/        starter for new games (not published)
+ponas/sdk/ponas.js           shared kit injected into every game (pause/close, overlays, storage, sound, ntfy)
+ponas/web/                   iPhone web app: home-screen icons, offline service worker
+ponas/tools/build-site.mjs   validates games, builds _site/ (web app, manifest.json, games)
+ponas/tools/smoke-test.mjs   headless test of every game in both orientations (needs Playwright)
+ponas/ponas.keystore         app signing key (committed on purpose)
+ponas/CLAUDE.md              rules for Claude sessions editing Ponas
+.github/workflows/ponas-pages.yml   publish games to GitHub Pages
+.github/workflows/ponas-apk.yml     build the APK, publish release ponas-v<n>
+.claude/skills/ponas-game/   Claude skill: the step-by-step "make or change a game" workflow
 ```
 
-Local check (any machine with Node):
+Local check (any machine with Node, from `ponas/`):
 
 ```sh
 node tools/build-site.mjs         # validates all games, builds _site/ (git-ignored)

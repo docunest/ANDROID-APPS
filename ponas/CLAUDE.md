@@ -1,9 +1,10 @@
 # Ponas — instructions for Claude
 
-Ponas is a kid-tablet app. The Android APK (`android/`) is installed once and is also the tablet's
+Ponas is a kid-tablet app. It lives in `ponas/` of the docunest/ANDROID-APPS repo (next to
+`dock/`); paths below are relative to `ponas/`, so run commands from there. The Android APK (`android/`) is installed once and is also the tablet's
 home screen. Games are small HTML/JS folders in `games/<id>/`. Pushing to `main` runs
-`.github/workflows/pages.yml`, which validates every game and publishes them to
-https://eb07-lab.github.io/ponas-app/ (a browser launcher plus `manifest.json`).
+`.github/workflows/ponas-pages.yml` (repo root), which validates every game and publishes them to
+https://docunest.github.io/ANDROID-APPS/ponas/ (the browser/iPhone web app plus `manifest.json`).
 
 On the tablet, the parent (Egle) picks which games to install. The picker is behind a PIN.
 Installed games update themselves: within ~15 min, or right away with the parent menu → Refresh.
@@ -15,7 +16,7 @@ Do it, run the checks below, commit straight to `main` and push.
 ## Hard rules
 
 - **Adding or editing games: only touch `games/<id>/`.** Never edit `android/`, `sdk/`,
-  `tools/` or `.github/` unless asked.
+  `tools/`, `web/`, `.github/` or `../dock/` unless asked.
 - **Never hand-edit or commit `manifest.json`, `_site/` or `_shots/`.** They are generated and
   git-ignored.
 - **Don't put `ponas.js` or `game.json` in a game folder.** The build adds them.
@@ -150,8 +151,8 @@ chan.send({ pic: 'heart' });               // any JSON, under ~3.8 KB
 5. Commit to `main` with a short message (for example `games/spalvos: add colour matching game`),
    then push. Don't commit `_site/`, `_shots/` or `node_modules/`.
 6. Tell Egle:
-   - it's live at https://eb07-lab.github.io/ponas-app/games/<id>/ once the "Publish games"
-     action is green (about 1 min);
+   - it's live at https://docunest.github.io/ANDROID-APPS/ponas/games/<id>/ once the "Ponas games"
+     action is green (about 1 min), and in the iPhone web app;
    - on the tablet, install it from the ⬇ button (bottom-right of the home screen, PIN) → Install;
    - updates to games that are already installed arrive within ~15 min, or right away with
      parent menu → Refresh.
@@ -165,7 +166,11 @@ chan.send({ pic: 'heart' });               // any JSON, under ~3.8 KB
 - `tools/build-site.mjs`: validates games and builds `_site/` (launcher, manifest.json,
   games + ponas.js + game.json). Node only, no dependencies.
 - `tools/smoke-test.mjs`: headless browser test in both orientations (needs Playwright).
-- `.github/workflows/pages.yml`: publishes to GitHub Pages.
-- `.github/workflows/android.yml`: builds the APK (only when `android/**` changes or on `v*` tags).
+- `web/`: the iPhone web app bits (home-screen icons, offline service worker); build-site adds them.
+- `ponas.keystore`: the app signing key, committed on purpose (same as `dock/`), so every build
+  installs over the last one.
+- `../.github/workflows/ponas-pages.yml`: publishes to GitHub Pages.
+- `../.github/workflows/ponas-apk.yml`: builds the APK when `android/**` changes and publishes it
+  as release `ponas-v<n>`.
 - `android/`: the Kotlin app. HomeActivity (tiles), InstallActivity (parent picks games),
   GameActivity (one game per process), SyncManager (downloads/updates), ParentMenu.

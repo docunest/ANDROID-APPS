@@ -5,10 +5,12 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-// Release signing comes from environment variables set by .github/workflows/android.yml.
-// Without them the release APK is left unsigned (the debug APK always builds).
-val keystorePath: String? = System.getenv("PONAS_KEYSTORE")
-val hasKeystore = !keystorePath.isNullOrBlank() && file(keystorePath).exists()
+// One fixed key, committed (ponas/ponas.keystore), same as dock/: every build — CI or local —
+// installs over the last one, so the child's saved progress survives updates.
+val keystoreFile = rootProject.file("../ponas.keystore")
+// One-off: -Pdebuggable=true builds a release that `adb run-as` can reach (used to restore
+// saved progress from the old lt.eb07.ponas.debug app). Never for normal builds.
+val debuggableRelease = (project.findProperty("debuggable") as String?) == "true"
 
 android {
     namespace = "lt.eb07.ponas"
@@ -24,13 +26,11 @@ android {
     }
 
     signingConfigs {
-        if (hasKeystore) {
-            create("release") {
-                storeFile = file(keystorePath!!)
-                storePassword = System.getenv("KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("KEY_ALIAS")
-                keyPassword = System.getenv("KEY_PASSWORD")
-            }
+        create("ponas") {
+            storeFile = keystoreFile
+            storePassword = "ponasponas"
+            keyAlias = "ponas"
+            keyPassword = "ponasponas"
         }
     }
 
@@ -38,8 +38,9 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            isDebuggable = debuggableRelease
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            if (hasKeystore) signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.getByName("ponas")
         }
         debug {
             // Separate package so a debug build can sit next to the release build
@@ -47,6 +48,7 @@ android {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
             resValue("string", "app_name", "Ponas debug")
+            signingConfig = signingConfigs.getByName("ponas")
         }
     }
 

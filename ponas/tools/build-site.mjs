@@ -22,6 +22,8 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const GAMES = join(ROOT, 'games');
 const SDK = join(ROOT, 'sdk', 'ponas.js');
+const WEB = join(ROOT, 'web');
+const WEB_ICONS = ['icon-180.png', 'icon-192.png', 'icon-512.png'];
 const MAX_GAME_BYTES = 2 * 1024 * 1024;
 const WARN_GAME_BYTES = 1.5 * 1024 * 1024;
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -194,6 +196,31 @@ writeFileSync(join(OUT, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\
 writeFileSync(join(OUT, 'index.html'), launcherHtml(manifest));
 writeFileSync(join(OUT, '.nojekyll'), '');
 
+// ---- web app (iPhone "Add to Home Screen", offline) ----
+// manifest.json is taken by the tablet catalog, so the web app manifest is app.webmanifest.
+for (const f of WEB_ICONS) copyFileSync(join(WEB, f), join(OUT, f));
+writeFileSync(join(OUT, 'app.webmanifest'), JSON.stringify({
+  name: 'Ponas',
+  short_name: 'Ponas',
+  start_url: './',
+  scope: './',
+  display: 'standalone',
+  background_color: '#FFF6E0',
+  theme_color: '#FFB300',
+  icons: [
+    { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
+    { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+  ],
+}, null, 2) + '\n');
+const offline = ['./', 'index.html', 'manifest.json', 'app.webmanifest', ...WEB_ICONS];
+for (const g of games) {
+  for (const f of g.files) offline.push(`games/${g.id}/${f.path}`);
+  offline.push(`games/${g.id}/game.json`);
+}
+writeFileSync(join(OUT, 'sw.js'), readFileSync(join(WEB, 'sw.js'), 'utf8')
+  .replace('__VERSION__', String(manifest.version))
+  .replace('__FILES__', JSON.stringify(offline)));
+
 for (const g of games) {
   console.log(`✓ ${g.id}  "${g.title}"  v${g.version}  ${g.files.length} files, ${(g.size / 1024).toFixed(0)} KB, hash ${g.hash}` +
     `${g.enabled ? '' : '  (disabled)'}${g.network.length ? '  net: ' + g.network.join(',') : ''}`);
@@ -219,7 +246,14 @@ function launcherHtml(man) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Ponas</title>
-<link rel="icon" href="data:,">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="app.webmanifest">
+<meta name="theme-color" content="#FFB300">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Ponas">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <style>
   :root { --bg: #FFF6E0; --ink: #5D4037; }
   * { box-sizing: border-box; }
@@ -253,7 +287,14 @@ function launcherHtml(man) {
 </header>
 <main class="grid">${tiles}
 </main>
-<footer>Catalog ${day(man.version)} · ${man.games.length} games · <a href="manifest.json">manifest.json</a></footer>
+<footer>Catalog ${day(man.version)} · ${man.games.length} games · <a href="manifest.json">manifest.json</a>
+  <span class="ios-hint"> · iPhone: Share → Add to Home Screen</span></footer>
+<script>
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () {});
+  if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) {
+    document.querySelector('.ios-hint').remove();
+  }
+</script>
 </body>
 </html>
 `;

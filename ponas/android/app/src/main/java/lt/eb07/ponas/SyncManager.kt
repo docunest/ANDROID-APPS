@@ -32,7 +32,7 @@ import java.util.concurrent.Executors
 object SyncManager {
     private const val TAG = "PonasSync"
 
-    const val BASE_URL = "https://eb07-lab.github.io/ponas-app/"
+    const val BASE_URL = "https://docunest.github.io/ANDROID-APPS/ponas/"
     const val MANIFEST_URL = BASE_URL + "manifest.json"
 
     private const val MIN_INTERVAL_MS = 15L * 60 * 1000
