@@ -281,6 +281,10 @@ class DockActivity : Activity() {
         text.addView(label((if (item.pinned) "📌 " else "") + item.title, 19f, bold = true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
         text.addView(label(subtitle(item), 13f, if (item.isNew) Palette.AMBER else Palette.MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
         r.addView(text, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        // Debug (temporary): every Waze method as a button.
+        r.addView(bigButton("🧪", Palette.CARD_HI, 16f) {
+            startActivity(NavTestActivity.intent(this, item.lat, item.lng, item.title, item.address, item.resolvedUrl ?: item.sourceUrl))
+        }, LinearLayout.LayoutParams(dp(56), dp(56)).apply { marginEnd = dp(6) })
         if (item.hasPoint) {
             r.addView(bigButton("🗺", Palette.CARD_HI, 16f) { focus(item) }, LinearLayout.LayoutParams(dp(56), dp(56)).apply { marginEnd = dp(6) })
         }
@@ -295,6 +299,9 @@ class DockActivity : Activity() {
 
     private fun itemMenu(item: Item) {
         val actions = mutableListOf<Pair<String, () -> Unit>>()
+        actions += "🧪 Waze test buttons" to {
+            startActivity(NavTestActivity.intent(this, item.lat, item.lng, item.title, item.address, item.resolvedUrl ?: item.sourceUrl))
+        }
         actions += (if (item.pinned) "Unpin" else "Pin to top") to { Sync.patch(item.id, JSONObject().put("pinned", !item.pinned)) }
         val url = item.resolvedUrl ?: item.sourceUrl
         if (url != null) actions += "Open original link" to {
@@ -374,6 +381,10 @@ class DockActivity : Activity() {
         bar.addView(bigButton(if (nav == Prefs.NAV_GMAPS) "Drive · Maps" else "Drive · Waze", if (nav == Prefs.NAV_GMAPS) Palette.GMAPS else Palette.WAZE, 16f) { go(nav) })
         bar.addView(space(6))
         bar.addView(bigButton(if (alt == Prefs.NAV_GMAPS) "G" else "W", Palette.CARD_HI, 16f) { go(alt) }, LinearLayout.LayoutParams(dp(56), dp(56)))
+        bar.addView(space(6))
+        bar.addView(bigButton("🧪", Palette.CARD_HI, 16f) {
+            startActivity(NavTestActivity.intent(this, lat, lng, title, item?.address, item?.let { it.resolvedUrl ?: it.sourceUrl }))
+        }, LinearLayout.LayoutParams(dp(56), dp(56)))
         bar.visibility = View.VISIBLE
     }
 
