@@ -64,6 +64,16 @@ object Locator {
         handler.postDelayed({ finish(null) }, TIMEOUT_MS)
     }
 
+    /** Freshest position the phone remembers, however old — good enough for "~23 km". */
+    @SuppressLint("MissingPermission")
+    fun lastKnownAny(context: Context): Location? {
+        if (!hasPermission(context)) return null
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        return runCatching { lm.getProviders(false) }.getOrDefault(emptyList())
+            .mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
+            .maxByOrNull { it.time }
+    }
+
     @SuppressLint("MissingPermission")
     private fun lastKnown(lm: LocationManager, providers: List<String>): Location? =
         providers.mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }

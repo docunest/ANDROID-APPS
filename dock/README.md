@@ -7,13 +7,14 @@ docunest/MapPal `lib/dock/`).
 
 | Gesture on the floating button | Result |
 |---|---|
-| **Tap** | Opens the dock panel: app tiles, ★ Save this spot, places list + map. Tap again to close. |
-| **Press and hold** (~0.3 s), **slide**, **lift** | Slide menu: YouTube, Google Maps, (DVR once set), ★ Save spot, and the most recent places. Lift on a place → Waze starts navigating. Never lift in between. |
+| **Tap** | Opens the dock panel: ★ Save this spot, places list + map. Tap again to close. |
+| **Press and hold** (~0.3 s), **slide**, **lift** | Slide menu: YouTube, Google Maps, (DVR once set), ★ Save spot, the most recent nearby places (with ~distance) and **Show more…** (full history). Lift on a place → Waze starts navigating. Never lift in between. |
 | **Drag** | Move the button anywhere (position is remembered). |
 
 - The button is small (50 dp) and 45 % transparent when idle, fully visible while touched. Both are adjustable in ⚙.
 - **New place from the phone** → a card appears at the top of the screen: tap the name or **Drive · Waze** (one tap), or **Maps** for Google Maps. The button shows an amber count of unseen places.
-- **Places list**: newest/unseen first, then pinned, then recently used — all history kept. Tap the **name** = navigate (Waze; set Google Maps as default in ⚙ if ever wanted). Small **G** = this once in Google Maps. 🗺 = show on map. Long-press = pin / delete / open original link.
+- **Places list**: pinned and unseen first, then recently used, each with ~distance. Places more than 150 km away *and* older than 2 days sit under **Show more** — all history kept.
+- **Waze** is opened with a name search (`waze.com/ul?q=<name, address>&navigate=yes`) — the only form that started a route with the place's name in field tests (Waze test #9; 🧪 buttons still in the app for now). Tap the **name** = navigate (Waze; set Google Maps as default in ⚙ if ever wanted). Small **G** = this once in Google Maps. 🗺 = show on map. Long-press = pin / delete / open original link.
 - **Map** (OpenStreetMap, no Google services needed): tap a pin → Drive. **Long-press anywhere** → drop a pin → Drive. Faded pins were found by name search (approximate).
 - **★ Save this spot**: one tap saves the GPS position; MapPal names it (nearest campsite/beach/viewpoint from OSM, else the address). Works offline — syncs when there's signal.
 - Links sent while the car was off arrive within seconds of switching on: the app starts on boot and keeps a long-poll open to MapPal (server answers the moment something arrives, ~1 s), re-asking at once on wake / network.

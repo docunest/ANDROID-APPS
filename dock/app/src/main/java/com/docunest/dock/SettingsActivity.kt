@@ -96,11 +96,9 @@ class SettingsActivity : Activity() {
         )
 
         section("Apps")
-        col.addView(label("Dock screen: " + names(prefs.gridApps), 14f))
         col.addView(label("Press-and-slide: " + names(prefs.fanApps), 14f))
         col.addView(label("DVR: " + (prefs.dvrPackage.takeIf { it.isNotBlank() }?.let { names(listOf(it)) } ?: "not set"), 14f))
         row(
-            bigButton("Dock apps…", Palette.CARD_HI, 15f) { pickApps(prefs.gridApps) { prefs.gridApps = it } },
             bigButton("Slide apps…", Palette.CARD_HI, 15f) { pickApps(prefs.fanApps) { prefs.fanApps = it } },
             bigButton("DVR app…", Palette.CARD_HI, 15f) { pickOne() },
         )

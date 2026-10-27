@@ -14,9 +14,6 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import android.widget.GridLayout
-import android.widget.HorizontalScrollView
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -46,6 +43,7 @@ class DockActivity : Activity() {
     private var myLocation: MyLocationNewOverlay? = null
     private var dropped: Marker? = null
     private var centeredOnce = false
+    private var showMore = false
     private val storeListener: () -> Unit = { render() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -56,6 +54,7 @@ class DockActivity : Activity() {
             userAgentValue = packageName
         }
         Sync.init(this)
+        showMore = intent?.getBooleanExtra(EXTRA_SHOW_MORE, false) == true
         build()
         val missing = buildList {
             if (!Locator.hasPermission(this@DockActivity)) add(android.Manifest.permission.ACCESS_FINE_LOCATION)
@@ -88,6 +87,11 @@ class DockActivity : Activity() {
         DockService.start(this)
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_SHOW_MORE, false)) showMore = true
+    }
+
     override fun onPause() {
         Store.removeListener(storeListener)
         runCatching { myLocation?.disableMyLocation() }
@@ -116,31 +120,25 @@ class DockActivity : Activity() {
             setPadding(dp(10), dp(10), dp(10), dp(10))
         }
 
-        // Left: actions + app tiles
-        val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        // Actions (apps live in the press-and-slide menu — not repeated here)
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         top.addView(bigButton("★  Save this spot", Palette.AMBER, 18f) { Actions.bookmarkHere(this) }, LinearLayout.LayoutParams(0, dp(64), 1f))
         top.addView(space(8))
         top.addView(bigButton("⚙", Palette.CARD, 20f) { startActivity(Intent(this, SettingsActivity::class.java)) }, LinearLayout.LayoutParams(dp(64), dp(64)))
         top.addView(space(8))
         top.addView(bigButton("✕", Palette.CARD, 20f) { finish() }, LinearLayout.LayoutParams(dp(64), dp(64)))
-        left.addView(top)
-        left.addView(space(10))
-        val grid = GridLayout(this).apply { columnCount = if (landscape) 2 else 4 }
-        appTiles().forEach { grid.addView(it) }
-        if (landscape) {
-            left.addView(ScrollView(this).apply { addView(grid) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        } else {
-            left.addView(HorizontalScrollView(this).apply { addView(grid) })
-        }
-        if (!Settings.canDrawOverlays(this)) {
-            left.addView(bigButton("Setup needed — tap to grant permissions", Palette.RED, 14f) {
-                startActivity(Intent(this, SettingsActivity::class.java))
-            })
-        }
 
         // Places list
         val placesCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        if (landscape) {
+            placesCol.addView(top)
+            placesCol.addView(space(8))
+        }
+        if (!Settings.canDrawOverlays(this)) {
+            placesCol.addView(bigButton("Setup needed — tap to grant permissions", Palette.RED, 14f) {
+                startActivity(Intent(this, SettingsActivity::class.java))
+            })
+        }
         val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         head.addView(label("Places", 20f, bold = true))
         head.addView(space(10))
@@ -185,13 +183,11 @@ class DockActivity : Activity() {
         }.getOrNull()
 
         if (landscape) {
-            root.addView(left, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.8f))
-            root.addView(space(10))
             root.addView(placesCol, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
             root.addView(space(10))
-            root.addView(mapFrame, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.2f))
+            root.addView(mapFrame, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.3f))
         } else {
-            root.addView(left)
+            root.addView(top)
             root.addView(space(10))
             root.addView(mapFrame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
             root.addView(space(10))
@@ -202,53 +198,39 @@ class DockActivity : Activity() {
 
     private fun space(d: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(d), dp(d)) }
 
-    private fun appTiles(): List<View> {
-        val pkgs = (prefs.gridApps + listOfNotNull(prefs.dvrPackage.takeIf { it.isNotBlank() })).distinct()
-        return pkgs.mapNotNull { pkg ->
-            val app = Apps.entry(this, pkg) ?: return@mapNotNull null
-            LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
-                background = rounded(Palette.CARD, dp(18).toFloat())
-                setPadding(dp(8), dp(12), dp(8), dp(10))
-                addView(ImageView(context).apply { setImageDrawable(app.icon) }, LinearLayout.LayoutParams(dp(64), dp(64)))
-                addView(label(app.label, 15f).apply { gravity = Gravity.CENTER; maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
-                isClickable = true
-                setOnClickListener { if (Apps.launch(this@DockActivity, pkg)) finish() }
-                layoutParams = GridLayout.LayoutParams().apply {
-                    width = dp(132); height = dp(122)
-                    setMargins(dp(5), dp(5), dp(5), dp(5))
-                }
-            }
-        }
-    }
-
     // --- Content ------------------------------------------------------------
 
     private fun render() {
         if (!::list.isInitialized) return
         status.text = Store.status
         val items = Store.sorted()
+        val here = Near.here(this)
+        val (main, more) = items.partition { Near.isMain(here, it) }
         list.removeAllViews()
         if (items.isEmpty()) {
             list.addView(label("Nothing yet. Share a Google Maps place from the phone to \"Send to car\", or tap ★ Save this spot.", 15f, Palette.MUTED).apply {
                 setPadding(0, dp(16), 0, 0)
             })
         }
-        items.forEach { list.addView(row(it)) }
-        renderMarkers(items)
+        main.forEach { list.addView(row(it)) }
+        if (more.isNotEmpty()) {
+            // Far away (> 150 km) and older than 2 days: history, one tap away.
+            list.addView(bigButton(if (showMore) "Hide older far places" else "Show more (${more.size}) — far & older", Palette.CARD_HI, 15f) {
+                showMore = !showMore
+                render()
+            }.apply {
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)).apply { setMargins(0, dp(8), 0, dp(4)) }
+            })
+            if (showMore) more.forEach { list.addView(row(it)) }
+        }
+        renderMarkers(if (showMore) items else main)
     }
 
     private fun subtitle(item: Item): String {
         val bits = mutableListOf<String>()
+        Near.label(Near.here(this), item)?.let { bits += it }
         if (item.isNew) bits += "NEW"
         bits += if (item.kind == "bookmark") "★ saved ${ago(item.createdAt)}" else "sent ${ago(item.createdAt)}"
-        val here = lastLocation
-        if (here != null && item.hasPoint) {
-            val d = FloatArray(1)
-            Location.distanceBetween(here.latitude, here.longitude, item.lat!!, item.lng!!, d)
-            bits += km(d[0])
-        }
         if (item.approximate) bits += "approx."
         if (!item.hasPoint) bits += "no pin"
         if (item.pending) bits += "not synced"
@@ -389,6 +371,8 @@ class DockActivity : Activity() {
     }
 
     companion object {
+        const val EXTRA_SHOW_MORE = "showMore"
+
         /** The open panel, so the floating button can toggle it closed. */
         @Volatile var current: DockActivity? = null
         @Volatile var lastLocation: Location? = null
