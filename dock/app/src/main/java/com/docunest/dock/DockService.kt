@@ -280,16 +280,14 @@ class DockService : Service() {
             t += FanTarget("★ Save spot", null, Palette.AMBER, pill = false) { Actions.bookmarkHere(this) }
         }
         val nav = if (prefs.defaultNav == Prefs.NAV_GMAPS) "Google Maps" else "Waze"
-        val here = DockActivity.lastLocation
-        for (item in Store.sorted().take(prefs.fanLinks.coerceIn(0, 8))) {
+        val here = Near.here(this)
+        val (main, more) = Store.sorted().partition { Near.isMain(here, it) }
+        val shown = main.take(prefs.fanLinks.coerceIn(0, 8))
+        for (item in shown) {
             val bits = mutableListOf<String>()
+            Near.label(here, item)?.let { bits += it }
             if (item.isNew) bits += "NEW"
             if (item.kind == "bookmark") bits += "★"
-            if (here != null && item.hasPoint) {
-                val d = FloatArray(1)
-                android.location.Location.distanceBetween(here.latitude, here.longitude, item.lat!!, item.lng!!, d)
-                bits += km(d[0])
-            }
             if (item.approximate) bits += "approx."
             bits += "→ $nav"
             t += FanTarget(
@@ -297,6 +295,18 @@ class DockService : Service() {
                 if (item.isNew) Color.parseColor("#92400E") else Color.argb(240, 31, 41, 55),
                 pill = true, subtitle = bits.joinToString(" · "),
             ) { Nav.go(this, item) }
+        }
+        // Always last: the full history (far & older places included).
+        val hidden = (main.size - shown.size) + more.size
+        t += FanTarget(
+            "Show more…", null, Color.argb(240, 55, 65, 81), pill = true,
+            subtitle = if (hidden > 0) "$hidden more places · history" else "all places · map",
+        ) {
+            startActivity(
+                Intent(this, DockActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .putExtra(DockActivity.EXTRA_SHOW_MORE, true),
+            )
         }
         return t
     }
