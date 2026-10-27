@@ -105,6 +105,29 @@ class SettingsActivity : Activity() {
         switch("\"★ Save spot\" in press-and-slide", prefs.fanBookmarkHere) { prefs.fanBookmarkHere = it }
         slider("Places in press-and-slide", prefs.fanLinks, 0, 8, "") { prefs.fanLinks = it }
 
+        section("Split screen (Google Maps beside Waze)")
+        col.addView(label(
+            "Used by: slide menu → Google Maps, 🔎 Nearby, and Preview on a new place. " +
+                "Helper: ${if (SplitService.instance != null) "on ✓" else "off ✗"}. Method now: ${prefs.splitMethod}.",
+            13f, Palette.MUTED,
+        ))
+        row(
+            bigButton("Turn helper on (root)", Palette.BLUE, 15f) {
+                Thread {
+                    val ok = Root.enableSplitService(this)
+                    runOnUiThread { Toast.makeText(this, if (ok) "Done — give it a second" else "Root refused — use Accessibility…", Toast.LENGTH_LONG).show(); render() }
+                }.start()
+            },
+            bigButton("Accessibility…", Palette.CARD_HI, 15f) { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
+        )
+        col.addView(label("If split screen misbehaves, try another method and report which one works:", 13f, Palette.MUTED))
+        row(*Split.METHODS.map { m ->
+            bigButton((if (prefs.splitMethod == m) "● " else "") + m, if (prefs.splitMethod == m) Palette.GMAPS else Palette.CARD_HI, 15f) {
+                prefs.splitMethod = m; render()
+            }
+        }.toTypedArray())
+        switch("\"🔎 Nearby\" in press-and-slide", prefs.fanNearby) { prefs.fanNearby = it }
+
         section("Floating button")
         slider("Size", prefs.bubbleSizeDp, 32, 96, " dp") { prefs.bubbleSizeDp = it; DockService.start(this, DockService.ACTION_RELAYOUT) }
         slider("Opacity when idle", prefs.bubbleAlpha, 15, 100, " %") { prefs.bubbleAlpha = it; DockService.start(this, DockService.ACTION_RELAYOUT) }

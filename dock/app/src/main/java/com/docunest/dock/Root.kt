@@ -19,6 +19,17 @@ object Root {
             "pm grant $pkg android.permission.ACCESS_COARSE_LOCATION",
             "pm grant $pkg android.permission.POST_NOTIFICATIONS 2>/dev/null; true",
             "dumpsys deviceidle whitelist +$pkg",
+        ).also { enableSplitService(context) }
+    }
+
+    /** Switch on [SplitService] (Accessibility) without the settings screen; keeps other services on. */
+    fun enableSplitService(context: Context): Boolean {
+        val comp = "${context.packageName}/${SplitService::class.java.name}"
+        return run(
+            "cur=\$(settings get secure enabled_accessibility_services)",
+            "case \"\$cur\" in *SplitService*) ;; null|\"\") settings put secure enabled_accessibility_services $comp ;; " +
+                "*) settings put secure enabled_accessibility_services \"\$cur:$comp\" ;; esac",
+            "settings put secure accessibility_enabled 1",
         )
     }
 }

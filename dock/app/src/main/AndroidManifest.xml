@@ -65,6 +65,21 @@
             android:exported="false"
             android:label="Waze test" />
 
+        <!-- Split screen helper: presses Android's "toggle split screen" so Waze
+             stays on one side and Google Maps opens on the other. -->
+        <service
+            android:name=".SplitService"
+            android:exported="false"
+            android:label="Dock split screen"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/split_service" />
+        </service>
+
         <receiver
             android:name=".UpdateReceiver"
             android:exported="false" />

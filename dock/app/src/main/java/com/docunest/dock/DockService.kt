@@ -274,7 +274,12 @@ class DockService : Service() {
         val pkgs = (prefs.fanApps + listOfNotNull(prefs.dvrPackage.takeIf { it.isNotBlank() })).distinct()
         for (pkg in pkgs) {
             val app = Apps.entry(this, pkg) ?: continue
-            t += FanTarget(app.label, app.icon, Palette.CARD, pill = false) { Apps.launch(this, pkg) }
+            // Google Maps always beside Waze (split screen) — Waze keeps the route.
+            val open: () -> Unit = if (pkg == Apps.GMAPS) ({ Split.openMaps(this) }) else ({ Apps.launch(this, pkg) })
+            t += FanTarget(app.label, app.icon, Palette.CARD, pill = false, action = open)
+        }
+        if (prefs.fanNearby) {
+            t += FanTarget("🔎 Nearby", null, Palette.GMAPS, pill = false) { showDetours() }
         }
         if (prefs.fanBookmarkHere) {
             t += FanTarget("★ Save spot", null, Palette.AMBER, pill = false) { Actions.bookmarkHere(this) }
@@ -368,6 +373,13 @@ class DockService : Service() {
             hideCard(); Nav.go(this, item, nav)
         })
         root.addView(gap())
+        // Look at it in Google Maps beside Waze, without touching the current route.
+        root.addView(bigButton("Preview", Palette.GMAPS, 15f) {
+            hideCard()
+            Sync.patch(item.id, JSONObject().put("seen", true))
+            Split.preview(this, item)
+        })
+        root.addView(gap())
         root.addView(bigButton(if (alt == Prefs.NAV_GMAPS) "Maps" else "Waze", Palette.CARD_HI, 15f) {
             hideCard(); Nav.go(this, item, alt)
         })
@@ -431,6 +443,51 @@ class DockService : Service() {
         }
     }
 
+    // --- Nearby (detour) sheet -------------------------------------------
+    private var detours: View? = null
+
+    /**
+     * Big buttons over Waze: fuel, toilet, café… → Google Maps searches
+     * around here in the other half of the screen. An overlay, not an
+     * activity, so Waze stays the app in front and keeps its half.
+     */
+    private fun showDetours() {
+        hideDetours()
+        val sheet = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(Color.argb(245, 17, 24, 39), dp(18).toFloat(), Palette.GMAPS, dp(2))
+            setPadding(dp(14), dp(12), dp(14), dp(14))
+            elevation = dp(10).toFloat()
+        }
+        sheet.addView(label("Find nearby — opens Google Maps beside Waze", 15f, Palette.MUTED))
+        val cols = 4
+        var row: LinearLayout? = null
+        val buttons = Split.DETOURS.map { (icon, name, query) ->
+            bigButton("$icon\n$name", Palette.CARD_HI, 16f) { hideDetours(); Split.nearby(this, query) }
+        } + bigButton("🗺\nJust Maps", Palette.CARD_HI, 16f) { hideDetours(); Split.openMaps(this) }
+        buttons.forEachIndexed { i, b ->
+            if (i % cols == 0) {
+                row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                sheet.addView(row)
+            }
+            row!!.addView(b, LinearLayout.LayoutParams(dp(130), dp(88)).apply { setMargins(dp(4), dp(6), dp(4), 0) })
+        }
+        sheet.addView(bigButton("✕ Close", Palette.CARD, 16f) { hideDetours() }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(56)).apply {
+            setMargins(dp(4), dp(10), dp(4), 0)
+        })
+        val params = overlayParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.CENTER
+        }
+        wm.addView(sheet, params)
+        detours = sheet
+        main.postDelayed({ hideDetours() }, 60_000L)
+    }
+
+    private fun hideDetours() {
+        detours?.let { runCatching { wm.removeView(it) } }
+        detours = null
+    }
+
     private fun hideCard() {
         card?.let { runCatching { wm.removeView(it) } }
         card = null
@@ -445,6 +502,7 @@ class DockService : Service() {
         netCallback?.let { cb -> runCatching { (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(cb) } }
         hideFan()
         hideCard()
+        hideDetours()
         bubble?.let { runCatching { wm.removeView(it) } }
         bubble = null
         super.onDestroy()

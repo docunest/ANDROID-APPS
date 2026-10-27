@@ -45,6 +45,15 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("fanBookmarkHere", true)
         set(value) = sp.edit().putBoolean("fanBookmarkHere", value).apply()
 
+    /** How Google Maps is put next to Waze — see [Split]. */
+    var splitMethod: String
+        get() = sp.getString("splitMethod", Split.AUTO) ?: Split.AUTO
+        set(value) = sp.edit().putString("splitMethod", value).apply()
+
+    var fanNearby: Boolean
+        get() = sp.getBoolean("fanNearby", true)
+        set(value) = sp.edit().putBoolean("fanNearby", value).apply()
+
     var bubbleSizeDp: Int
         get() = sp.getInt("bubbleSizeDp", 50)
         set(value) = sp.edit().putInt("bubbleSizeDp", value).apply()
