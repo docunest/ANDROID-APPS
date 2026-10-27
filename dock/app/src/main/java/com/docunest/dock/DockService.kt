@@ -63,7 +63,7 @@ class DockService : Service() {
     private val updateLoop = object : Runnable {
         override fun run() {
             checkUpdate()
-            main.postDelayed(this, 60 * 60_000L)
+            main.postDelayed(this, Updater.EVERY_MS)
         }
     }
 
@@ -98,7 +98,9 @@ class DockService : Service() {
             Sync.onNewLinks = { if (bubble != null) showCard(it) else notifyNew(it) }
             Sync.start(this)
             registerWakeups()
-            main.postDelayed(updateLoop, 30_000L)
+            // Car just started: look for a new build right away.
+            Updater.checkSoon(this, force = true)
+            main.postDelayed(updateLoop, Updater.EVERY_MS)
             main.post(locationLoop)
         }
         if (!Settings.canDrawOverlays(this)) {
@@ -151,7 +153,7 @@ class DockService : Service() {
         }.also { runCatching { cm.registerDefaultNetworkCallback(it) } }
     }
 
-    private fun checkUpdate() = Sync.post { Updater.check(this) }
+    private fun checkUpdate() = Updater.checkSoon(this)
 
     private fun screen(): DisplayMetrics = DisplayMetrics().also {
         @Suppress("DEPRECATION")
