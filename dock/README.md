@@ -15,6 +15,11 @@ docunest/MapPal `lib/dock/`).
 - **New place from the phone** → a card appears at the top of the screen: tap the name or **Drive · Waze** (one tap), or **Maps** for Google Maps. The button shows an amber count of unseen places.
 - **Places list**: pinned and unseen first, then recently used, each with ~distance. Places more than 150 km away *and* older than 2 days sit under **Show more** — all history kept.
 - **Waze** is opened with a name search (`waze.com/ul?q=<name, address>&navigate=yes`) — the only form that started a route with the place's name in field tests (Waze test #9; 🧪 buttons still in the app for now). Tap the **name** = navigate (Waze; set Google Maps as default in ⚙ if ever wanted). Small **G** = this once in Google Maps. 🗺 = show on map. Long-press = pin / delete / open original link.
+- **Split screen — Waze keeps the route, Google Maps beside it**:
+  - Slide menu → **Google Maps** always opens in split screen next to Waze.
+  - New place card → **Preview**: the place in Google Maps beside Waze (name, photos, reviews) without touching the route; **Drive · Waze** when you decide.
+  - Slide menu → **🔎 Nearby**: big buttons over Waze — Fuel, Toilet, Café, Groceries, Parking, Pharmacy, Camper area, Just Maps — each a Google Maps search around you in the other half.
+  - How: Dock's tiny Accessibility helper presses Android's own "split screen" (switched on by root automatically; ⚙ → Split screen otherwise). Fallbacks: root `am start --windowingMode`, or plain launch-adjacent. Pick the method in ⚙ if one misbehaves.
 - **Map** (OpenStreetMap, no Google services needed): tap a pin → Drive. **Long-press anywhere** → drop a pin → Drive. Faded pins were found by name search (approximate).
 - **★ Save this spot**: one tap saves the GPS position; MapPal names it (nearest campsite/beach/viewpoint from OSM, else the address). Works offline — syncs when there's signal.
 - Links sent while the car was off arrive within seconds of switching on: the app starts on boot and keeps a long-poll open to MapPal (server answers the moment something arrives, ~1 s), re-asking at once on wake / network.

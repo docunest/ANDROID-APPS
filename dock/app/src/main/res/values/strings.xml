@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Dock</string>
+    <string name="split_service_desc">Lets Dock put Google Maps next to Waze in split screen (it only presses Android\'s own "split screen" action). Reads no screen content.</string>
 </resources>
