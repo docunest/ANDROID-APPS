@@ -19,57 +19,108 @@ import java.net.URL
  * Without root (a phone) Android's installer is used: one tap the first
  * time, silent afterwards on Android 12+.
  * The app restarts itself afterwards (BootReceiver: MY_PACKAGE_REPLACED).
+ *
+ * Checked right away when the dock starts (car on) and every [EVERY_MS]
+ * after, so a build pushed from the phone lands within minutes. GitHub
+ * allows 60 anonymous API calls/hour; requests carry the last ETag, and an
+ * unchanged answer (304) doesn't count against that.
  */
 object Updater {
-    private const val EVERY_MS = 3 * 60 * 60_000L
+    const val EVERY_MS = 3 * 60_000L
+    private const val RETRY_FAILED_BUILD_MS = 30 * 60_000L
 
     data class Release(val build: Int, val apkUrl: String)
 
-    fun latest(): Release? {
+    // Own thread: a download never blocks place syncing.
+    private val thread = android.os.HandlerThread("dock-update").apply { start() }
+    private val worker = android.os.Handler(thread.looper)
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /** What the version badge shows. */
+    @Volatile var busy = false
+        private set
+    @Volatile var status = "Not checked yet"
+        private set
+    private val listeners = mutableSetOf<() -> Unit>()
+    fun addListener(l: () -> Unit) = synchronized(listeners) { listeners += l }
+    fun removeListener(l: () -> Unit) = synchronized(listeners) { listeners -= l }
+    private fun set(busy: Boolean, status: String) {
+        this.busy = busy
+        this.status = status
+        val ls = synchronized(listeners) { listeners.toList() }
+        main.post { ls.forEach { it() } }
+    }
+
+    /** Check in the background (badge tap, car start, every few minutes). */
+    fun checkSoon(context: Context, force: Boolean = false) {
+        val app = context.applicationContext
+        worker.post { check(app, force) }
+    }
+
+    fun latest(context: Context): Release? {
+        val prefs = Prefs(context)
         val conn = URL("https://api.github.com/repos/${BuildConfig.UPDATE_REPO}/releases?per_page=30").openConnection() as HttpURLConnection
         conn.setRequestProperty("Accept", "application/vnd.github+json")
+        prefs.updateEtag.takeIf { it.isNotEmpty() }?.let { conn.setRequestProperty("If-None-Match", it) }
         conn.connectTimeout = 10_000
         conn.readTimeout = 20_000
-        val arr = try {
-            JSONArray(conn.inputStream.bufferedReader().use { it.readText() })
+        try {
+            if (conn.responseCode == 304) return prefs.cachedRelease()
+            if (conn.responseCode != 200) throw java.io.IOException("GitHub ${conn.responseCode}")
+            val arr = JSONArray(conn.inputStream.bufferedReader().use { it.readText() })
+            val rel = (0 until arr.length()).map { arr.getJSONObject(it) }.mapNotNull { r ->
+                val build = Regex("^dock-v(\\d+)$").find(r.optString("tag_name"))?.groupValues?.get(1)?.toIntOrNull() ?: return@mapNotNull null
+                val assets = r.optJSONArray("assets") ?: return@mapNotNull null
+                val apk = (0 until assets.length()).map { assets.getJSONObject(it) }.firstOrNull { it.optString("name").endsWith(".apk") }
+                    ?: return@mapNotNull null
+                Release(build, apk.getString("browser_download_url"))
+            }.maxByOrNull { it.build }
+            prefs.cacheRelease(rel, conn.getHeaderField("ETag").orEmpty())
+            return rel
         } finally {
             conn.disconnect()
         }
-        return (0 until arr.length()).map { arr.getJSONObject(it) }.mapNotNull { r ->
-            val build = Regex("^dock-v(\\d+)$").find(r.optString("tag_name"))?.groupValues?.get(1)?.toIntOrNull() ?: return@mapNotNull null
-            val assets = r.optJSONArray("assets") ?: return@mapNotNull null
-            val apk = (0 until assets.length()).map { assets.getJSONObject(it) }.firstOrNull { it.optString("name").endsWith(".apk") }
-                ?: return@mapNotNull null
-            Release(build, apk.getString("browser_download_url"))
-        }.maxByOrNull { it.build }
     }
 
     /** Returns a short status line. Blocking. */
     fun check(context: Context, force: Boolean = false): String {
         val prefs = Prefs(context)
-        if (!force && (!prefs.autoUpdate || System.currentTimeMillis() - prefs.lastUpdateCheck < EVERY_MS)) return "Skipped"
+        if (!force && (!prefs.autoUpdate || System.currentTimeMillis() - prefs.lastUpdateCheck < EVERY_MS - 5_000)) return status
         prefs.lastUpdateCheck = System.currentTimeMillis()
-        val rel = runCatching { latest() }.getOrElse { return "Update check failed: ${it.message}" }
-            ?: return "No releases found"
-        if (rel.build <= BuildConfig.VERSION_CODE) return "Up to date (build ${BuildConfig.VERSION_CODE})"
+        set(true, "Checking…")
+        val rel = runCatching { latest(context) }.getOrElse { return done("Check failed: ${it.message}") }
+            ?: return done("No releases found")
+        if (rel.build <= BuildConfig.VERSION_CODE) return done("Up to date")
+        if (!force && prefs.failedBuild == rel.build && System.currentTimeMillis() - prefs.failedAt < RETRY_FAILED_BUILD_MS) {
+            return done("v${rel.build} failed to install — retrying later")
+        }
+        set(true, "Downloading v${rel.build}…")
         val file = File(context.cacheDir, "dock-${rel.build}.apk")
         runCatching {
             URL(rel.apkUrl).openStream().use { input -> file.outputStream().use { input.copyTo(it) } }
-        }.onFailure { return "Download failed: ${it.message}" }
+        }.onFailure { return done("Download failed: ${it.message}") }
+        set(true, "Installing v${rel.build}…")
         // pm can't always read app-private files: stage in /data/local/tmp.
         val staged = "/data/local/tmp/dock-update.apk"
         val ok = Root.run("cp '${file.absolutePath}' $staged", "chmod 644 $staged", "pm install -r -d $staged", "rm -f $staged")
         if (ok) {
             file.delete()
-            return "Updated to build ${rel.build}"
+            return done("Updated to v${rel.build} — restarting")
         }
+        prefs.failedBuild = rel.build
+        prefs.failedAt = System.currentTimeMillis()
         // No root (a phone): Android's own installer. First time = one "Update"
         // tap; after that Android 12+ lets the app update itself silently.
         return try {
-            installWithoutRoot(context, file)
+            done(installWithoutRoot(context, file))
         } finally {
             file.delete()
         }
+    }
+
+    private fun done(status: String): String {
+        set(false, status)
+        return status
     }
 
     private fun installWithoutRoot(context: Context, apk: File): String {

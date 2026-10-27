@@ -83,6 +83,31 @@ class Prefs(context: Context) {
         get() = sp.getLong("lastUpdateCheck", 0)
         set(value) = sp.edit().putLong("lastUpdateCheck", value).apply()
 
+    var updateEtag: String
+        get() = sp.getString("updateEtag", "") ?: ""
+        set(value) = sp.edit().putString("updateEtag", value).apply()
+
+    var failedBuild: Int
+        get() = sp.getInt("failedBuild", 0)
+        set(value) = sp.edit().putInt("failedBuild", value).apply()
+
+    var failedAt: Long
+        get() = sp.getLong("failedAt", 0)
+        set(value) = sp.edit().putLong("failedAt", value).apply()
+
+    /** Last answer from GitHub, reused when it says "not modified" (304). */
+    fun cachedRelease(): Updater.Release? {
+        val build = sp.getInt("relBuild", 0)
+        val url = sp.getString("relUrl", null)
+        return if (build > 0 && url != null) Updater.Release(build, url) else null
+    }
+
+    fun cacheRelease(rel: Updater.Release?, etag: String) = sp.edit()
+        .putInt("relBuild", rel?.build ?: 0)
+        .putString("relUrl", rel?.apkUrl)
+        .putString("updateEtag", etag)
+        .apply()
+
     var rootGranted: Boolean
         get() = sp.getBoolean("rootGranted", false)
         set(value) = sp.edit().putBoolean("rootGranted", value).apply()

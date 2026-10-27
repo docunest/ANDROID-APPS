@@ -133,7 +133,7 @@ class SettingsActivity : Activity() {
         slider("Opacity when idle", prefs.bubbleAlpha, 15, 100, " %") { prefs.bubbleAlpha = it; DockService.start(this, DockService.ACTION_RELAYOUT) }
 
         section("Updates")
-        col.addView(label("Build ${BuildConfig.VERSION_CODE}. New builds from GitHub install by themselves (root), checked on start and every 3 h.", 13f, Palette.MUTED))
+        col.addView(label("Build ${BuildConfig.VERSION_CODE}. New builds from GitHub install by themselves (root), checked when the dock starts and every 3 min.", 13f, Palette.MUTED))
         switch("Install updates automatically", prefs.autoUpdate) { prefs.autoUpdate = it }
         row(bigButton("Check now", Palette.CARD_HI, 15f) {
             Toast.makeText(this, "Checking…", Toast.LENGTH_SHORT).show()

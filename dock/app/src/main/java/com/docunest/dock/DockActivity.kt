@@ -69,6 +69,8 @@ class DockActivity : Activity() {
         super.onResume()
         current = this
         Store.addListener(storeListener)
+        Updater.addListener(updaterListener)
+        renderVersion()
         map.onResume()
         runCatching { myLocation?.enableMyLocation() }
         render()
@@ -94,6 +96,7 @@ class DockActivity : Activity() {
 
     override fun onPause() {
         Store.removeListener(storeListener)
+        Updater.removeListener(updaterListener)
         runCatching { myLocation?.disableMyLocation() }
         map.onPause()
         if (current === this) current = null
@@ -123,6 +126,8 @@ class DockActivity : Activity() {
         // Actions (apps live in the press-and-slide menu — not repeated here)
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         top.addView(bigButton("★  Save this spot", Palette.AMBER, 18f) { Actions.bookmarkHere(this) }, LinearLayout.LayoutParams(0, dp(64), 1f))
+        top.addView(space(8))
+        top.addView(versionBadge(), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(64)))
         top.addView(space(8))
         top.addView(bigButton("⚙", Palette.CARD, 20f) { startActivity(Intent(this, SettingsActivity::class.java)) }, LinearLayout.LayoutParams(dp(64), dp(64)))
         top.addView(space(8))
@@ -194,6 +199,31 @@ class DockActivity : Activity() {
             root.addView(placesCol, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         }
         setContentView(root)
+    }
+
+    // --- Version badge: "v15 · Up to date", spinner while checking/installing; tap = check now.
+    private lateinit var versionText: TextView
+    private lateinit var versionSpinner: android.widget.ProgressBar
+    private val updaterListener: () -> Unit = { renderVersion() }
+
+    private fun versionBadge(): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        background = rounded(Palette.CARD, dp(14).toFloat())
+        setPadding(dp(12), 0, dp(12), 0)
+        isClickable = true
+        setOnClickListener { Updater.checkSoon(this@DockActivity, force = true) }
+        versionSpinner = android.widget.ProgressBar(context).apply { isIndeterminate = true }
+        addView(versionSpinner, LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginEnd = dp(8) })
+        versionText = label("", 13f, Palette.MUTED).apply { maxLines = 2; maxWidth = dp(170) }
+        addView(versionText)
+        renderVersion()
+    }
+
+    private fun renderVersion() {
+        if (!::versionText.isInitialized) return
+        versionText.text = "v${BuildConfig.VERSION_CODE}\n${Updater.status}"
+        versionSpinner.visibility = if (Updater.busy) View.VISIBLE else View.GONE
     }
 
     private fun space(d: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(d), dp(d)) }
