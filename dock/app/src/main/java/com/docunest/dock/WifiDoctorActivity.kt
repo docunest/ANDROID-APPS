@@ -177,7 +177,8 @@ class WifiDoctorActivity : Activity() {
         val drops = events.filter { it.title.startsWith("Lost") }
         tally.text = if (events.isEmpty()) "Nothing yet — every drop and no-internet spell is listed here with the cause."
         else "${drops.size} drops: " + drops.groupingBy { it.fault }.eachCount().entries.joinToString(" · ") { "${it.key.label} ${it.value}" } +
-            "  ·  ${events.size - drops.size} no-internet spells"
+            "  ·  ${events.count { it.title.startsWith("No internet") }} no-internet spells" +
+            events.count { it.title.endsWith(" froze") }.let { if (it > 0) "  ·  $it frozen links" else "" }
         history.removeAllViews()
         val fmt = SimpleDateFormat("d MMM HH:mm", Locale.US)
         for (e in events.take(40)) {

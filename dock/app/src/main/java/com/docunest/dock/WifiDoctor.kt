@@ -52,6 +52,11 @@ object WifiDoctor {
     private const val MAX_RESTARTS = 3
     private const val WEAK_RSSI = -80
     private const val PROBE_EVERY_MS = 60_000L
+    /** Shorter no-internet spells aren't recorded. */
+    private const val MIN_SPELL_MS = 20_000L
+    /** Hotspot silent this long while connected = frozen link. */
+    private const val FREEZE_MS = 60_000L
+    private const val FREEZE_GAP_MS = 3 * 60_000L
     private const val NOTIFY_ID = 7
     private const val CHANNEL = "wifi"
 
@@ -92,6 +97,12 @@ object WifiDoctor {
     private lateinit var app: Context
     private var started = false
     private var lastRestartAt = 0L
+    /** The hotspot answered a ping at least once on this connection (some never do — then silence means nothing). */
+    private var gatewayAnswered = false
+    private var gatewaySilentSince = 0L
+    private var lastFreezeFixAt = 0L
+    /** Dock itself switched Wi-Fi off/on for a frozen link — that drop isn't a new event. */
+    private var selfRestartAt = 0L
     private var lastProbeAt = 0L
     private var lastRssis = ArrayDeque<Int>()
     private var notified = false
@@ -218,12 +229,20 @@ object WifiDoctor {
 
         if (connected) {
             val probeDue = internet != true || now() - lastProbeAt > PROBE_EVERY_MS
-            if (keepAlive || probeDue) gatewayPingMs = gateway?.let { ping(it) }
+            if (keepAlive || probeDue) {
+                gatewayPingMs = gateway?.let { ping(it) }
+                if (gatewayPingMs != null) {
+                    gatewayAnswered = true
+                    gatewaySilentSince = 0L
+                } else if (gatewaySilentSince == 0L) gatewaySilentSince = now()
+            }
             if (probeDue && net != null) {
                 lastProbeAt = now()
                 val ok = probe(net)
                 if (internet != false && !ok) {
                     noInternetSince = now()
+                } else if (internet == false && ok && noInternetSince > 0 && now() - noInternetSince < MIN_SPELL_MS) {
+                    noInternetSince = 0L // the first check after connecting often fails while things settle — not a real spell
                 } else if (internet == false && ok && noInternetSince > 0) {
                     val gwOk = gatewayPingMs != null
                     record(
@@ -236,6 +255,7 @@ object WifiDoctor {
                 }
                 internet = ok
             }
+            unfreeze()
         } else {
             gatewayPingMs = null
             internet = null
@@ -244,6 +264,31 @@ object WifiDoctor {
             notifyLost()
         }
         changed()
+    }
+
+    /**
+     * Connected, but the hotspot stopped answering (and no internet) for a
+     * minute. Android would normally hang up by itself; we switched that off
+     * (ipreach-disconnect) so short hiccups don't drop the hotspot — so this
+     * is where a really dead link gets restarted. Once per [FREEZE_GAP_MS].
+     */
+    private fun unfreeze() {
+        val silent = if (gatewaySilentSince > 0) now() - gatewaySilentSince else 0L
+        if (!gatewayAnswered || internet == true || silent < FREEZE_MS) return
+        if (hasRoot != true || !autoFix) {
+            lastAction = "The hotspot stopped answering ${GpsDoctor.duration(silent)} ago — tap Reconnect or Wi-Fi settings"
+            return
+        }
+        if (now() - lastFreezeFixAt < FREEZE_GAP_MS) return
+        lastFreezeFixAt = now()
+        record(
+            "${ssid ?: "Wi-Fi"} froze",
+            "Connected, but the hotspot stopped answering for ${GpsDoctor.duration(silent)} — Dock restarted Wi-Fi.",
+            Fault.UNKNOWN, silent,
+        )
+        gatewaySilentSince = 0L
+        selfRestartAt = now()
+        Root.run("svc wifi disable", "sleep 2", "svc wifi enable")
     }
 
     private fun back() {
@@ -255,6 +300,8 @@ object WifiDoctor {
         }
         downSince = 0L
         upSince = now()
+        gatewayAnswered = false
+        gatewaySilentSince = 0L
         restarts = 0
         lastAction = ""
         internet = null
@@ -273,6 +320,7 @@ object WifiDoctor {
         val lastGood = lastRssis.maxOrNull() ?: rssi
         val lastSeen = lastRssis.lastOrNull() ?: rssi
         val name = ssid ?: "Wi-Fi"
+        if (now() - selfRestartAt < 20_000) return // the "froze" event already says why
         if (!enabled) {
             record("Lost $name", "Wi-Fi was switched off on the head unit.", Fault.ANDROID, null)
             return
@@ -464,7 +512,8 @@ object WifiDoctor {
     /** "back by itself after 40 s" on the newest drop. */
     private fun amendLast(after: String) {
         val list = load()
-        val last = (list.length() - 1 downTo 0).map { list.getJSONObject(it) }.firstOrNull { it.optString("title").startsWith("Lost") } ?: return
+        val last = (list.length() - 1 downTo 0).map { list.getJSONObject(it) }
+            .firstOrNull { it.optString("title").let { t -> t.startsWith("Lost") || t.endsWith(" froze") } } ?: return
         if (last.has("after")) return
         last.put("after", after)
         sp().edit().putString("wifiEvents", list.toString()).apply()
