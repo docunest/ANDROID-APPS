@@ -167,7 +167,7 @@ class WifiDoctorActivity : Activity() {
             if (w.connected) "Up for: ${if (w.upSince > 0) GpsDoctor.duration(now - w.upSince) else "—"}" else "Down for: ${GpsDoctor.duration(now - w.downSince)} · rejoin tries ${w.restarts}",
             "Android auto-join: " + (w.joinStatus?.let { if (it.contains("DISABLED")) "blocked ✗ ($it)" else "allowed ✓" } ?: if (w.hasRoot == true) "checked on a drop" else "unknown (needs root)"),
         ).joinToString("\n")
-        action.text = if (w.connected) "" else w.lastAction
+        action.text = w.lastAction // while connected: only the frozen-link note
         action.visibility = if (action.text.isEmpty()) View.GONE else View.VISIBLE
 
         val events = w.events()

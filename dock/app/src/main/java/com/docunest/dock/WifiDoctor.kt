@@ -57,6 +57,7 @@ object WifiDoctor {
     /** Hotspot silent this long while connected = frozen link. */
     private const val FREEZE_MS = 60_000L
     private const val FREEZE_GAP_MS = 3 * 60_000L
+    private const val FREEZE_NOTE = "The hotspot stopped answering"
     private const val NOTIFY_ID = 7
     private const val CHANNEL = "wifi"
 
@@ -274,9 +275,12 @@ object WifiDoctor {
      */
     private fun unfreeze() {
         val silent = if (gatewaySilentSince > 0) now() - gatewaySilentSince else 0L
-        if (!gatewayAnswered || internet == true || silent < FREEZE_MS) return
+        if (!gatewayAnswered || internet == true || silent < FREEZE_MS) {
+            if (lastAction.startsWith(FREEZE_NOTE)) lastAction = ""
+            return
+        }
         if (hasRoot != true || !autoFix) {
-            lastAction = "The hotspot stopped answering ${GpsDoctor.duration(silent)} ago — tap Reconnect or Wi-Fi settings"
+            lastAction = "$FREEZE_NOTE ${GpsDoctor.duration(silent)} ago — tap Reconnect or Wi-Fi settings"
             return
         }
         if (now() - lastFreezeFixAt < FREEZE_GAP_MS) return
