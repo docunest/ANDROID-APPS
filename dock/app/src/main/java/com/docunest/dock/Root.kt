@@ -21,7 +21,12 @@ object Root {
         if (code == 0 && out.contains("uid=0")) null
         else "su refused (exit $code${if (out.isNotEmpty()) ": " + out.take(60) else ""}) — allow Dock in Magisk / SuperSU"
     } catch (e: java.io.IOException) {
-        "no su on this device"
+        val m = e.message.orEmpty()
+        when {
+            "error=13" in m || "ermission denied" in m -> "su exists but Dock may not run it — allow Dock in the root manager (Magisk / SuperSU)"
+            "error=2" in m || "No such file" in m -> "no su found — not rooted, or the root manager isn't installed"
+            else -> "can't start su (${m.take(60)})"
+        }
     }
 
     /** Like [run], but returns what the commands printed (null if root refused). */
