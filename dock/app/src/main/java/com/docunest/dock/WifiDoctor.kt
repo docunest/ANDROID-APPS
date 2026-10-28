@@ -58,6 +58,8 @@ object WifiDoctor {
     private const val FREEZE_MS = 60_000L
     private const val FREEZE_GAP_MS = 3 * 60_000L
     private const val FREEZE_NOTE = "The hotspot stopped answering"
+    /** More than this received during the silent minute = the link works, just slowly. */
+    private const val FROZEN_MAX_RX = 100_000L
     private const val NOTIFY_ID = 7
     private const val CHANNEL = "wifi"
 
@@ -101,6 +103,8 @@ object WifiDoctor {
     /** The hotspot answered a ping at least once on this connection (some never do — then silence means nothing). */
     private var gatewayAnswered = false
     private var gatewaySilentSince = 0L
+    /** Bytes received (not over mobile data) when the hotspot went silent — data still arriving = not frozen. */
+    private var rxAtSilence = 0L
     private var lastFreezeFixAt = 0L
     /** Dock itself switched Wi-Fi off/on for a frozen link — that drop isn't a new event. */
     private var selfRestartAt = 0L
@@ -177,8 +181,13 @@ object WifiDoctor {
         worker.post(tick)
     }
 
-    /** "Reconnect now" on the doctor screen: skip the waiting. */
+    /** "Reconnect now" on the doctor screen: skip the waiting. Leaves a working connection alone. */
     fun reconnectNow() = worker.post {
+        if (connected && internet == true) {
+            lastAction = "Connection works — nothing to reconnect"
+            changed()
+            return@post
+        }
         restarts = 0
         lastRestartAt = 0L
         runCatching { fix(force = true) }
@@ -235,7 +244,10 @@ object WifiDoctor {
                 if (gatewayPingMs != null) {
                     gatewayAnswered = true
                     gatewaySilentSince = 0L
-                } else if (gatewaySilentSince == 0L) gatewaySilentSince = now()
+                } else if (gatewaySilentSince == 0L) {
+                    gatewaySilentSince = now()
+                    rxAtSilence = wifiRx()
+                }
             }
             if (probeDue && net != null) {
                 lastProbeAt = now()
@@ -276,6 +288,13 @@ object WifiDoctor {
     private fun unfreeze() {
         val silent = if (gatewaySilentSince > 0) now() - gatewaySilentSince else 0L
         if (!gatewayAnswered || internet == true || silent < FREEZE_MS) {
+            if (lastAction.startsWith(FREEZE_NOTE) || internet == true) lastAction = ""
+            return
+        }
+        // A jammed but working link (big download) can time out pings and probes; it still receives data.
+        if (rxAtSilence >= 0 && wifiRx() - rxAtSilence > FROZEN_MAX_RX) {
+            gatewaySilentSince = now()
+            rxAtSilence = wifiRx()
             if (lastAction.startsWith(FREEZE_NOTE)) lastAction = ""
             return
         }
@@ -479,6 +498,13 @@ object WifiDoctor {
     }
 
     // --- Measurements -----------------------------------------------------------
+
+    /** Received bytes not over mobile data (the head unit's Wi-Fi), -1 if unknown. */
+    private fun wifiRx(): Long {
+        val total = android.net.TrafficStats.getTotalRxBytes()
+        if (total < 0) return -1
+        return total - android.net.TrafficStats.getMobileRxBytes().coerceAtLeast(0)
+    }
 
     private fun ping(host: String): Int? = runCatching {
         val iface = gatewayIface
