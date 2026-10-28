@@ -36,7 +36,7 @@ jobs:
           gh release create "dock-v${{ github.run_number }}" dock.apk \
             --target "${{ github.sha }}" \
             --title "Dock build ${{ github.run_number }}" \
-            --notes "Branch ${{ github.ref_name }}, commit ${{ github.sha }}. Installed automatically on the head unit within ~3 h (or Settings → Check now)."
+            --notes "Branch ${{ github.ref_name }}, commit ${{ github.sha }}. Installed automatically on the head unit within a few minutes (or tap the version badge)."
 
       - uses: actions/upload-artifact@v4
         with:

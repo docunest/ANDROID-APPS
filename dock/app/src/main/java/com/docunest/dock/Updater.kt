@@ -24,10 +24,16 @@ import java.net.URL
  * after, so a build pushed from the phone lands within minutes. GitHub
  * allows 60 anonymous API calls/hour; requests carry the last ETag, and an
  * unchanged answer (304) doesn't count against that.
+ *
+ * Android hands a root `pm install` to Play Protect like a USB install, and
+ * Play Protect flags Dock (root, overlay, accessibility, self-install) and
+ * holds the install up to an hour waiting for a tap. So verification of
+ * USB/shell installs is switched off first (`verifier_verify_adb_installs`,
+ * owner's call 2026-10-28); Play Store and browser installs are still checked.
  */
 object Updater {
-    const val EVERY_MS = 3 * 60_000L
-    private const val RETRY_FAILED_BUILD_MS = 30 * 60_000L
+    const val EVERY_MS = 60_000L
+    private const val RETRY_FAILED_BUILD_MS = 10 * 60_000L
 
     data class Release(val build: Int, val apkUrl: String)
 
@@ -102,7 +108,12 @@ object Updater {
         set(true, "Installing v${rel.build}…")
         // pm can't always read app-private files: stage in /data/local/tmp.
         val staged = "/data/local/tmp/dock-update.apk"
-        val ok = Root.run("cp '${file.absolutePath}' $staged", "chmod 644 $staged", "pm install -r -d $staged", "rm -f $staged")
+        val ok = Root.run(
+            "settings put global verifier_verify_adb_installs 0",
+            "cp '${file.absolutePath}' $staged", "chmod 644 $staged",
+            // The install's own result decides (not the clean-up after it), so a refusal falls back below.
+            "pm install -r -d $staged", "r=\$?", "rm -f $staged", "exit \$r",
+        )
         if (ok) {
             file.delete()
             return done("Updated to v${rel.build} — restarting")
