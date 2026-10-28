@@ -221,14 +221,18 @@ class GpsDoctorActivity : Activity() {
 
         val now = SystemClock.elapsedRealtime()
         val f = d.fix
-        val signal = when {
-            d.satsHeard == 0 -> "none"
-            d.topCn0 >= 25 -> "%.0f dB-Hz · good".format(d.topCn0)
-            d.topCn0 >= 20 -> "%.0f dB-Hz · fair".format(d.topCn0)
-            else -> "%.0f dB-Hz · weak".format(d.topCn0)
+        val signal = if (d.satsHeard == 0) "none" else {
+            val q = when {
+                d.topCn0 >= 35 -> "good"
+                d.topCn0 >= 28 -> "fair"
+                else -> "weak"
+            }
+            "best four %.0f dB-Hz · %s (%s)\nStrong enough (%d+ dB-Hz): %d of %d — a fix needs 4".format(
+                d.topCn0, q, d.topSignals, GpsDoctor.STRONG_CN0.toInt(), d.strongSats, d.satsHeard,
+            )
         }
         live.text = listOf(
-            "Location ${onOff(d.locationOn(this))} · GPS ${onOff(d.gpsEnabled(lm))} · Root ${when (d.hasRoot) { true -> "yes"; false -> "no"; null -> "?" }}",
+            "Location ${onOff(d.locationOn(this))} · GPS ${onOff(d.gpsEnabled(lm))} · Root ${when (d.hasRoot) { true -> "yes"; false -> "no — ${d.rootWhy}"; null -> "? (checked when fixing)" }}",
             "Satellites: heard ${d.satsHeard}, used ${d.satsUsed}" + (d.systems.takeIf { it.isNotEmpty() }?.let { "  ($it)" } ?: ""),
             "Signal: $signal",
             "Chip data: " + if (d.nmeaCount > 0) "${d.nmeaCount} NMEA lines, last ${d.duration(now - d.lastNmeaAt)} ago" else "no NMEA lines yet",

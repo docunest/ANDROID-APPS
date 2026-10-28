@@ -272,7 +272,8 @@ class DockActivity : Activity() {
         val fresh = last != null && SystemClock.elapsedRealtimeNanos() - last.elapsedRealtimeNanos < 30_000_000_000L
         val (text, color) = when {
             !allowed || !GpsDoctor.locationOn(this) || !GpsDoctor.gpsEnabled(lm) -> "📡 GPS off · fix" to Palette.RED
-            fresh -> "📡 GPS ±${last!!.accuracy.toInt()} m" to Palette.GMAPS
+            fresh && last!!.accuracy <= GpsDoctor.GOOD_ACCURACY_M -> "📡 GPS ±${last.accuracy.toInt()} m" to Palette.GMAPS
+            fresh -> "📡 GPS weak ±${last!!.accuracy.toInt()} m" to Palette.AMBER
             else -> "📡 No GPS fix · fix" to Palette.AMBER
         }
         gpsChip.text = text

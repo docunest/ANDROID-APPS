@@ -10,6 +10,20 @@ object Root {
         p.waitFor() == 0
     }.getOrDefault(false)
 
+    /**
+     * null when root works, else why not — "no su" (not rooted / su not on the
+     * path) or "su refused" (the superuser app — Magisk, SuperSU — denies Dock).
+     */
+    fun check(): String? = try {
+        val p = ProcessBuilder("su", "-c", "id").redirectErrorStream(true).start()
+        val out = p.inputStream.bufferedReader().readText().trim()
+        val code = p.waitFor()
+        if (code == 0 && out.contains("uid=0")) null
+        else "su refused (exit $code${if (out.isNotEmpty()) ": " + out.take(60) else ""}) — allow Dock in Magisk / SuperSU"
+    } catch (e: java.io.IOException) {
+        "no su on this device"
+    }
+
     /** Like [run], but returns what the commands printed (null if root refused). */
     fun output(vararg commands: String): String? = runCatching {
         val p = ProcessBuilder("su", "-c", commands.joinToString("; ")).redirectErrorStream(true).start()

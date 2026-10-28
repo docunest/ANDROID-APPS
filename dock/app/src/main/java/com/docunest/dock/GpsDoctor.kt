@@ -36,10 +36,16 @@ import kotlin.math.abs
  */
 object GpsDoctor {
     /** A fix this good (or better) from the GPS chip = working. */
-    private const val GOOD_ACCURACY_M = 100f
-    private const val FRESH_MS = 15_000L
+    /** A fix this good (or better) is one Waze can navigate on. */
+    const val GOOD_ACCURACY_M = 30f
+    private const val FRESH_MS = 5_000L
+    /** "Fixed" = this many good fixes in a row (~5 s at 1 Hz), not one lucky one. */
+    private const val STABLE_FIXES = 5
     private const val CLOCK_OFF_MS = 2 * 60_000L
-    private const val WEAK_CN0 = 20f
+    /** Best-four average below this = too weak for a reliable fix (open sky gives 35–45). */
+    private const val WEAK_CN0 = 28f
+    /** A satellite this strong is usable; a fix needs at least 4. */
+    const val STRONG_CN0 = 30f
 
     enum class State { PENDING, RUNNING, OK, NO_FIX, SKIPPED }
 
@@ -55,6 +61,14 @@ object GpsDoctor {
     @Volatile var satsUsed = 0
     /** Average of the best four signals, dB-Hz (≥ 25 good, < 20 weak). */
     @Volatile var topCn0 = 0f
+    /** Satellites at ≥ [STRONG_CN0] — need 4 for a fix. */
+    @Volatile var strongSats = 0
+    /** The four best signals, e.g. "27 · 24 · 22 · 19". */
+    @Volatile var topSignals = ""
+    /** Good fixes (≤ [GOOD_ACCURACY_M]) in a row. */
+    @Volatile var goodStreak = 0
+    /** Why root isn't available (null = works or not checked). */
+    @Volatile var rootWhy: String? = null
     @Volatile var systems = ""
     @Volatile var nmeaCount = 0
     @Volatile var lastNmeaAt = 0L
@@ -103,11 +117,13 @@ object GpsDoctor {
         override fun onLocationChanged(location: Location) {
             fix = location
             fixAt = now()
+            goodStreak = if (!location.hasAccuracy() || location.accuracy <= GOOD_ACCURACY_M) goodStreak + 1 else 0
             changed()
         }
         override fun onProviderEnabled(provider: String) = changed()
         override fun onProviderDisabled(provider: String) {
             fixAt = 0L // an old fix doesn't count once GPS is off
+            goodStreak = 0
             changed()
         }
         @Deprecated("Called on Android 10 and older only")
@@ -131,7 +147,10 @@ object GpsDoctor {
             }
             satsHeard = heard
             satsUsed = used
-            topCn0 = cn0s.sortedDescending().take(4).takeIf { it.isNotEmpty() }?.average()?.toFloat() ?: 0f
+            val best = cn0s.sortedDescending().take(4)
+            topCn0 = best.takeIf { it.isNotEmpty() }?.average()?.toFloat() ?: 0f
+            topSignals = best.joinToString(" · ") { it.toInt().toString() }
+            strongSats = cn0s.count { it >= STRONG_CN0 }
             systems = bySystem.entries.joinToString(" · ") { "${it.key} ${it.value}" }
             lastStatusAt = now()
             changed()
@@ -198,6 +217,7 @@ object GpsDoctor {
         if (!gpsEnabled(lm)) return "GPS is switched off (only Wi-Fi / mobile location is on)."
         if (hasFix()) return "GPS works: ±${fix!!.accuracy.toInt()} m${satellitesInUse()}."
         val t = now()
+        val poor = fix?.takeIf { t - fixAt < FRESH_MS && it.hasAccuracy() }?.accuracy?.toInt()
         val chipTalks = t - lastNmeaAt < 10_000 || t - lastStatusAt < 10_000
         if (!chipTalks) {
             return if (t - watchingSince < 20_000) "Listening to the GPS chip…"
@@ -205,7 +225,12 @@ object GpsDoctor {
         }
         clockOffsetMs?.let { if (abs(it) > CLOCK_OFF_MS) return "The clock is ${duration(abs(it))} off — the GPS can't use its saved satellite data." }
         if (satsHeard == 0) return "The GPS chip runs but hears no satellites — antenna cable/connector, or something metal above it."
-        if (topCn0 < WEAK_CN0) return "Satellites heard, but very weak (%.0f dB-Hz) — antenna or what's above it.".format(topCn0)
+        if (strongSats < 4 || topCn0 < WEAK_CN0) {
+            return "Signal too weak for a good fix: ${plural(strongSats, "satellite")} strong enough (need 4 at ${STRONG_CN0.toInt()}+ dB-Hz; best $topSignals)" +
+                (poor?.let { ", fix only ±$it m" } ?: "") +
+                ". Antenna, its cable/connector, or interference (dashcam, USB chargers) — a reset won't help."
+        }
+        if (poor != null) return "GPS fix is poor (±$poor m) although the signal is fine — the fixes below may help."
         return "${plural(satsHeard, "satellite")} heard well but no fix yet — usually stale satellite data (a reset helps)."
     }
 
@@ -250,8 +275,9 @@ object GpsDoctor {
     }
 
     private fun ladder(context: Context) {
-        hasRoot = Root.run("id")
-        note("Root: ${if (hasRoot == true) "yes" else "no — root-only fixes are skipped"}")
+        rootWhy = Root.check()
+        hasRoot = rootWhy == null
+        note("Root: ${if (hasRoot == true) "yes" else "no ($rootWhy) — root-only fixes are skipped"}")
         clockOffsetMs = networkTime(context)?.let { System.currentTimeMillis() - it }
         var fixedBy: Step? = null
         var blocked = false
@@ -307,7 +333,7 @@ object GpsDoctor {
     private fun advice(): String = when {
         nmeaCount == 0 && lastStatusAt == 0L -> " Try a full head unit restart (button below); if it stays silent the GPS module or its driver is faulty."
         satsHeard == 0 -> " Check the GPS antenna: connector at the back of the head unit, cable not pinched, antenna not under metal."
-        topCn0 < WEAK_CN0 -> " Signal is weak: move the antenna to the windscreen/dash edge, away from a heated or metallised windscreen."
+        strongSats < 4 || topCn0 < WEAK_CN0 -> " Signal is weak: parked with open sky, unplug the dashcam and USB chargers one by one and watch the best signals here — if they jump, that device jams GPS. Otherwise check the antenna connector at the back of the head unit and put the antenna where it sees the sky (not under metal or a metallised/heated windscreen)."
         else -> " Restart the head unit (button below) and park with open sky for 5 minutes."
     }
 
@@ -429,7 +455,7 @@ object GpsDoctor {
         step.endsAt = start + step.waitMs
         changed()
         while (!cancelled && now() < step.endsAt) {
-            if (fixAt > start && hasFix()) {
+            if (fixAt > start && hasFix() && goodStreak >= STABLE_FIXES) {
                 step.note += " → fix after ${duration(now() - start)}"
                 return true
             }

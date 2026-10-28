@@ -153,7 +153,7 @@ class WifiDoctorActivity : Activity() {
         val signal = if (w.connected) "${w.rssi} dBm · ${quality(w.rssi)} · ${band(w.freqMhz)} · ${w.linkMbps} Mbit/s" else "—"
         val seen = if (w.targetSeenAt > 0) "${w.targetSeenRssi} dBm, ${GpsDoctor.duration(now - w.targetSeenAt)} ago" else "not yet"
         live.text = listOf(
-            "Wi-Fi ${if (w.enabled) "on ✓" else "off ✗"} · Root ${when (w.hasRoot) { true -> "yes"; false -> "no"; null -> "?" }}",
+            "Wi-Fi ${if (w.enabled) "on ✓" else "off ✗"} · Root ${when (w.hasRoot) { true -> "yes"; false -> "no — ${w.rootWhy}"; null -> "?" }}",
             "Network: ${if (w.connected) (w.ssid ?: "connected") else "not connected"}" + (w.target?.let { "   (keeping: $it)" } ?: ""),
             "Signal: $signal",
             "Hotspot answers: " + when {

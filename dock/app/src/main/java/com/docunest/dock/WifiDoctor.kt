@@ -93,6 +93,7 @@ object WifiDoctor {
     @Volatile var joinStatus: String? = null
     @Volatile var lastAction = ""
     @Volatile var hasRoot: Boolean? = null
+    @Volatile var rootWhy: String? = null
 
     private val thread = HandlerThread("wifi-doctor").apply { start() }
     private val worker = Handler(thread.looper)
@@ -170,7 +171,8 @@ object WifiDoctor {
             )
         }
         worker.post {
-            hasRoot = Root.run("id")
+            rootWhy = Root.check()
+            hasRoot = rootWhy == null
             // Scans more often than 4 per 2 min (Android's default throttle).
             if (hasRoot == true) Root.run(
                 "settings put global wifi_scan_throttle_enabled 0",
