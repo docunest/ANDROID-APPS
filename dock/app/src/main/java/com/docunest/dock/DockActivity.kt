@@ -1,13 +1,18 @@
 package com.docunest.dock
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
 import android.location.Location
+import android.location.LocationManager
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.text.TextUtils
 import android.view.Gravity
@@ -40,6 +45,15 @@ class DockActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var map: MapView
     private lateinit var bar: LinearLayout
+    private lateinit var gpsChip: TextView
+    private lateinit var wifiChip: TextView
+    private val gpsTicker = object : Runnable {
+        override fun run() {
+            renderGps()
+            gpsHandler.postDelayed(this, 5000)
+        }
+    }
+    private val gpsHandler = Handler(Looper.getMainLooper())
     private var myLocation: MyLocationNewOverlay? = null
     private var dropped: Marker? = null
     private var centeredOnce = false
@@ -54,6 +68,7 @@ class DockActivity : Activity() {
             userAgentValue = packageName
         }
         Sync.init(this)
+        WifiDoctor.start(this)
         showMore = intent?.getBooleanExtra(EXTRA_SHOW_MORE, false) == true
         build()
         val missing = buildList {
@@ -74,6 +89,7 @@ class DockActivity : Activity() {
         map.onResume()
         runCatching { myLocation?.enableMyLocation() }
         render()
+        gpsHandler.post(gpsTicker)
         Sync.pollSoon()
         Locator.current(this) { loc ->
             if (loc != null) {
@@ -97,6 +113,7 @@ class DockActivity : Activity() {
     override fun onPause() {
         Store.removeListener(storeListener)
         Updater.removeListener(updaterListener)
+        gpsHandler.removeCallbacks(gpsTicker)
         runCatching { myLocation?.disableMyLocation() }
         map.onPause()
         if (current === this) current = null
@@ -173,6 +190,25 @@ class DockActivity : Activity() {
         mapFrame.addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM).apply {
             setMargins(dp(8), dp(8), dp(8), dp(8))
         })
+        // GPS and Wi-Fi state at a glance; tap = the doctor screens (diagnose + fix).
+        fun chip(text: String, target: Class<*>) = label(text, 14f, bold = true).apply {
+            background = rounded(Color.argb(235, 17, 24, 39), dp(12).toFloat())
+            gravity = Gravity.CENTER_VERTICAL
+            minHeight = dp(48)
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            isClickable = true
+            setOnClickListener { startActivity(Intent(this@DockActivity, target)) }
+        }
+        gpsChip = chip("📡 GPS", GpsDoctorActivity::class.java)
+        wifiChip = chip("📶 Wi-Fi", WifiDoctorActivity::class.java)
+        val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        chips.addView(gpsChip)
+        chips.addView(space(8))
+        chips.addView(wifiChip)
+        mapFrame.addView(chips, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply {
+            setMargins(dp(8), dp(8), dp(8), dp(8))
+        })
+        renderGps()
         map.overlays.add(MapEventsOverlay(object : MapEventsReceiver {
             override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
                 bar.visibility = View.GONE
@@ -224,6 +260,36 @@ class DockActivity : Activity() {
         if (!::versionText.isInitialized) return
         versionText.text = "v${BuildConfig.VERSION_CODE}\n${Updater.status}"
         versionSpinner.visibility = if (Updater.busy) View.VISIBLE else View.GONE
+    }
+
+    /** The 📡 chip: green with a fresh GPS fix (< 30 s), amber without one, red when GPS is off. */
+    @SuppressLint("MissingPermission") // checked by Locator.hasPermission()
+    private fun renderGps() {
+        if (!::gpsChip.isInitialized) return
+        val lm = getSystemService(LOCATION_SERVICE) as LocationManager
+        val allowed = Locator.hasPermission(this)
+        val last = if (allowed) runCatching { lm.getLastKnownLocation(LocationManager.GPS_PROVIDER) }.getOrNull() else null
+        val fresh = last != null && SystemClock.elapsedRealtimeNanos() - last.elapsedRealtimeNanos < 30_000_000_000L
+        val (text, color) = when {
+            !allowed || !GpsDoctor.locationOn(this) || !GpsDoctor.gpsEnabled(lm) -> "📡 GPS off · fix" to Palette.RED
+            fresh -> "📡 GPS ±${last!!.accuracy.toInt()} m" to Palette.GMAPS
+            else -> "📡 No GPS fix · fix" to Palette.AMBER
+        }
+        gpsChip.text = text
+        gpsChip.setTextColor(color)
+
+        // Wi-Fi: the watchdog in the dock service keeps this current.
+        val w = WifiDoctor
+        val now = SystemClock.elapsedRealtime()
+        val (wText, wColor) = when {
+            !w.enabled -> "📶 Wi-Fi off" to Palette.RED
+            !w.connected && w.downSince == 0L -> "📶 Wi-Fi…" to Palette.MUTED
+            !w.connected -> "📶 Wi-Fi lost ${GpsDoctor.duration(now - w.downSince)}" to Palette.RED
+            w.internet == false -> "📶 no internet" to Palette.AMBER
+            else -> "📶 ${w.ssid?.take(14) ?: "Wi-Fi"}" to (if (w.internet == true) Palette.GMAPS else Palette.TEXT)
+        }
+        wifiChip.text = wText
+        wifiChip.setTextColor(wColor)
     }
 
     private fun space(d: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(d), dp(d)) }
