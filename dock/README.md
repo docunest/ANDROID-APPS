@@ -22,6 +22,10 @@ docunest/MapPal `lib/dock/`).
   - How: Dock's tiny Accessibility helper presses Android's own "split screen" (switched on by root automatically; ⚙ → Split screen otherwise). Fallbacks: root `am start --windowingMode`, or plain launch-adjacent. Pick the method in ⚙ if one misbehaves.
 - **Map** (OpenStreetMap, no Google services needed): tap a pin → Drive. **Long-press anywhere** → drop a pin → Drive. Faded pins were found by name search (approximate).
 - **★ Save this spot**: one tap saves the GPS position; MapPal names it (nearest campsite/beach/viewpoint from OSM, else the address). Works offline — syncs when there's signal.
+- **📡 GPS chip** (top-left of the map): green `±8 m` = fresh GPS fix, amber = no fix, red = GPS/location off. Tap → **GPS doctor**:
+  - Live view of the GPS chip itself: satellites heard / used (per system), signal strength (dB-Hz), raw NMEA flowing, last fix, time to first fix, clock vs internet time — plus one sentence on what's wrong (no permission, location off, chip silent = driver, no satellites = antenna, weak signal, stale data, wrong clock).
+  - **Fix GPS** tries, in order, and after each one waits up to 1–3 min for a real GPS fix (only the GPS chip counts, never Wi-Fi/mobile position); stops at the first that works and tries that one first next time: allow location → switch location/GPS on → ask GPS and wait → fix the clock → fresh orbit data (XTRA/PSDS + time) → warm restart → GPS off/on (root) → cold start → restart the GPS driver process (root; HAL / `mnld` / `gpsd`). Worst case ~16 min; **Stop** any time. Keep the screen open while it runs.
+  - If nothing works it says what's left (antenna, module) and offers **Restart head unit** (root, with confirmation).
 - Links sent while the car was off arrive within seconds of switching on: the app starts on boot and keeps a long-poll open to MapPal (server answers the moment something arrives, ~1 s), re-asking at once on wake / network.
 
 ## First install (once)

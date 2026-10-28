@@ -10,6 +10,13 @@ object Root {
         p.waitFor() == 0
     }.getOrDefault(false)
 
+    /** Like [run], but returns what the commands printed (null if root refused). */
+    fun output(vararg commands: String): String? = runCatching {
+        val p = ProcessBuilder("su", "-c", commands.joinToString("; ")).redirectErrorStream(true).start()
+        val out = p.inputStream.bufferedReader().readText()
+        if (p.waitFor() == 0) out else null
+    }.getOrNull()
+
     /** Overlay, location, notifications, no battery kill. Idempotent. */
     fun grantAll(context: Context): Boolean {
         val pkg = context.packageName
