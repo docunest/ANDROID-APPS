@@ -102,6 +102,12 @@ class DockService : Service() {
             Updater.checkSoon(this, force = true)
             main.postDelayed(updateLoop, Updater.EVERY_MS)
             main.post(locationLoop)
+            GpsWatch.start(this)
+            WifiDoctor.start(this)
+            // Background location: Wi-Fi names and GPS glitches while another app is in front.
+            if (checkSelfPermission(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                Thread { Root.run("pm grant $packageName android.permission.ACCESS_BACKGROUND_LOCATION") }.start()
+            }
         }
         if (!Settings.canDrawOverlays(this)) {
             if (!rootTried) {

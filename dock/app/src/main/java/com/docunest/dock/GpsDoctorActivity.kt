@@ -33,6 +33,8 @@ class GpsDoctorActivity : Activity() {
     private lateinit var fixButton: TextView
     private lateinit var stepsBox: LinearLayout
     private lateinit var logText: TextView
+    private lateinit var sensorsText: TextView
+    private lateinit var glitchText: TextView
     private var rendered: List<GpsDoctor.Step>? = null
     private val rows = mutableListOf<Pair<TextView, TextView>>()
     private val doctorListener: () -> Unit = { render() }
@@ -59,12 +61,14 @@ class GpsDoctorActivity : Activity() {
         super.onResume()
         GpsDoctor.addListener(doctorListener)
         GpsDoctor.watch(this)
+        Sensors.start(this)
         main.post(ticker)
     }
 
     override fun onPause() {
         GpsDoctor.removeListener(doctorListener)
         main.removeCallbacks(ticker)
+        Sensors.stop(this)
         super.onPause()
     }
 
@@ -138,6 +142,20 @@ class GpsDoctorActivity : Activity() {
         manual.addView(bigButton("Restart head unit", Palette.CARD_HI, 14f) { confirmReboot() }, LinearLayout.LayoutParams(0, dp(56), 1f))
         left.addView(manual)
 
+        left.addView(space(14))
+        left.addView(label("Sensors", 18f, bold = true))
+        sensorsText = label("", 14f).apply {
+            background = rounded(Palette.CARD, dp(14).toFloat())
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setLineSpacing(dp(3).toFloat(), 1f)
+        }
+        left.addView(sensorsText)
+        left.addView(space(6))
+        left.addView(bigButton("Set as level (parked on flat ground)", Palette.CARD_HI, 14f) {
+            Sensors.setLevel(this)
+            Toast.makeText(this, "Saved — this is level now", Toast.LENGTH_SHORT).show()
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
+
         right.addView(label("Fixes, in order", 18f, bold = true))
         stepsBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         right.addView(stepsBox)
@@ -146,6 +164,13 @@ class GpsDoctorActivity : Activity() {
         right.addView(label("Log", 16f, bold = true))
         logText = label("", 12f, Palette.MUTED).apply { setTextIsSelectable(true) }
         right.addView(logText)
+        right.addView(space(14))
+        val ghead = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        ghead.addView(label("Speed / position glitches", 16f, bold = true), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        ghead.addView(bigButton("Clear", Palette.CARD, 13f) { GpsWatch.clear(this); render() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(48)))
+        right.addView(ghead)
+        glitchText = label("", 12f, Palette.MUTED).apply { setTextIsSelectable(true) }
+        right.addView(glitchText)
 
         val root = LinearLayout(this).apply {
             orientation = if (landscape) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
@@ -218,6 +243,26 @@ class GpsDoctorActivity : Activity() {
         summary.visibility = if (d.summary.isEmpty()) View.GONE else View.VISIBLE
         renderSteps(d.steps, now)
         logText.text = d.logLines().takeLast(40).joinToString("\n").ifEmpty { "Tap Fix GPS to start." }
+        renderSensors()
+        val glitches = GpsWatch.lines(this)
+        glitchText.text = "Recorded in the background whenever Waze or any app uses GPS: speed jumps a towing van can't do, " +
+            "reported speed that disagrees with the distance covered, and position leaps. " +
+            "${GpsWatch.fixesSeen} fixes checked since the dock started.\n\n" +
+            glitches.take(15).joinToString("\n").ifEmpty { "None so far." }
+    }
+
+    private fun renderSensors() {
+        val found = Sensors.list(this)
+        val lines = mutableListOf(found.joinToString(" · ") { "${it.label} ${if (it.sensor != null) "✓" else "✗"}" })
+        val accel = found.first().sensor
+        if (accel == null) {
+            lines += "No accelerometer in this unit — no level, no movement check."
+        } else {
+            lines += "Accelerometer: ${accel.vendor} ${accel.name}".trim()
+            lines += "Level: " + Sensors.levelText() + if (Sensors.levelSet(this)) "" else "  (not calibrated yet — tap Set as level once, parked flat)"
+            if (Sensors.hasReading) lines += "Movement: %.2f g".format(Sensors.shake)
+        }
+        sensorsText.text = lines.joinToString("\n")
     }
 
     private fun renderSteps(steps: List<GpsDoctor.Step>, now: Long) {

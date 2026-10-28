@@ -59,4 +59,6 @@ android {
 dependencies {
     // OpenStreetMap map view: no API key, no Google Play Services.
     implementation("org.osmdroid:osmdroid-android:6.1.20")
+    // Plain JVM tests for the logic that doesn't need a device (./gradlew testDebugUnitTest).
+    testImplementation("junit:junit:4.13.2")
 }

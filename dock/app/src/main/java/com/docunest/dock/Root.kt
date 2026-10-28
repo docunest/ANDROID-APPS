@@ -24,6 +24,7 @@ object Root {
             "appops set $pkg SYSTEM_ALERT_WINDOW allow",
             "pm grant $pkg android.permission.ACCESS_FINE_LOCATION",
             "pm grant $pkg android.permission.ACCESS_COARSE_LOCATION",
+            "pm grant $pkg android.permission.ACCESS_BACKGROUND_LOCATION",
             "pm grant $pkg android.permission.POST_NOTIFICATIONS 2>/dev/null; true",
             "dumpsys deviceidle whitelist +$pkg",
         ).also { enableSplitService(context) }

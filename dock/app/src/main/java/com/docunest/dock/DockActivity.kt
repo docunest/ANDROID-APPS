@@ -46,6 +46,7 @@ class DockActivity : Activity() {
     private lateinit var map: MapView
     private lateinit var bar: LinearLayout
     private lateinit var gpsChip: TextView
+    private lateinit var wifiChip: TextView
     private val gpsTicker = object : Runnable {
         override fun run() {
             renderGps()
@@ -67,6 +68,7 @@ class DockActivity : Activity() {
             userAgentValue = packageName
         }
         Sync.init(this)
+        WifiDoctor.start(this)
         showMore = intent?.getBooleanExtra(EXTRA_SHOW_MORE, false) == true
         build()
         val missing = buildList {
@@ -188,16 +190,22 @@ class DockActivity : Activity() {
         mapFrame.addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM).apply {
             setMargins(dp(8), dp(8), dp(8), dp(8))
         })
-        // GPS state at a glance; tap = GPS doctor (diagnose + fix).
-        gpsChip = label("📡 GPS", 14f, bold = true).apply {
+        // GPS and Wi-Fi state at a glance; tap = the doctor screens (diagnose + fix).
+        fun chip(text: String, target: Class<*>) = label(text, 14f, bold = true).apply {
             background = rounded(Color.argb(235, 17, 24, 39), dp(12).toFloat())
             gravity = Gravity.CENTER_VERTICAL
             minHeight = dp(48)
             setPadding(dp(12), dp(6), dp(12), dp(6))
             isClickable = true
-            setOnClickListener { startActivity(Intent(this@DockActivity, GpsDoctorActivity::class.java)) }
+            setOnClickListener { startActivity(Intent(this@DockActivity, target)) }
         }
-        mapFrame.addView(gpsChip, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply {
+        gpsChip = chip("📡 GPS", GpsDoctorActivity::class.java)
+        wifiChip = chip("📶 Wi-Fi", WifiDoctorActivity::class.java)
+        val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        chips.addView(gpsChip)
+        chips.addView(space(8))
+        chips.addView(wifiChip)
+        mapFrame.addView(chips, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply {
             setMargins(dp(8), dp(8), dp(8), dp(8))
         })
         renderGps()
@@ -269,6 +277,19 @@ class DockActivity : Activity() {
         }
         gpsChip.text = text
         gpsChip.setTextColor(color)
+
+        // Wi-Fi: the watchdog in the dock service keeps this current.
+        val w = WifiDoctor
+        val now = SystemClock.elapsedRealtime()
+        val (wText, wColor) = when {
+            !w.enabled -> "📶 Wi-Fi off" to Palette.RED
+            !w.connected && w.downSince == 0L -> "📶 Wi-Fi…" to Palette.MUTED
+            !w.connected -> "📶 Wi-Fi lost ${GpsDoctor.duration(now - w.downSince)}" to Palette.RED
+            w.internet == false -> "📶 no internet" to Palette.AMBER
+            else -> "📶 ${w.ssid?.take(14) ?: "Wi-Fi"}" to (if (w.internet == true) Palette.GMAPS else Palette.TEXT)
+        }
+        wifiChip.text = wText
+        wifiChip.setTextColor(wColor)
     }
 
     private fun space(d: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(d), dp(d)) }
