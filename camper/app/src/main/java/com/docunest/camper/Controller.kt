@@ -75,7 +75,7 @@ class Controller(private val ctx: Context) {
         private val DEFAULTS = """{"position":null,"floor_mode":"auto","on_target":24.0,
             "auto_targets":{"night":23.0,"cloudy":22.0,"sunny":20.0},"control_by":"calibrated","thermo_weight":0.5,
             "ac_fan":"auto","ac_quiet":true,"dry_until":0,"ac_managed":false,"dismissed":{},
-            "diesel_phase":"","diesel_until":0,"diesel_started":0,"diesel_level":3,"diesel_low":3,"diesel_high":8}"""
+            "diesel_phase":"","diesel_until":0,"diesel_started":0,"diesel_level":3,"diesel_low":3,"diesel_mid":5,"diesel_high":8}"""
         const val CLEAN_STOP_MIN = 10
         const val CLEANOUT_MIN = 20
     }
@@ -305,11 +305,12 @@ class Controller(private val ctx: Context) {
             when (cmd.optString("action")) {
                 "diesel" -> {
                     if (!heater.connected) "Diesel heater not connected" else {
-                        val high = cmd.optString("level") == "high"
+                        // preset low / mid / high (levels in state, default 3 / 5 / 8)
+                        val preset = cmd.optString("level").takeIf { it in setOf("low", "mid", "high") } ?: "low"
                         val minutes = cmd.optInt("minutes")
-                        s.put("position", if (high) "max" else "diesel")
+                        s.put("position", if (preset == "high") "max" else "diesel")
                         s.put("diesel_phase", "run")
-                        s.put("diesel_level", s.optInt(if (high) "diesel_high" else "diesel_low"))
+                        s.put("diesel_level", s.optInt("diesel_$preset"))
                         s.put("diesel_until", if (minutes > 0) System.currentTimeMillis() + minutes * 60_000L else 0)
                         s.put("diesel_started", System.currentTimeMillis())
                         if (s.optString("floor_mode") == "off") s.put("floor_mode", "auto")
@@ -449,6 +450,9 @@ class Controller(private val ctx: Context) {
         return "off"
     }
 
+    /** Saved settings as on disk (debug: GET /api/saved). */
+    fun saved(): String = runCatching { stateFile.readText() }.getOrElse { "error: ${it.message}" }
+
     fun snapshot(): JSONObject {
         val st = synchronized(s) { JSONObject(s.toString()) }
         val now = System.currentTimeMillis()
@@ -485,7 +489,7 @@ class Controller(private val ctx: Context) {
                 .put("phase", st.optString("diesel_phase"))
                 .put("minutes_left", st.optLong("diesel_until").let { if (it > now) ((it - now) / 60_000).toInt() + 1 else 0 })
                 .put("until_off", st.optString("diesel_phase") == "run" && st.optLong("diesel_until") == 0L)
-                .put("low", st.optInt("diesel_low")).put("high", st.optInt("diesel_high")))
+                .put("low", st.optInt("diesel_low")).put("mid", st.optInt("diesel_mid", 5)).put("high", st.optInt("diesel_high")))
             .put("weather", weather ?: JSONObject.NULL)
             .put("alerts", alerts())
             .put("errors", JSONObject(errors as Map<*, *>))

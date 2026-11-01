@@ -228,7 +228,7 @@ function adjustHTML() {
             <button class="round" data-act="dlev:1" aria-label="Raise level">+</button></div>
           ${st && st.running
             ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><button class="src" style="justify-content:center;border-color:#FF8A3D" data-act="dstop:clean">Clean stop · 10 min hot</button><button class="src" style="justify-content:center" data-act="dstop:now">Stop now</button></div>`
-            : `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><button class="src" style="justify-content:center;border-color:#FF8A3D;color:#FFB48A" data-act="srun:low">Start · level ${D.low}</button><button class="src" style="justify-content:center;border-color:#FF6A3D;color:#FF9A7A" data-act="srun:high">Start · level ${D.high}</button></div>`}
+            : `<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">${[['low', D.low], ['mid', D.mid || 5], ['high', D.high]].map(([k, v]) => `<button class="src" style="justify-content:center;border-color:#FF8A3D;color:#FFB48A" data-act="srun:${k}">${k[0].toUpperCase() + k.slice(1)} · ${v}</button>`).join('')}</div>`}
         </section>
         <section class="panel"><div class="h">HEATER</div>
           ${row('Burner', st ? esc(st.step) : '–')}${row('At heater', st && st.room_temp != null ? st.room_temp + '°' : '–')}
@@ -300,7 +300,7 @@ function weatherHTML() {
 
 function sheetHTML() {
   if (!ui.sheet) return '';
-  let title = '', sub = '', opts = [], cancel = 'Cancel';
+  let title = '', sub = '', opts = [], cancel = 'Cancel', pre = '';
   const opt = (label, s, act, c) => `<button class="opt" data-act="${act}" style="border:1px solid ${c};background:${c}1A"><b>${label}</b><span>${s}</span></button>`;
   if (ui.sheet === 'dry') {
     const now = new Date(), until = new Date(now);
@@ -311,9 +311,11 @@ function sheetHTML() {
     sub = 'Runs alongside heating. Check the AC water tank afterwards.';
     opts = [opt('1 h', '', 'dry:60', '#6FE3C9'), opt('3 h', '', 'dry:180', '#6FE3C9'), opt('Overnight', 'until 08:00', `dry:${overnight}`, '#6FE3C9')];
   } else if (ui.sheet === 'dieselrun') {
-    const high = ui.sheetLevel === 'high', c = high ? '#FF6A3D' : '#FF8A3D';
-    title = `Run diesel heater · level ${high ? S.diesel.high : S.diesel.low}`;
-    sub = 'Floor heating keeps running underneath. When the time is up it does a clean stop (10 min hot, then off).';
+    const lv = ui.sheetLevel || 'low', c = lv === 'high' ? '#FF6A3D' : '#FF8A3D';
+    const D = S.diesel, lvl = { low: D.low, mid: D.mid || 5, high: D.high };
+    title = 'Run diesel heater';
+    sub = `Level ${lvl[lv]}. Floor heating keeps running underneath; when the time is up it does a clean stop (10 min hot, then off).`;
+    pre = `<div class="seg" style="grid-auto-columns:minmax(0,1fr)">${['low', 'mid', 'high'].map((k) => `<button data-act="dlvl:${k}" aria-pressed="${k === lv}" style="height:48px;${k === lv ? `background:${c};color:#120D07` : ''}">${k[0].toUpperCase() + k.slice(1)} · ${lvl[k]}</button>`).join('')}</div>`;
     opts = [opt('20 min', 'quick warm-up', 'drun:20', c), opt('1 h', '', 'drun:60', c), opt('2 h', '', 'drun:120', c), opt('Until off', 'you stop it', 'drun:0', c)];
   } else if (ui.sheet === 'stop') {
     title = 'Stop the diesel heater';
@@ -329,7 +331,7 @@ function sheetHTML() {
     cancel = 'OK';
   }
   return `<div class="scrim"><div class="sheet" role="dialog" aria-label="${esc(title)}"><div><h2>${esc(title)}</h2><p>${esc(sub)}</p></div>
-    ${opts.length ? `<div class="opts" style="grid-template-columns:repeat(${opts.length},minmax(0,1fr))">${opts.join('')}</div>` : ''}
+    ${pre}${opts.length ? `<div class="opts" style="grid-template-columns:repeat(${opts.length},minmax(0,1fr))">${opts.join('')}</div>` : ''}
     <button class="ghost" data-act="sheet:">${cancel}</button></div></div>`;
 }
 
@@ -394,6 +396,7 @@ function handle(a, b, c) {
       return;
     case 'go': ui.screen = b; ui.sheet = null; break;
     case 'srun': ui.sheetLevel = b; ui.sheet = 'dieselrun'; break;
+    case 'dlvl': ui.sheetLevel = b; break;
     case 'drun': ui.sheet = null; cmd({ action: 'diesel', level: ui.sheetLevel, minutes: +b }); return;
     case 'dstop': ui.sheet = null; cmd({ action: 'diesel_stop', clean: b === 'clean', next: ui.nextPos || 'floor' }); ui.nextPos = null; return;
     case 'dclean': ui.sheet = null; cmd({ action: 'diesel_cleanout' }); return;

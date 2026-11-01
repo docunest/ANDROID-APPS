@@ -57,7 +57,10 @@ class HttpServer(private val assets: AssetManager, private val controller: Contr
             val out = c.getOutputStream()
             when {
                 method == "GET" && path == "/api/state" -> send(out, 200, "application/json", controller.snapshot().toString().toByteArray())
+                method == "GET" && path == "/api/saved" -> send(out, 200, "application/json", controller.saved().toByteArray())
                 method == "POST" && path == "/api/cmd" -> {
+                    // 127.0.0.1 = the wall screen itself, anything else = a phone on the camper Wi-Fi
+                    Log.i(Controller.TAG, "command from ${c.inetAddress.hostAddress}")
                     val r = runCatching { controller.command(JSONObject(String(body, Charsets.UTF_8))) }
                         .getOrElse { JSONObject().put("ok", false).put("error", it.message ?: it.toString()) }
                     send(out, 200, "application/json", r.toString().toByteArray())
