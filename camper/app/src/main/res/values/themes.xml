@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.Camper" parent="android:Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">#FF0A0C0F</item>
+        <item name="android:statusBarColor">#FF0A0C0F</item>
+        <item name="android:navigationBarColor">#FF0A0C0F</item>
+    </style>
+</resources>

@@ -1,0 +1,8 @@
+{
+  "name": "Camper",
+  "short_name": "Camper",
+  "start_url": "/",
+  "display": "fullscreen",
+  "background_color": "#0A0C0F",
+  "theme_color": "#0A0C0F"
+}
