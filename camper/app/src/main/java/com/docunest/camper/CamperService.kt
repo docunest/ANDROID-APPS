@@ -31,6 +31,7 @@ class CamperService : Service() {
 
     private var controller: Controller? = null
     private var server: HttpServer? = null
+    private var remote: RemoteSync? = null
     private var loop: Thread? = null
     private var wake: PowerManager.WakeLock? = null
     private var wifi: WifiManager.WifiLock? = null
@@ -71,6 +72,9 @@ class CamperService : Service() {
         val c = Controller(applicationContext)
         controller = c
         server = HttpServer(assets, c).also { runCatching { it.start() }.onFailure { e -> Log.e(Controller.TAG, "server", e) } }
+        val cfg = Config.load(applicationContext)
+        val url = cfg["CAMPER_REMOTE_URL"]; val token = cfg["CAMPER_REMOTE_TOKEN"]
+        if (url != null && token != null) remote = RemoteSync(c, url, token).also { it.start() }
         loop = Thread({
             while (running) {
                 runCatching { c.poll() }.onFailure { Log.e(Controller.TAG, "poll", it) }
@@ -83,6 +87,7 @@ class CamperService : Service() {
         running = false
         loop?.interrupt()
         server?.stop()
+        remote?.stop()
         runCatching { wake?.release() }
         runCatching { wifi?.release() }
         runCatching { multicast?.release() }
