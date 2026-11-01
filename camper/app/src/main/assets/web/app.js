@@ -4,6 +4,7 @@
 
 const $stage = document.getElementById('stage');
 let S = null;
+const dieselOn = () => !!(S && S.diesel && S.diesel.connected);
 const ui = { screen: ['adjust', 'weather'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'home', sheet: null, tab: 'floor', wxView: 'now', wxSrc: 'camper', offline: false, toast: null };
 
 const COLORS = { max: '#FF6A3D', diesel: '#FF8A3D', floor: '#FFB547', off: '#7D8792', cool: '#5CC8FF', coolmax: '#3FA8FF' };
@@ -52,6 +53,10 @@ function modeLine(pos) {
     if (!S.position && S.floor) return `Set ${S.floor.setpoint}°`;
     return S.floor_mode === 'on' ? `On · ${S.on_target}°` : `Auto · ${S.floor_target}°`;
   }
+  if (pos === 'diesel' || pos === 'max') {
+    const st = S.diesel && S.diesel.status;
+    return st && st.level ? `Floor + diesel L${st.level}` : 'Floor + diesel';
+  }
   if (pos === 'cool') return 'Cooling to 24°';
   if (pos === 'coolmax') return 'Cooling to 22°';
   return warm() ? 'Cooling off' : 'Heating off';
@@ -63,7 +68,7 @@ function dialHTML() {
   const hp = pt(cur.a, RING);
   const chips = LADDER.map((p) => {
     const on = p.k === pos;
-    const dim = !on && (p.diesel || (w && p.heat) || (!w && p.cool));
+    const dim = !on && ((p.diesel && !dieselOn()) || (w && p.heat) || (!w && p.cool));
     const st = on ? `background:${COLORS[p.k]};border-color:${COLORS[p.k]};color:#120D07;box-shadow:0 0 16px ${COLORS[p.k]}55;` : '';
     return `<button class="chip${dim ? ' dim' : ''}" data-act="pos:${p.k}" aria-pressed="${on}" style="left:${(p.x - 38).toFixed(0)}px;top:${(p.y - 19).toFixed(0)}px;${st}">${p.label}</button>`;
   }).join('');
@@ -117,8 +122,7 @@ function devicesHTML() {
       st = !f.power ? 'Off' : `${S.position ? (S.floor_mode === 'on' ? 'On ' : 'Auto ') + S.floor_target + '°' : 'Set ' + f.setpoint + '°'} · ${f.heating ? 'heating' : 'idle'}`;
     }
     rows.push(`<div class="dev"><span class="dot" style="${on ? 'background:var(--amber);box-shadow:0 0 8px var(--amber)' : ''}"></span><div style="flex:1;min-width:0"><div class="n">Floor heating</div><div class="st" style="${on ? 'color:#E6C9A0' : ''}">${esc(st)}</div></div></div>`);
-    // not linked: we can't see it, so never show a state (a grey dot would read as "off")
-    rows.push(`<div class="dev"><span class="dot" style="background:none;border:1.5px dashed #5A636D"></span><div style="flex:1;min-width:0"><div class="n">Diesel heater</div><div class="st" style="color:#C9A86B">Not linked · state unknown</div></div></div>`);
+    rows.push(dieselRowHTML(pill));
   } else {
     const a = S.ac, on = a && a.power && a.mode === 'cool';
     rows.push(`<div class="dev"><span class="dot" style="${on ? 'background:var(--blue);box-shadow:0 0 8px var(--blue)' : ''}"></span><div style="flex:1;min-width:0"><div class="n">Air conditioner</div><div class="st">${a ? (on ? `Cool ${a.target}° · ${a.fan} fan` : 'Off') : 'Not responding'}</div></div></div>`);
@@ -129,12 +133,35 @@ function devicesHTML() {
   return `<section class="card devices" aria-label="Devices">${rows.join('')}</section>`;
 }
 
+function dieselText() {
+  const D = S.diesel, st = D && D.status;
+  if (!st) return '';
+  const phase = D.phase === 'run' ? (D.until_off ? 'until you stop it' : `${D.minutes_left} min left`)
+    : D.phase === 'clean_stop' ? `clean stop · ${D.minutes_left} min` : D.phase === 'cleanout' ? `clean-out · ${D.minutes_left} min` : '';
+  if (!st.running) return 'Off' + (st.room_temp != null ? ` · ${Math.round(st.room_temp)}° at heater` : '');
+  const what = st.step === 'running' ? `Level ${st.level}` : st.step[0].toUpperCase() + st.step.slice(1);
+  return [what, phase].filter(Boolean).join(' · ');
+}
+
+function dieselRowHTML(pill) {
+  const D = S.diesel;
+  if (!dieselOn()) {
+    // not linked: we can't see it, so never show a state (a grey dot would read as "off")
+    const note = D ? (D.note || 'connecting…') : 'not linked';
+    return `<div class="dev"><span class="dot" style="background:none;border:1.5px dashed #5A636D"></span><div style="flex:1;min-width:0"><div class="n">Diesel heater</div><div class="st" style="color:#C9A86B">State unknown · ${esc(note)}</div></div></div>`;
+  }
+  const st = D.status, on = st && st.running;
+  const err = st && st.error;
+  return `<div class="dev"><span class="dot" style="${on ? 'background:var(--orange);box-shadow:0 0 8px var(--orange)' : ''}"></span><div style="flex:1;min-width:0"><div class="n">Diesel heater</div><div class="st" style="${err ? 'color:#FF8A6A' : on ? 'color:#F2B48E' : ''}">${esc(err || dieselText())}</div></div>
+    ${on && D.phase !== 'clean_stop' ? `<button class="act" style="${pill('#FF8A3D')}" data-act="sheet:stop">Stop</button>` : ''}</div>`;
+}
+
 function alertsHTML() {
   const list = [];
   if (ui.offline) list.push({ text: 'Camper not reachable', sub: 'Showing the last known state' });
   if (S.dry_run) list.push({ text: 'Test mode', sub: 'Commands are logged, not sent' });
   list.push(...S.alerts);
-  return list.slice(0, 2).map((a) => `<div class="alert"><div><div class="t">${esc(a.text)}</div><div class="s">${esc(a.sub)}</div></div>${a.action ? `<button data-act="dismiss:${esc(a.id)}">${esc(a.action)}</button>` : ''}</div>`).join('');
+  return list.slice(0, 2).map((a) => `<div class="alert"><div><div class="t">${esc(a.text)}</div><div class="s">${esc(a.sub)}</div></div>${a.action ? `<button data-act="${a.id === 'cleanout' ? 'sheet:cleanout' : 'dismiss:' + esc(a.id)}">${esc(a.action)}</button>` : ''}</div>`).join('');
 }
 
 function homeHTML() {
@@ -186,10 +213,30 @@ function adjustHTML() {
         <div class="warnnote" style="margin-top:auto">${diff == null ? 'One sensor is missing' : `Thermostat reads ${diff >= 0 ? '+' : ''}${diff.toFixed(1)}° vs AC sensor`}${S.floor ? `<br>Setpoint on the thermostat: ${S.floor.setpoint}°` : ''}</div>
       </section></div>`;
   } else if (ui.tab === 'diesel') {
-    body = `<div class="body2"><section class="panel"><div style="font-size:17px;font-weight:600">Diesel heater is not connected yet</div>
-      <div class="note" style="font-size:14px;line-height:1.45">Next step: identify its controller (the Vevor app or Bluetooth module) so the agent can drive it from the Z1.
-      Then this tab gets Low/High, run timers, clean stop and the 20-min clean-out burn.</div></section>
-      <section class="panel"><div class="h">PLANNED SAFETY RULES</div><div class="note" style="line-height:1.5">At least 45 min per run<br>Always finish with 10 min on high<br>Weekly clean-out reminder</div></section></div>`;
+    const D = S.diesel, st = D && D.status;
+    if (!dieselOn()) {
+      body = `<div class="body2"><section class="panel"><div style="font-size:17px;font-weight:600">Diesel heater not connected</div>
+        <div class="note" style="font-size:14px;line-height:1.45">${esc((D && D.note) || 'not linked')}. The heater takes one Bluetooth connection at a time: close the AirHeaterBLE app and the heater web app on your phone.</div></section>
+        <section class="panel"><div class="h">SAFETY RULES</div><div class="note" style="line-height:1.5">Runs only when you start it, with a timer<br>Clean stop: 10 min hot, then off<br>Weekly clean-out reminder</div></section></div>`;
+    } else {
+      const lvl = st && st.level ? st.level : D.low;
+      const row = (k, v) => `<div style="display:flex;justify-content:space-between;font-size:14px"><span class="note">${k}</span><b>${v}</b></div>`;
+      body = `<div class="body2">
+        <section class="panel"><div class="h">LEVEL</div>
+          <div class="onbig"><button class="round" data-act="dlev:-1" aria-label="Lower level">−</button>
+            <div><div class="v" style="color:var(--orange)">${lvl}</div><div class="note" style="text-align:center">${esc(dieselText())}</div></div>
+            <button class="round" data-act="dlev:1" aria-label="Raise level">+</button></div>
+          ${st && st.running
+            ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><button class="src" style="justify-content:center;border-color:#FF8A3D" data-act="dstop:clean">Clean stop · 10 min hot</button><button class="src" style="justify-content:center" data-act="dstop:now">Stop now</button></div>`
+            : `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><button class="src" style="justify-content:center;border-color:#FF8A3D;color:#FFB48A" data-act="srun:low">Start · level ${D.low}</button><button class="src" style="justify-content:center;border-color:#FF6A3D;color:#FF9A7A" data-act="srun:high">Start · level ${D.high}</button></div>`}
+        </section>
+        <section class="panel"><div class="h">HEATER</div>
+          ${row('Burner', st ? esc(st.step) : '–')}${row('At heater', st && st.room_temp != null ? st.room_temp + '°' : '–')}
+          ${row('Heat exchanger', st && st.case_temp != null ? Math.round(st.case_temp) + '°' : '–')}${row('Supply', st && st.voltage != null ? st.voltage.toFixed(1) + ' V' : '–')}
+          ${st && st.error ? `<div class="warnnote">${esc(st.error)}</div>` : ''}
+          <button class="src" style="margin-top:auto;justify-content:center;background:#231A0F;border-color:#47331A;color:#F6D9AE" data-act="sheet:cleanout">Clean-out burn · 20 min</button>
+        </section></div>`;
+    }
   } else {
     const a = S.ac, pos = position(), dry = S.dry_minutes_left > 0;
     const cur = pos === 'cool' || pos === 'coolmax' ? pos : dry ? 'dry' : 'off';
@@ -263,6 +310,19 @@ function sheetHTML() {
     title = 'Dehumidify with the AC';
     sub = 'Runs alongside heating. Check the AC water tank afterwards.';
     opts = [opt('1 h', '', 'dry:60', '#6FE3C9'), opt('3 h', '', 'dry:180', '#6FE3C9'), opt('Overnight', 'until 08:00', `dry:${overnight}`, '#6FE3C9')];
+  } else if (ui.sheet === 'dieselrun') {
+    const high = ui.sheetLevel === 'high', c = high ? '#FF6A3D' : '#FF8A3D';
+    title = `Run diesel heater · level ${high ? S.diesel.high : S.diesel.low}`;
+    sub = 'Floor heating keeps running underneath. When the time is up it does a clean stop (10 min hot, then off).';
+    opts = [opt('20 min', 'quick warm-up', 'drun:20', c), opt('1 h', '', 'drun:60', c), opt('2 h', '', 'drun:120', c), opt('Until off', 'you stop it', 'drun:0', c)];
+  } else if (ui.sheet === 'stop') {
+    title = 'Stop the diesel heater';
+    sub = 'A clean stop burns hot for 10 min first, which keeps the glow plug free of soot.';
+    opts = [opt('Clean stop', '10 min hot, then off', 'dstop:clean', '#FF8A3D'), opt('Stop now', 'fan cools it down', 'dstop:now', '#7D8792')];
+  } else if (ui.sheet === 'cleanout') {
+    title = 'Diesel clean-out burn';
+    sub = '20 min at full power to burn off carbon, then off. It will get warm in here.';
+    opts = [opt('Start now', '20 min at level 10', 'dclean:go', '#FF6A3D')];
   } else if (ui.sheet === 'diesel') {
     title = 'Diesel heater not linked yet';
     sub = 'This screen cannot see or control it yet, so use its own controller. Once linked, this asks how long to run and offers a clean stop.';
@@ -325,10 +385,23 @@ async function cmd(c) {
 function handle(a, b, c) {
   switch (a) {
     case 'pos':
-      if (b === 'diesel' || b === 'max') { ui.sheet = 'diesel'; break; }
+      if (b === 'diesel' || b === 'max') {
+        if (!dieselOn()) { ui.sheet = 'diesel'; break; }
+        ui.sheetLevel = b === 'max' ? 'high' : 'low'; ui.sheet = 'dieselrun'; break;
+      }
+      if (S.diesel && S.diesel.phase === 'run' && b !== S.position) { ui.nextPos = b; ui.sheet = 'stop'; break; }
       if (b !== S.position) { S.position = b; cmd({ action: 'position', value: b }); }
       return;
     case 'go': ui.screen = b; ui.sheet = null; break;
+    case 'srun': ui.sheetLevel = b; ui.sheet = 'dieselrun'; break;
+    case 'drun': ui.sheet = null; cmd({ action: 'diesel', level: ui.sheetLevel, minutes: +b }); return;
+    case 'dstop': ui.sheet = null; cmd({ action: 'diesel_stop', clean: b === 'clean', next: ui.nextPos || 'floor' }); ui.nextPos = null; return;
+    case 'dclean': ui.sheet = null; cmd({ action: 'diesel_cleanout' }); return;
+    case 'dlev': {
+      const cur = (S.diesel.status && S.diesel.status.level) || S.diesel.low;
+      cmd({ action: 'diesel_level', value: Math.min(10, Math.max(1, cur + parseInt(b, 10))) });
+      return;
+    }
     case 'sheet': ui.sheet = b || null; break;
     case 'dry':
       ui.sheet = null;

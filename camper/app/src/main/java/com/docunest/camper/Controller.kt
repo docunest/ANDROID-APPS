@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
 import android.util.Log
+import com.docunest.camper.heater.HeaterBle
 import com.docunest.camper.midea.AcState
 import com.docunest.camper.midea.MideaAc
 import com.docunest.camper.tuya.TuyaDevice
@@ -73,7 +74,10 @@ class Controller(private val ctx: Context) {
         val COOL = mapOf("cool" to Pair(24.0, AcState.FAN_LOW), "coolmax" to Pair(22.0, AcState.FAN_HIGH))
         private val DEFAULTS = """{"position":null,"floor_mode":"auto","on_target":24.0,
             "auto_targets":{"night":23.0,"cloudy":22.0,"sunny":20.0},"control_by":"calibrated","thermo_weight":0.5,
-            "ac_fan":"auto","ac_quiet":true,"dry_until":0,"ac_managed":false,"dismissed":{}}"""
+            "ac_fan":"auto","ac_quiet":true,"dry_until":0,"ac_managed":false,"dismissed":{},
+            "diesel_phase":"","diesel_until":0,"diesel_started":0,"diesel_level":3,"diesel_low":3,"diesel_high":8}"""
+        const val CLEAN_STOP_MIN = 10
+        const val CLEANOUT_MIN = 20
     }
 
     private val cfg = Config.load(ctx)
@@ -88,6 +92,7 @@ class Controller(private val ctx: Context) {
         val t = cfg["MIDEA_AC_TOKEN"]; val k = cfg["MIDEA_AC_KEY"]
         if (t != null && k != null) MideaAc(id.toLong(), t, k) else null
     }
+    val heater = HeaterBle(ctx, cfg["HEATER_PASSKEY"]?.toIntOrNull() ?: 1234, cfg["HEATER_PREFIX"] ?: "BYD")
     private val location = cfg["CAMPER_LAT"]?.toDoubleOrNull()?.let { lat -> cfg["CAMPER_LON"]?.toDoubleOrNull()?.let { lat to it } }
 
     @Volatile private var floorState: FloorState? = null
@@ -103,12 +108,15 @@ class Controller(private val ctx: Context) {
         // last known IPs: connect straight away after a restart; discovery only if they changed
         s.optString("floor_ip").takeIf { it.isNotEmpty() }?.let { floor?.ip = it }
         s.optString("ac_ip").takeIf { it.isNotEmpty() }?.let { ac?.ip = it }
+        s.optString("heater_addr").takeIf { it.isNotEmpty() }?.let { heater.address = it }
+        heater.start()
     }
 
     private fun rememberIps() {
-        val f = floor?.ip; val a = ac?.ip
-        if ((f != null && f != s.optString("floor_ip")) || (a != null && a != s.optString("ac_ip"))) {
-            synchronized(s) { f?.let { s.put("floor_ip", it) }; a?.let { s.put("ac_ip", it) } }
+        val f = floor?.ip; val a = ac?.ip; val hAddr = heater.address
+        if ((f != null && f != s.optString("floor_ip")) || (a != null && a != s.optString("ac_ip")) ||
+            (hAddr != null && hAddr != s.optString("heater_addr"))) {
+            synchronized(s) { f?.let { s.put("floor_ip", it) }; a?.let { s.put("ac_ip", it) }; hAddr?.let { s.put("heater_addr", it) } }
             save()
         }
     }
@@ -195,7 +203,9 @@ class Controller(private val ctx: Context) {
     // ---------- the control step ----------
 
     private fun enforce() {
-        val pos = pos() ?: return
+        // floor + cooling follow the dial (only once the user picked a position); the dehumidifier timer and
+        // the diesel phases are independent of it, so drying never switches heating off
+        val pos = pos()
         val now = System.currentTimeMillis()
         val dryUntil = s.optLong("dry_until")
         val dryActive = dryUntil > now
@@ -203,7 +213,7 @@ class Controller(private val ctx: Context) {
 
         val f = floorState
         val fl = floor
-        if (f != null && fl != null) {
+        if (pos != null && f != null && fl != null) {
             val wantOn = pos in HEAT && s.optString("floor_mode") != "off"
             if (f.power != wantOn) { Log.i(TAG, "floor <- power $wantOn"); fl.set(JSONObject().put("1", wantOn)) }
             if (wantOn) {
@@ -222,7 +232,7 @@ class Controller(private val ctx: Context) {
         val a = acState
         val acDev = ac
         if (a != null && acDev != null) {
-            val cool = COOL[pos]
+            val cool = pos?.let { COOL[it] }
             val fanPref = when (s.optString("ac_fan")) { "low" -> AcState.FAN_LOW; "high" -> AcState.FAN_HIGH; else -> AcState.FAN_AUTO }
             when {
                 cool != null -> if (!a.power || a.mode != AcState.COOL || a.target != cool.first || a.fan != cool.second) {
@@ -238,19 +248,109 @@ class Controller(private val ctx: Context) {
                 }
             }
         }
+        enforceDiesel()
+    }
+
+    /**
+     * Diesel heater: the app only acts inside a phase the user started (run with a timer, clean stop, clean-out).
+     * Outside a phase the heater is left alone, so its own panel/remote keeps working.
+     */
+    private fun enforceDiesel() {
+        val hs = heater.status ?: return
+        if (!heater.connected) return
+        val phase = s.optString("diesel_phase")
+        if (phase.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val until = s.optLong("diesel_until")
+        when (phase) {
+            "run" -> when {
+                until > 0 && now > until -> startCleanStop("timer")
+                // switched off at the heater itself (after we started it): respect it
+                !hs.running && now - s.optLong("diesel_started") > 120_000 -> endDiesel("stopped at the heater")
+                !hs.running -> { Log.i(TAG, "heater <- on"); heater.power(true) }
+                hs.level != s.optInt("diesel_level") -> { Log.i(TAG, "heater <- level ${s.optInt("diesel_level")}"); heater.setLevel(s.optInt("diesel_level")) }
+            }
+            "clean_stop", "cleanout" -> when {
+                !hs.running -> endDiesel("already off")
+                now > until -> { Log.i(TAG, "heater <- off after $phase"); heater.power(false); endDiesel("done") }
+                hs.level != 10 -> heater.setLevel(10)
+            }
+        }
+    }
+
+    private fun startCleanStop(why: String) {
+        Log.i(TAG, "heater clean stop ($why)")
+        synchronized(s) {
+            s.put("diesel_phase", "clean_stop"); s.put("diesel_until", System.currentTimeMillis() + CLEAN_STOP_MIN * 60_000L)
+            if (pos() == "diesel" || pos() == "max") s.put("position", "floor")
+        }
+        save()
+        runCatching { heater.setLevel(10) }
+    }
+
+    private fun endDiesel(why: String) {
+        Log.i(TAG, "heater phase ends: $why")
+        synchronized(s) {
+            s.put("diesel_phase", ""); s.put("diesel_until", 0)
+            if (pos() == "diesel" || pos() == "max") s.put("position", "floor")
+        }
+        save()
     }
 
     // ---------- commands from the UI ----------
 
     fun command(cmd: JSONObject): JSONObject = synchronized(io) {
+        Log.i(TAG, "command: $cmd")
         val err = synchronized(s) {
             when (cmd.optString("action")) {
+                "diesel" -> {
+                    if (!heater.connected) "Diesel heater not connected" else {
+                        val high = cmd.optString("level") == "high"
+                        val minutes = cmd.optInt("minutes")
+                        s.put("position", if (high) "max" else "diesel")
+                        s.put("diesel_phase", "run")
+                        s.put("diesel_level", s.optInt(if (high) "diesel_high" else "diesel_low"))
+                        s.put("diesel_until", if (minutes > 0) System.currentTimeMillis() + minutes * 60_000L else 0)
+                        s.put("diesel_started", System.currentTimeMillis())
+                        if (s.optString("floor_mode") == "off") s.put("floor_mode", "auto")
+                        null
+                    }
+                }
+                "diesel_stop" -> {
+                    val next = cmd.optString("next").ifEmpty { "floor" }
+                    if (cmd.optBoolean("clean")) {
+                        s.put("diesel_phase", "clean_stop"); s.put("diesel_until", System.currentTimeMillis() + CLEAN_STOP_MIN * 60_000L)
+                    } else {
+                        s.put("diesel_phase", "stop_now")
+                    }
+                    s.put("position", next)
+                    null
+                }
+                "diesel_level" -> {
+                    val v = cmd.getInt("value").coerceIn(1, 10)
+                    if (!heater.connected) "Diesel heater not connected" else {
+                        if (s.optString("diesel_phase") == "run") s.put("diesel_level", v) else s.put("diesel_set_level", v)
+                        null
+                    }
+                }
+                "diesel_cleanout" -> {
+                    if (!heater.connected) "Diesel heater not connected" else {
+                        s.put("diesel_phase", "cleanout"); s.put("diesel_until", System.currentTimeMillis() + CLEANOUT_MIN * 60_000L)
+                        s.put("diesel_started", System.currentTimeMillis()); s.put("diesel_last_cleanout", System.currentTimeMillis())
+                        if (!(heater.status?.running ?: false)) runCatching { heater.power(true) }
+                        null
+                    }
+                }
                 "position" -> {
                     val p = cmd.getString("value")
                     when {
-                        p == "diesel" || p == "max" -> "Diesel heater is not connected yet"
+                        p == "diesel" || p == "max" -> "Pick a run time for the diesel heater"
                         p !in setOf("floor", "off", "cool", "coolmax") -> "unknown position"
                         else -> {
+                            // leaving a running diesel by any route (e.g. a phone) = clean stop
+                            if (s.optString("diesel_phase") == "run") {
+                                s.put("diesel_phase", "clean_stop"); s.put("diesel_until", System.currentTimeMillis() + CLEAN_STOP_MIN * 60_000L)
+                            }
                             s.put("position", p)
                             if (p == "floor" && s.optString("floor_mode") == "off") s.put("floor_mode", "auto")
                             if (p in COOL) { s.put("dry_until", 0); s.put("ac_managed", true) }
@@ -271,7 +371,7 @@ class Controller(private val ctx: Context) {
                     if (minutes > 0 && pos() in COOL) "AC is cooling; switch the dial off cooling first"
                     else {
                         s.put("dry_until", if (minutes > 0) System.currentTimeMillis() + minutes * 60_000L else 0)
-                        if (minutes > 0) { s.put("ac_managed", true); if (pos() == null) s.put("position", "off") }
+                        if (minutes > 0) s.put("ac_managed", true)
                         null
                     }
                 }
@@ -287,6 +387,15 @@ class Controller(private val ctx: Context) {
             if (cmd.optString("action") == "ac_quiet") {
                 val a = acState
                 if (a != null && a.displayOn == cmd.getBoolean("value")) ac?.toggleDisplay()
+            }
+            if (s.optString("diesel_phase") == "stop_now") {
+                runCatching { heater.power(false) }
+                synchronized(s) { s.put("diesel_phase", ""); s.put("diesel_until", 0) }; save()
+            }
+            if (s.has("diesel_set_level")) {
+                val v = synchronized(s) { s.remove("diesel_set_level") as Int }
+                save()
+                heater.setLevel(v)
             }
             enforce()
             floor?.let { f -> runCatching { floorState = FloorState.of(f.status()) } }
@@ -312,6 +421,13 @@ class Controller(private val ctx: Context) {
         floorState?.let { if (it.fault != 0) add("floor_fault", "Floor thermostat fault", "Code ${it.fault}, check floor probe", "OK") }
         if (errors.containsKey("floor")) add("offline_floor", "Floor thermostat not responding", "Retrying every 30 s", null)
         if (errors.containsKey("ac")) add("offline_ac", "AC not responding", "Retrying every 30 s", null)
+        heater.status?.let { hs ->
+            if (heater.connected && hs.errorCode != 0) add("heater_error", "Diesel heater ${hs.error}", "Check the heater", null)
+        }
+        val lastClean = s.optLong("diesel_last_cleanout")
+        if (heater.connected && lastClean > 0 && System.currentTimeMillis() - lastClean > 7 * 86_400_000L && !recent("cleanout", 2.0)) {
+            add("cleanout", "Diesel clean-out due", "Last hot burn ${(System.currentTimeMillis() - lastClean) / 86_400_000} days ago", "Run")
+        }
         battery?.let { b ->
             val t = b.optDouble("temp", Double.NaN)
             if (!t.isNaN() && t >= 42) add("battery_hot", "Screen phone battery hot", "${t.roundToInt()}°C, check for swelling", null)
@@ -326,6 +442,7 @@ class Controller(private val ctx: Context) {
 
     private fun inferredPosition(): String {
         pos()?.let { return it }
+        heater.status?.let { if (heater.connected && it.running && it.step != "cooldown") return if ((it.level ?: 0) >= s.optInt("diesel_high", 8)) "max" else "diesel" }
         val a = acState
         if (a != null && a.power && a.mode == AcState.COOL) return "cool"
         if (floorState?.power == true) return "floor"
@@ -359,7 +476,16 @@ class Controller(private val ctx: Context) {
             .put("ac_quiet", st.optBoolean("ac_quiet"))
             .put("ac_fan", st.optString("ac_fan"))
             .put("dry_minutes_left", if (dryUntil > now) ((dryUntil - now) / 60_000).toInt() else 0)
-            .put("diesel", JSONObject.NULL)
+            .put("diesel", JSONObject()
+                .put("connected", heater.connected)
+                .put("name", heater.deviceName ?: JSONObject.NULL)
+                .put("note", heater.lastError ?: JSONObject.NULL)
+                .put("status", if (heater.connected) heater.status?.json() ?: JSONObject.NULL else JSONObject.NULL)
+                .put("age_s", if (heater.lastUpdate > 0) (now - heater.lastUpdate) / 1000 else JSONObject.NULL)
+                .put("phase", st.optString("diesel_phase"))
+                .put("minutes_left", st.optLong("diesel_until").let { if (it > now) ((it - now) / 60_000).toInt() + 1 else 0 })
+                .put("until_off", st.optString("diesel_phase") == "run" && st.optLong("diesel_until") == 0L)
+                .put("low", st.optInt("diesel_low")).put("high", st.optInt("diesel_high")))
             .put("weather", weather ?: JSONObject.NULL)
             .put("alerts", alerts())
             .put("errors", JSONObject(errors as Map<*, *>))

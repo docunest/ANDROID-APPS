@@ -30,6 +30,10 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         CamperService.start(this)
+        // Bluetooth scan for the diesel heater needs location on Android 11 (granted over adb on the Z1 anyway)
+        val perms = if (Build.VERSION.SDK_INT >= 31) arrayOf("android.permission.BLUETOOTH_SCAN", "android.permission.BLUETOOTH_CONNECT")
+        else arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION)
+        if (perms.any { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }) requestPermissions(perms, 1)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         web = WebView(this).apply {
             setBackgroundColor(Color.parseColor("#0A0C0F"))

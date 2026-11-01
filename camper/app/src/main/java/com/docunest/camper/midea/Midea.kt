@@ -269,8 +269,14 @@ class MideaAc(val id: Long, token: String, key: String) {
         try {
             connect()
             write(MideaV3.encodeRequest(localKey!!, nextId(), MideaPacket.encode(id, frame)))
-            val reply = MideaV3.decode(localKey, readPacket())
-            return listOf(MideaPacket.decode(reply))
+            // the AC also pushes unsolicited status reports (A0/A1/A5); read until the C0 state reply arrives
+            val frames = mutableListOf<ByteArray>()
+            repeat(4) {
+                val f = MideaPacket.decode(MideaV3.decode(localKey, readPacket()))
+                frames += f
+                if (AcFrames.parseState(f) != null) return frames
+            }
+            return frames
         } catch (e: Exception) {
             close()
             ip = null
