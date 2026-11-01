@@ -117,7 +117,8 @@ function devicesHTML() {
       st = !f.power ? 'Off' : `${S.position ? (S.floor_mode === 'on' ? 'On ' : 'Auto ') + S.floor_target + '°' : 'Set ' + f.setpoint + '°'} · ${f.heating ? 'heating' : 'idle'}`;
     }
     rows.push(`<div class="dev"><span class="dot" style="${on ? 'background:var(--amber);box-shadow:0 0 8px var(--amber)' : ''}"></span><div style="flex:1;min-width:0"><div class="n">Floor heating</div><div class="st" style="${on ? 'color:#E6C9A0' : ''}">${esc(st)}</div></div></div>`);
-    rows.push(`<div class="dev"><span class="dot"></span><div style="flex:1;min-width:0"><div class="n">Diesel heater</div><div class="st">Not connected yet</div></div></div>`);
+    // not linked: we can't see it, so never show a state (a grey dot would read as "off")
+    rows.push(`<div class="dev"><span class="dot" style="background:none;border:1.5px dashed #5A636D"></span><div style="flex:1;min-width:0"><div class="n">Diesel heater</div><div class="st" style="color:#C9A86B">Not linked · state unknown</div></div></div>`);
   } else {
     const a = S.ac, on = a && a.power && a.mode === 'cool';
     rows.push(`<div class="dev"><span class="dot" style="${on ? 'background:var(--blue);box-shadow:0 0 8px var(--blue)' : ''}"></span><div style="flex:1;min-width:0"><div class="n">Air conditioner</div><div class="st">${a ? (on ? `Cool ${a.target}° · ${a.fan} fan` : 'Off') : 'Not responding'}</div></div></div>`);
@@ -263,8 +264,8 @@ function sheetHTML() {
     sub = 'Runs alongside heating. Check the AC water tank afterwards.';
     opts = [opt('1 h', '', 'dry:60', '#6FE3C9'), opt('3 h', '', 'dry:180', '#6FE3C9'), opt('Overnight', 'until 08:00', `dry:${overnight}`, '#6FE3C9')];
   } else if (ui.sheet === 'diesel') {
-    title = 'Diesel heater not connected yet';
-    sub = 'Once it is linked, this asks how long to run (20 min, 1 h, 2 h, until off) and offers a clean stop.';
+    title = 'Diesel heater not linked yet';
+    sub = 'This screen cannot see or control it yet, so use its own controller. Once linked, this asks how long to run and offers a clean stop.';
     cancel = 'OK';
   }
   return `<div class="scrim"><div class="sheet" role="dialog" aria-label="${esc(title)}"><div><h2>${esc(title)}</h2><p>${esc(sub)}</p></div>
