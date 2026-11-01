@@ -211,9 +211,18 @@ class HeaterBle(private val ctx: Context, private val passkey: Int = 1234, priva
             if (scanning) {
                 stopScan()
                 val names = seen.values.distinct().take(6).joinToString(", ").ifEmpty { "nothing" }
-                lastError = "not found, is a phone app connected to it? (sees: $names)"
-                Log.i(TAG, "heater scan: no match; saw ${seen.size} devices: $names")
-                h.postDelayed({ connectOrScan() }, 20_000)
+                Log.i(TAG, "heater scan: no name match; saw ${heard.size} devices: $names")
+                // some units advertise without their BYD name: try connectable, unnamed, non-Apple/Victron devices
+                probeQueue.clear()
+                probeQueue.addAll(heard.values.filter { d ->
+                    d.optBoolean("connectable") && d.isNull("name") && d.getString("address") !in probed &&
+                        (0 until d.getJSONArray("makers").length()).none { d.getJSONArray("makers").getString(it) in setOf("004c", "02e1") }
+                }.sortedByDescending { it.optInt("rssi") }.map { it.getString("address") })
+                if (probeQueue.isNotEmpty()) probeNext()
+                else {
+                    lastError = "not found, is a phone app connected to it? (sees: $names)"
+                    h.postDelayed({ connectOrScan() }, 20_000)
+                }
             }
         }, 15_000)
     }
@@ -225,11 +234,42 @@ class HeaterBle(private val ctx: Context, private val passkey: Int = 1234, priva
     }
 
     private val seen = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val probeQueue = ArrayDeque<String>()
+    /** Addresses already checked and found not to be a heater (not retried until restart). */
+    private val probed = mutableSetOf<String>()
+    @Volatile private var probing: String? = null
+
+    private fun probeNext() {
+        val addr = probeQueue.removeFirstOrNull() ?: run {
+            lastError = "not found, is a phone app connected to it?"
+            h.postDelayed({ connectOrScan() }, 20_000); return
+        }
+        probing = addr
+        lastError = "checking $addr…"
+        Log.i(TAG, "heater probe $addr")
+        connect(adapter!!.getRemoteDevice(addr))
+        h.postDelayed({ if (probing == addr && !connected) { Log.i(TAG, "probe $addr: timeout"); probed += addr; dropProbe() } }, 12_000)
+    }
+
+    private fun dropProbe() {
+        probing = null
+        runCatching { gatt?.disconnect(); gatt?.close() }
+        gatt = null
+        h.postDelayed({ probeNext() }, 500)
+    }
+
+    /** Every device heard in scans (debug: GET /api/ble). */
+    val heard = java.util.concurrent.ConcurrentHashMap<String, org.json.JSONObject>()
 
     private val scanCb = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val name = result.device.name ?: result.scanRecord?.deviceName
             if (name != null) seen[result.device.address] = name
+            val rec = result.scanRecord
+            val makers = rec?.manufacturerSpecificData?.let { m -> (0 until m.size()).map { "%04x".format(m.keyAt(it)) } } ?: emptyList()
+            heard[result.device.address] = org.json.JSONObject().put("address", result.device.address).put("name", name ?: org.json.JSONObject.NULL)
+                .put("rssi", result.rssi).put("services", org.json.JSONArray(rec?.serviceUuids?.map { it.uuid.toString().substring(4, 8) } ?: emptyList<String>()))
+                .put("makers", org.json.JSONArray(makers)).put("connectable", result.isConnectable)
             // like the bridge: a BYD-* name or the heater's GATT service FFE0 in the advertisement
             val hasService = result.scanRecord?.serviceUuids?.any { it.uuid == HeaterProtocol.SERVICE } == true
             val byName = name != null && name.uppercase().startsWith(namePrefix.uppercase())
@@ -259,10 +299,15 @@ class HeaterBle(private val ctx: Context, private val passkey: Int = 1234, priva
     private val gattCb = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             h.post {
+                if (g != gatt) { runCatching { g.close() }; return@post } // late event from a closed connection
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
                     address = g.device.address
                     deviceName = g.device.name ?: deviceName
                     g.discoverServices()
+                } else if (probing != null && !connected) {
+                    Log.i(TAG, "probe $probing: disconnected (status $status)")
+                    probed += probing!!
+                    dropProbe()
                 } else {
                     // a stored address that never connects may be stale: rescan by name next time
                     if (!connected) address = null
@@ -274,8 +319,14 @@ class HeaterBle(private val ctx: Context, private val passkey: Int = 1234, priva
 
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
             h.post {
+                if (g != gatt) return@post
+                Log.i(TAG, "gatt ${g.device.address}: services " + g.services.joinToString(" ") { it.uuid.toString().substring(4, 8) })
                 val c = g.getService(HeaterProtocol.SERVICE)?.getCharacteristic(HeaterProtocol.CHAR)
-                if (c == null) { lastError = "not a heater (no FFE1)"; address = null; reconnect("no FFE1"); return@post }
+                if (c == null) {
+                    if (probing != null) { probed += probing!!; dropProbe(); return@post }
+                    lastError = "not a heater (no FFE1)"; address = null; reconnect("no FFE1"); return@post
+                }
+                probing = null
                 chr = c
                 g.setCharacteristicNotification(c, true)
                 val d = c.getDescriptor(HeaterProtocol.CCCD)
