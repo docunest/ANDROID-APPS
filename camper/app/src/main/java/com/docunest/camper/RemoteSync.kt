@@ -34,10 +34,22 @@ class RemoteSync(private val controller: Controller, private val base: String, p
         }
     }
 
+    // upload cursors: newest sample/event time MapPal has stored (kept in memory; after a restart MapPal's
+    // reply to the first push tells us where it is, and duplicates are ignored there anyway)
+    private var sentSample = -1L
+    private var sentEvent = -1L
+
     private fun push() {
         val res = synchronized(results) { JSONArray(results.toString()).also { while (results.length() > 0) results.remove(0) } }
+        val h = controller.history
+        val samples = if (sentSample >= 0) h.samplesAfter(sentSample) else JSONArray()
+        val events = if (sentEvent >= 0) h.eventsAfter(sentEvent) else JSONArray()
         try {
-            http("POST", "/api/camper/state", JSONObject().put("state", controller.snapshot()).put("results", res), 20_000)
+            val r = http("POST", "/api/camper/state", JSONObject().put("state", controller.snapshot()).put("results", res)
+                .put("samples", samples).put("events", events), 20_000)
+            // MapPal answers with the newest times it has; start from there (also covers its first reply)
+            sentSample = r.optLong("lastSample", sentSample.coerceAtLeast(0))
+            sentEvent = r.optLong("lastEvent", sentEvent.coerceAtLeast(0))
             lastOk = System.currentTimeMillis(); lastError = null
         } catch (e: Exception) {
             lastError = e.message
@@ -54,7 +66,7 @@ class RemoteSync(private val controller: Controller, private val base: String, p
                 for (i in 0 until cmds.length()) {
                     val c = cmds.getJSONObject(i)
                     Log.i(Controller.TAG, "remote command ${c.optString("id")}")
-                    val out = runCatching { controller.command(c.getJSONObject("body")) }
+                    val out = runCatching { controller.command(c.getJSONObject("body"), "remote") }
                         .getOrElse { JSONObject().put("ok", false).put("error", it.message) }
                     synchronized(results) {
                         results.put(JSONObject().put("id", c.getString("id")).put("ok", out.optBoolean("ok")).put("error", out.optString("error", "")))
