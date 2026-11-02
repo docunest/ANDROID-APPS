@@ -83,8 +83,6 @@ class Controller(private val ctx: Context) {
             "auto_targets":{"night":23.0,"cloudy":22.0,"sunny":20.0},"control_by":"calibrated","thermo_weight":0.5,
             "ac_fan":"auto","ac_quiet":true,"dry_until":0,"ac_managed":false,"dismissed":{},
             "diesel_phase":"","diesel_until":0,"diesel_started":0,"diesel_level":3,"diesel_low":3,"diesel_mid":5,"diesel_high":8}"""
-        const val CLEAN_STOP_MIN = 10
-        const val CLEANOUT_MIN = 20
     }
 
     private val cfg = Config.load(ctx)
@@ -103,6 +101,7 @@ class Controller(private val ctx: Context) {
     val heater = HeaterBle(ctx, cfg["HEATER_PASSKEY"]?.toIntOrNull() ?: 1234, cfg["HEATER_PREFIX"] ?: "BYD")
     val victron = Victron(ctx, cfg.victronDevices())
     val history = History(ctx.filesDir)
+    val rules = Rules(ctx.filesDir)
     private val location = cfg["CAMPER_LAT"]?.toDoubleOrNull()?.let { lat -> cfg["CAMPER_LON"]?.toDoubleOrNull()?.let { lat to it } }
 
     @Volatile private var floorState: FloorState? = null
@@ -188,6 +187,43 @@ class Controller(private val ctx: Context) {
         logReading()
         recordHistory()
         try { enforce() } catch (e: Exception) { errors["control"] = e.message ?: e.toString(); Log.w(TAG, "enforce", e) }
+        evaluateRules()
+    }
+
+    // ---------- user rules (Rules.kt) ----------
+
+    private fun fieldValue(devs: List<Device>, device: String, field: String): Any? {
+        val d = devs.firstOrNull { it.id == device } ?: return null
+        if (field == "online") return d.online
+        return d.readings.firstOrNull { it.id == field }?.value ?: d.controls.firstOrNull { it.id == field }?.value
+    }
+
+    /** One rule action through the same validated paths as manual input; returns an error or null. */
+    private fun runRuleAction(a: JSONObject, ruleName: String): String? {
+        val by = "rule: $ruleName"
+        val r = if (a.has("control")) set(a.getString("device"), a.getString("control"), a.opt("value"), by)
+            else act(a.getString("device"), a.getString("action"), a.optJSONObject("params") ?: JSONObject(), by)
+        return if (r.optBoolean("ok")) null else r.optString("error", "failed")
+    }
+
+    private fun evaluateRules() = runCatching {
+        val devs = devices()
+        rules.evaluate(System.currentTimeMillis(), { d, f -> fieldValue(devs, d, f) }) { a, name -> runRuleAction(a, name) }
+            .forEach { name ->
+                Log.i(TAG, "rule fired: $name")
+                history.event("rule", name, rules.json(System.currentTimeMillis()).let { arr ->
+                    (0 until arr.length()).map { arr.getJSONObject(it) }.firstOrNull { it.optString("name") == name }?.optString("last_result") ?: "ok"
+                }, "rule")
+            }
+    }.onFailure { errors["rules"] = it.message ?: it.toString(); Log.w(TAG, "rules", it) }
+
+    private fun cleanStopMin() = s.optInt("clean_stop_min", 10)
+    private fun coolTarget(p: String) = s.optDouble(if (p == "coolmax") "coolmax_target" else "cool_target", if (p == "coolmax") 22.0 else 24.0)
+
+    /** A stored setting, written by a non-raw control (already range-checked by Control.coerce). */
+    private fun setting(key: String, v: Any) {
+        synchronized(s) { s.put(key, if (v is Double && key != "cool_target" && key != "coolmax_target") v.roundToInt() else v) }
+        save()
     }
 
     private fun readBattery(): JSONObject? {
@@ -287,7 +323,7 @@ class Controller(private val ctx: Context) {
         val a = acState
         val acDev = ac
         if (a != null && acDev != null) {
-            val cool = pos?.let { COOL[it] }
+            val cool = pos?.let { p -> COOL[p]?.let { Pair(coolTarget(p), it.second) } }
             val fanPref = fanPref()
             when {
                 cool != null -> if (!a.power || a.mode != AcState.COOL || a.target != cool.first || a.fan != cool.second) {
@@ -417,7 +453,7 @@ class Controller(private val ctx: Context) {
         // --- app rules: the dial, floor plan, targets ---
         val heatOn = p in HEAT; val inferred = inferredPosition()
         out += Device("climate", "Climate rules", "rules", true,
-            status = when (p) { null -> "Manual (mirrors the devices) · now $inferred"; "floor", "diesel", "max" -> "Heat · ${st.optString("floor_mode")} ${floorTarget()}°"; "cool" -> "Cool 24°"; "coolmax" -> "Cool+ 22°"; else -> "Off" },
+            status = when (p) { null -> "Manual (mirrors the devices) · now $inferred"; "floor", "diesel", "max" -> "Heat · ${st.optString("floor_mode")} ${floorTarget()}°"; "cool" -> "Cool ${coolTarget("cool").roundToInt()}°"; "coolmax" -> "Cool+ ${coolTarget("coolmax").roundToInt()}°"; else -> "Off" },
             readings = listOf(
                 Reading("inside", "Inside", n(t.optDouble("calibrated")), "°C"),
                 Reading("control", "Controlled by", n(t.optDouble("control")), "°C", log = false),
@@ -431,7 +467,9 @@ class Controller(private val ctx: Context) {
             ) + listOf("night", "cloudy", "sunny").map { k ->
                 Control("auto_$k", "Auto $k", Control.Type.NUMBER, st.getJSONObject("auto_targets").optDouble(k), 5.0, 28.0, 0.5, "°C", raw = false) { command(cmd("auto_target", "key" to k, "value" to it)) }
             } + Control("control_by", "Heat by sensor", Control.Type.CHOICE, st.optString("control_by"),
-                options = listOf(Option("calibrated", "Average"), Option("thermostat", "Thermostat"), Option("ac", "AC")), raw = false) { command(cmd("control_by", "value" to it)) },
+                options = listOf(Option("calibrated", "Average"), Option("thermostat", "Thermostat"), Option("ac", "AC")), raw = false) { command(cmd("control_by", "value" to it)) } +
+                Control("cool_target", "Cool target", Control.Type.NUMBER, st.optDouble("cool_target", 24.0), 17.0, 30.0, 1.0, "°C", raw = false) { setting("cool_target", it) } +
+                Control("coolmax_target", "Cool+ target", Control.Type.NUMBER, st.optDouble("coolmax_target", 22.0), 17.0, 30.0, 1.0, "°C", raw = false) { setting("coolmax_target", it) },
             actions = listOf(
                 Action("heat", "Heat", active = heatOn) { listOf(cmd("position", "value" to "floor")) },
                 Action("off", "Off", active = p == "off") { listOf(cmd("position", "value" to "off")) },
@@ -527,6 +565,10 @@ class Controller(private val ctx: Context) {
             controls = listOf(
                 Control("power", "Power", Control.Type.TOGGLE, hs?.running) { v -> heater.power(v as Boolean) },
                 Control("level", "Level", Control.Type.NUMBER, hs?.level?.toDouble(), 1.0, 10.0, 1.0) { v -> heater.setLevel((v as Double).roundToInt()) },
+                Control("preset_low", "Low preset", Control.Type.NUMBER, lvl("low").toDouble(), 1.0, 10.0, 1.0, raw = false) { setting("diesel_low", it) },
+                Control("preset_mid", "Mid preset", Control.Type.NUMBER, lvl("mid").toDouble(), 1.0, 10.0, 1.0, raw = false) { setting("diesel_mid", it) },
+                Control("preset_high", "High preset", Control.Type.NUMBER, lvl("high").toDouble(), 1.0, 10.0, 1.0, raw = false) { setting("diesel_high", it) },
+                Control("clean_stop_min", "Clean stop", Control.Type.NUMBER, st.optInt("clean_stop_min", 10).toDouble(), 5.0, 20.0, 1.0, "min", raw = false) { setting("clean_stop_min", it) },
             ),
             actions = if (hs?.running == true) listOf(
                 Action("clean_stop", "Clean stop", active = phase == "clean_stop") { listOf(cmd("diesel_stop", "clean" to true)) },
@@ -577,7 +619,7 @@ class Controller(private val ctx: Context) {
     private fun startCleanStop(why: String) {
         Log.i(TAG, "heater clean stop ($why)")
         synchronized(s) {
-            s.put("diesel_phase", "clean_stop"); s.put("diesel_until", System.currentTimeMillis() + CLEAN_STOP_MIN * 60_000L)
+            s.put("diesel_phase", "clean_stop"); s.put("diesel_until", System.currentTimeMillis() + cleanStopMin() * 60_000L)
             if (pos() == "diesel" || pos() == "max") s.put("position", "floor")
         }
         save()
@@ -599,6 +641,24 @@ class Controller(private val ctx: Context) {
         Log.i(TAG, "command from $by: $cmd")
         when (cmd.optString("action")) {
             "set" -> return set(cmd.optString("device"), cmd.optString("control"), cmd.opt("value"), by)
+            "rule_save" -> return try {
+                val r = rules.put(cmd.getJSONObject("rule"))
+                history.event("command", "rule_save", r.getString("name"), by)
+                JSONObject().put("ok", true).put("rule", r)
+            } catch (e: Exception) { JSONObject().put("ok", false).put("error", e.message ?: "invalid rule") }
+            "rule_delete" -> {
+                val r = rules.get(cmd.optString("id"))
+                return if (r != null && rules.delete(r.getString("id"))) {
+                    history.event("command", "rule_delete", r.getString("name"), by); JSONObject().put("ok", true)
+                } else JSONObject().put("ok", false).put("error", "no such rule")
+            }
+            "rule_run" -> {
+                val r = rules.get(cmd.optString("id")) ?: return JSONObject().put("ok", false).put("error", "no such rule")
+                val res = rules.runActions(r) { a, name -> runRuleAction(a, name) }
+                rules.recordManualRun(r.getString("id"), res)
+                history.event("rule", r.getString("name"), "run now: ${res ?: "ok"}", by)
+                return if (res == null) JSONObject().put("ok", true) else JSONObject().put("ok", false).put("error", res)
+            }
             "act" -> return act(cmd.optString("device"), cmd.optString("id"), cmd.optJSONObject("params") ?: JSONObject(), by)
             "raw" -> { // older remote pages: {device, power?, setpoint?, ...} -> one set per field
                 var last = JSONObject().put("ok", true)
@@ -628,7 +688,7 @@ class Controller(private val ctx: Context) {
                 "diesel_stop" -> {
                     val next = cmd.optString("next").ifEmpty { "floor" }
                     if (cmd.optBoolean("clean")) {
-                        s.put("diesel_phase", "clean_stop"); s.put("diesel_until", System.currentTimeMillis() + CLEAN_STOP_MIN * 60_000L)
+                        s.put("diesel_phase", "clean_stop"); s.put("diesel_until", System.currentTimeMillis() + cleanStopMin() * 60_000L)
                     } else {
                         s.put("diesel_phase", "stop_now")
                     }
@@ -644,7 +704,7 @@ class Controller(private val ctx: Context) {
                 }
                 "diesel_cleanout" -> {
                     if (!heater.connected) "Diesel heater not connected" else {
-                        s.put("diesel_phase", "cleanout"); s.put("diesel_until", System.currentTimeMillis() + CLEANOUT_MIN * 60_000L)
+                        s.put("diesel_phase", "cleanout"); s.put("diesel_until", System.currentTimeMillis() + s.optInt("cleanout_min", 20) * 60_000L)
                         s.put("diesel_started", System.currentTimeMillis()); s.put("diesel_last_cleanout", System.currentTimeMillis())
                         if (!(heater.status?.running ?: false)) runCatching { heater.power(true) }
                         null
@@ -658,7 +718,7 @@ class Controller(private val ctx: Context) {
                         else -> {
                             // leaving a running diesel by any route (e.g. a phone) = clean stop
                             if (s.optString("diesel_phase") == "run") {
-                                s.put("diesel_phase", "clean_stop"); s.put("diesel_until", System.currentTimeMillis() + CLEAN_STOP_MIN * 60_000L)
+                                s.put("diesel_phase", "clean_stop"); s.put("diesel_until", System.currentTimeMillis() + cleanStopMin() * 60_000L)
                             }
                             s.put("position", p)
                             if (p == "floor" && s.optString("floor_mode") == "off") s.put("floor_mode", "auto")
@@ -822,6 +882,7 @@ class Controller(private val ctx: Context) {
             .put("motion", motion.summary())
             .put("victron", victron.json())
             .put("devices", JSONArray(devices().map { it.json() }))
+            .put("rules", rules.json(now))
             .put("app", BuildConfig.VERSION_NAME)
     }
 }
