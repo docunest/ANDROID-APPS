@@ -216,47 +216,40 @@ class Controller(private val ctx: Context) {
 
     private var prev: Map<String, Any?>? = null
 
-    /** The on/off-ish states whose changes become events. */
-    private fun watched(): Map<String, Any?> {
-        val f = floorState; val a = acState; val hs = if (heater.connected) heater.status else null
-        return mapOf(
-            "floor.power" to f?.power, "floor.heating" to f?.heating, "floor.setpoint" to f?.setpoint, "floor.mode" to f?.mode,
-            "ac.power" to a?.power, "ac.mode" to a?.let { modeName(it.mode) }, "ac.target" to a?.target, "ac.fan" to a?.let { fanName(it.fan) },
-            "diesel.running" to hs?.running, "diesel.level" to hs?.level, "diesel.connected" to heater.connected,
-            "dial.position" to pos(), "dial.floor_mode" to s.optString("floor_mode"),
-            "victron.charger_state" to victron.values("charger")?.optString("state_name"),
-            "victron.solar_state" to victron.values("mppt")?.optString("state_name"),
-        )
+    /** Device states whose changes become events: every control, non-numeric readings, online. */
+    private fun watched(devs: List<Device>): Map<String, Any?> = buildMap {
+        for (d in devs) {
+            put("${d.id}.online", d.online)
+            if (!d.online) continue
+            d.controls.forEach { put("${d.id}.${it.id}", it.value) }
+            d.readings.filter { it.value !is Number }.forEach { put("${d.id}.${it.id}", it.value) }
+        }
     }
 
     private fun recordHistory() = runCatching {
-        val now = watched()
+        val devs = devices()
+        val now = watched(devs)
         prev?.let { old ->
             for ((k, v) in now) {
                 val o = old[k]
-                // a device dropping out (null) is logged via its own "connected"/errors, not as a change
+                // a device dropping out is logged once as "<id>.online", not as every value going missing
                 if (v != null && o != null && v != o) history.event(k.substringBefore("."), k.substringAfter("."), v)
             }
         }
         prev = now.mapValues { (k, v) -> v ?: prev?.get(k) }
         val nowS = System.currentTimeMillis() / 1000
-        if (history.sampleDue(nowS)) history.sample(sampleRow(nowS))
+        if (history.sampleDue(nowS)) history.sample(sampleRow(nowS, devs))
     }.onFailure { Log.w(TAG, "history", it) }
 
-    private fun sampleRow(t: Long): JSONObject {
-        val temps = temps(); val f = floorState; val a = acState; val hs = if (heater.connected) heater.status else null
-        val mppt = victron.values("mppt"); val chg = victron.values("charger")
-        fun n(v: Any?) = v ?: JSONObject.NULL
-        return JSONObject().put("t", t)
-            .put("inside", temps.opt("calibrated")).put("thermostat", temps.opt("thermostat")).put("ac_temp", temps.opt("ac"))
-            .put("outside", n(weather?.opt("now_temp")))
-            .put("floor_on", n(f?.power)).put("floor_heating", n(f?.heating)).put("floor_setpoint", n(f?.setpoint))
-            .put("ac_on", n(a?.power)).put("ac_mode", n(a?.let { modeName(it.mode) })).put("ac_target", n(a?.target))
-            .put("diesel_on", n(hs?.running)).put("diesel_level", n(hs?.level)).put("diesel_room", n(hs?.roomTemp))
-            .put("battery_v", n(mppt?.opt("battery_voltage") ?: chg?.opt("battery_voltage")))
-            .put("solar_w", n(mppt?.opt("pv_power"))).put("solar_a", n(mppt?.opt("battery_current")))
-            .put("charger_a", n(chg?.opt("battery_current"))).put("yield_kwh", n(mppt?.opt("yield_today_kwh")))
-            .put("phone_battery", n(battery?.opt("percent")))
+    /** "<device>.<id>": numeric readings with a unit, number controls, and on/off states (for the bands). */
+    private fun sampleRow(t: Long, devs: List<Device>): JSONObject {
+        val row = JSONObject().put("t", t)
+        for (d in devs) {
+            if (!d.online) continue
+            d.readings.forEach { r -> if ((r.log && r.unit != null && r.value is Number) || r.value is Boolean) row.put("${d.id}.${r.id}", r.value) }
+            d.controls.forEach { c -> if (c.type != Control.Type.CHOICE && c.value != null) row.put("${d.id}.${c.id}", c.value) }
+        }
+        return row
     }
 
     private fun modeName(m: Int) = when (m) { AcState.COOL -> "cool"; AcState.DRY -> "dry"; AcState.FAN_ONLY -> "fan"; else -> "other" }
@@ -366,34 +359,219 @@ class Controller(private val ctx: Context) {
         else -> "unknown device"
     }
 
-    /** Writes the raw fields of a "raw" command: floor {power, setpoint, mode}, ac {power, mode, target, fan}, diesel {power, level}. */
-    private fun rawWrite(cmd: JSONObject) {
-        when (cmd.optString("device")) {
-            "floor" -> {
-                val dps = JSONObject()
-                if (cmd.has("power")) dps.put("1", cmd.getBoolean("power"))
-                if (cmd.has("mode")) dps.put("4", cmd.getString("mode").also { require(it in setOf("home", "auto")) { "mode must be home or auto" } })
-                if (cmd.has("setpoint")) {
-                    val max = floorState?.maxSetpoint?.toDouble() ?: 28.0
-                    dps.put("2", ((cmd.getDouble("setpoint").coerceIn(5.0, max) * 2).roundToInt() * 5))
-                    if (!cmd.has("mode") && floorState?.mode != "home") dps.put("4", "home") // a setpoint in auto/leave mode doesn't stick
-                }
-                if (dps.length() > 0) floor!!.set(dps)
-            }
-            "ac" -> {
-                val a = ac!!.status()
-                ac.apply(a.copy(
-                    power = if (cmd.has("power")) cmd.getBoolean("power") else a.power,
-                    mode = when (cmd.optString("mode")) { "cool" -> AcState.COOL; "dry" -> AcState.DRY; "fan" -> AcState.FAN_ONLY; else -> a.mode },
-                    target = if (cmd.has("target")) cmd.getDouble("target").coerceIn(17.0, 30.0).roundToInt().toDouble() else a.target,
-                    fan = when (cmd.optString("fan")) { "low" -> AcState.FAN_LOW; "high" -> AcState.FAN_HIGH; "auto" -> AcState.FAN_AUTO; else -> a.fan },
-                ))
-            }
-            "diesel" -> {
-                if (cmd.has("level")) heater.setLevel(cmd.getInt("level").coerceIn(1, 10))
-                if (cmd.has("power")) heater.power(cmd.getBoolean("power"))
-            }
+    /** Manual control write, validated against the device's own description (range, step, options). */
+    private fun set(deviceId: String, controlId: String, value: Any?, by: String): JSONObject {
+        fun fail(e: String) = JSONObject().put("ok", false).put("error", e)
+        val d = devices().firstOrNull { it.id == deviceId } ?: return fail("unknown device $deviceId")
+        val c = d.controls.firstOrNull { it.id == controlId } ?: return fail("${d.name}: unknown control $controlId")
+        val v = try { c.coerce(value) } catch (e: IllegalArgumentException) { return fail(e.message ?: "bad value") }
+        if (!d.online) return fail("${d.name} is not connected")
+        if (c.raw) {
+            synchronized(s) { rawRelease(d.id) }?.let { return fail(it) }
+            save()
+            history.event("command", "set", "${d.id}.${c.id}=$v", by)
         }
+        return try {
+            c.write(v)
+            if (c.raw) {
+                enforce()
+                floor?.let { f -> runCatching { floorState = FloorState.of(f.status()) } }
+                ac?.let { a -> runCatching { acState = a.status() } }
+            }
+            JSONObject().put("ok", true).put("state", snapshot())
+        } catch (e: Exception) {
+            fail(e.message ?: e.toString())
+        }
+    }
+
+    /** One-tap action: expands to existing commands (with the chosen params checked against their options). */
+    private fun act(deviceId: String, actionId: String, params: JSONObject, by: String): JSONObject {
+        fun fail(e: String) = JSONObject().put("ok", false).put("error", e)
+        val d = devices().firstOrNull { it.id == deviceId } ?: return fail("unknown device $deviceId")
+        val a = d.actions.firstOrNull { it.id == actionId } ?: return fail("${d.name}: \"$actionId\" isn't available now")
+        val p = JSONObject()
+        for (c in a.params) {
+            p.put(c.id, try { c.coerce(if (params.has(c.id)) params.get(c.id) else c.value) } catch (e: IllegalArgumentException) { return fail(e.message ?: "bad value") })
+        }
+        var last = JSONObject().put("ok", true)
+        for (b in a.bodies(p)) {
+            last = command(b, by)
+            if (!last.optBoolean("ok")) return last
+        }
+        return last
+    }
+
+    private fun n(v: Double?) = v?.takeIf { !it.isNaN() }
+    private fun onOff(v: Boolean?) = when (v) { true -> "on"; false -> "off"; else -> "–" }
+    private fun d1(v: Double?) = v?.let { "%.1f°".format(Locale.US, it) } ?: "–"
+
+    /** Everything the app can show and control, described for any UI (see Devices.kt). */
+    fun devices(): List<Device> {
+        val st = synchronized(s) { JSONObject(s.toString()) }
+        val now = System.currentTimeMillis()
+        val p = pos()
+        val out = ArrayList<Device>()
+        val t = temps()
+        val dryLeft = st.optLong("dry_until").let { if (it > now) ((it - now) / 60_000).toInt() + 1 else 0 }
+
+        // --- app rules: the dial, floor plan, targets ---
+        val heatOn = p in HEAT; val inferred = inferredPosition()
+        out += Device("climate", "Climate rules", "rules", true,
+            status = when (p) { null -> "Manual (mirrors the devices) · now $inferred"; "floor", "diesel", "max" -> "Heat · ${st.optString("floor_mode")} ${floorTarget()}°"; "cool" -> "Cool 24°"; "coolmax" -> "Cool+ 22°"; else -> "Off" },
+            readings = listOf(
+                Reading("inside", "Inside", n(t.optDouble("calibrated")), "°C"),
+                Reading("control", "Controlled by", n(t.optDouble("control")), "°C", log = false),
+                Reading("outside", "Outside", weather?.optDouble("now_temp")?.let { n(it) }, "°C"),
+                Reading("position", "Dial", p ?: "manual", log = false),
+            ),
+            controls = listOf(
+                Control("floor_mode", "Floor plan", Control.Type.CHOICE, st.optString("floor_mode"),
+                    options = listOf(Option("off", "Off"), Option("auto", "Auto (weather)"), Option("on", "On")), raw = false) { command(cmd("floor_mode", "value" to it)) },
+                Control("on_target", "On target", Control.Type.NUMBER, st.optDouble("on_target"), 5.0, 28.0, 0.5, "°C", raw = false) { command(cmd("on_target", "value" to it)) },
+            ) + listOf("night", "cloudy", "sunny").map { k ->
+                Control("auto_$k", "Auto $k", Control.Type.NUMBER, st.getJSONObject("auto_targets").optDouble(k), 5.0, 28.0, 0.5, "°C", raw = false) { command(cmd("auto_target", "key" to k, "value" to it)) }
+            } + Control("control_by", "Heat by sensor", Control.Type.CHOICE, st.optString("control_by"),
+                options = listOf(Option("calibrated", "Average"), Option("thermostat", "Thermostat"), Option("ac", "AC")), raw = false) { command(cmd("control_by", "value" to it)) },
+            actions = listOf(
+                Action("heat", "Heat", active = heatOn) { listOf(cmd("position", "value" to "floor")) },
+                Action("off", "Off", active = p == "off") { listOf(cmd("position", "value" to "off")) },
+                Action("cool", "Cool", active = p == "cool") { listOf(cmd("position", "value" to "cool")) },
+                Action("coolmax", "Cool+", active = p == "coolmax") { listOf(cmd("position", "value" to "coolmax")) },
+            ))
+
+        // --- floor thermostat (Tuya) ---
+        floor?.let {
+            val f = floorState
+            out += Device("floor", "Floor heating", "thermostat", f != null && !errors.containsKey("floor"),
+                status = if (f == null) "not responding" else if (!f.power) "Off" else "On · set ${f.setpoint}° · ${if (f.heating) "heating" else "idle"}",
+                manual = p == null,
+                readings = listOf(
+                    Reading("temp", "Sensor", f?.temp, "°C"),
+                    Reading("heating", "Relay", f?.heating),
+                    Reading("fault", "Fault", f?.fault?.takeIf { it != 0 }?.let { "code $it" } ?: "none", log = false),
+                ),
+                controls = listOf(
+                    Control("power", "Power", Control.Type.TOGGLE, f?.power) { v -> it.set(JSONObject().put("1", v as Boolean)) },
+                    Control("setpoint", "Setpoint", Control.Type.NUMBER, f?.setpoint, 5.0, (f?.maxSetpoint ?: 28).toDouble(), 0.5, "°C") { v ->
+                        val dps = JSONObject().put("2", ((v as Double) * 10).roundToInt())
+                        if (floorState?.mode != "home") dps.put("4", "home") // a setpoint in auto/leave mode doesn't stick
+                        it.set(dps)
+                    },
+                    Control("mode", "Mode", Control.Type.CHOICE, f?.mode, options = listOf(Option("home", "Manual"), Option("auto", "Schedule"))) { v ->
+                        it.set(JSONObject().put("4", v as String))
+                    },
+                ))
+        }
+
+        // --- AC (Midea) ---
+        ac?.let { dev ->
+            val a = acState
+            val managed = st.optBoolean("ac_managed") || dryLeft > 0 || COOL[p] != null
+            out += Device("ac", "Air conditioner", "ac", a != null && !errors.containsKey("ac"),
+                status = if (a == null) "not responding" else if (!a.power) "Off" else "${modeName(a.mode)} ${a.target.roundToInt()}° · fan ${fanName(a.fan)}",
+                manual = !managed,
+                readings = listOf(Reading("temp", "Sensor", a?.indoor, "°C"),
+                    Reading("water", "Water tank", if (a?.errorCode != null && a.errorCode != 0) "error ${a.errorCode}" else "ok", log = false)),
+                controls = listOf(
+                    Control("power", "Power", Control.Type.TOGGLE, a?.power) { v -> dev.apply(dev.status().copy(power = v as Boolean)) },
+                    Control("mode", "Mode", Control.Type.CHOICE, a?.let { modeName(it.mode) },
+                        options = listOf(Option("cool", "Cool"), Option("dry", "Dry"), Option("fan", "Fan"))) { v ->
+                        dev.apply(dev.status().copy(mode = when (v) { "dry" -> AcState.DRY; "fan" -> AcState.FAN_ONLY; else -> AcState.COOL }))
+                    },
+                    Control("target", "Target", Control.Type.NUMBER, a?.target, 17.0, 30.0, 1.0, "°C") { v -> dev.apply(dev.status().copy(target = v as Double)) },
+                    Control("fan", "Fan", Control.Type.CHOICE, a?.let { fanName(it.fan) },
+                        options = listOf(Option("low", "Low"), Option("high", "High"), Option("auto", "Auto"))) { v ->
+                        dev.apply(dev.status().copy(fan = when (v) { "low" -> AcState.FAN_LOW; "high" -> AcState.FAN_HIGH; else -> AcState.FAN_AUTO }))
+                    },
+                ))
+
+            // dehumidifier: the AC in dry mode on a timer, independent of the dial
+            val fanOpts = listOf(Option("low", "Mini"), Option("auto", "Auto"), Option("high", "Max"))
+            out += Device("dry", "Dehumidifier", "rules", a != null,
+                status = if (dryLeft > 0) "Drying · ${dryLeft} min left · ${fanOpts.first { it.value == st.optString("ac_fan", "auto") }.label}" else "Off",
+                readings = listOf(Reading("minutes_left", "Time left", dryLeft, "min", log = false)),
+                controls = listOf(Control("fan", "Strength", Control.Type.CHOICE, st.optString("ac_fan", "auto"), options = fanOpts, raw = false) {
+                    command(cmd("ac_fan", "value" to it))
+                }),
+                actions = if (dryLeft > 0) listOf(Action("stop", "Stop drying", active = true) { listOf(cmd("dry", "minutes" to 0)) })
+                else listOf(Action("run", "Dry", params = listOf(
+                    Control("fan", "Strength", Control.Type.CHOICE, st.optString("ac_fan", "auto"), options = fanOpts) {},
+                    Control("minutes", "For", Control.Type.CHOICE, "60",
+                        options = listOf(Option("60", "1 h"), Option("180", "3 h"), Option("480", "8 h"))) {},
+                )) { pp -> listOf(cmd("ac_fan", "value" to pp.getString("fan")), cmd("dry", "minutes" to pp.getString("minutes").toInt())) }),
+            )
+        }
+
+        // --- diesel heater (BLE) ---
+        val hs = if (heater.connected) heater.status else null
+        val phase = st.optString("diesel_phase")
+        val left = st.optLong("diesel_until").let { if (it > now) ((it - now) / 60_000).toInt() + 1 else 0 }
+        val lvl = { k: String -> st.optInt("diesel_$k") }
+        out += Device("diesel", "Diesel heater", "heater", heater.connected,
+            status = when {
+                !heater.connected -> "Not connected" + (heater.lastError?.let { " · $it" } ?: "")
+                hs == null -> "Connected, no status yet"
+                hs.error != null -> hs.error
+                !hs.running -> "Off"
+                else -> "${if (hs.step == "running") "Level ${hs.level}" else hs.step}" + when (phase) {
+                    "run" -> if (left == 0) " · until off" else " · $left min left"
+                    "clean_stop" -> " · clean stop $left min"; "cleanout" -> " · clean-out $left min"; else -> "" }
+            },
+            manual = phase.isEmpty(),
+            readings = listOf(
+                Reading("room_temp", "Sensor", hs?.roomTemp, "°C"),
+                Reading("case_temp", "Heat exchanger", hs?.caseTemp, "°C"),
+                Reading("voltage", "Supply", hs?.voltage, "V"),
+                Reading("step", "Stage", hs?.step, log = false),
+            ),
+            controls = listOf(
+                Control("power", "Power", Control.Type.TOGGLE, hs?.running) { v -> heater.power(v as Boolean) },
+                Control("level", "Level", Control.Type.NUMBER, hs?.level?.toDouble(), 1.0, 10.0, 1.0) { v -> heater.setLevel((v as Double).roundToInt()) },
+            ),
+            actions = if (hs?.running == true) listOf(
+                Action("clean_stop", "Clean stop", active = phase == "clean_stop") { listOf(cmd("diesel_stop", "clean" to true)) },
+                Action("stop_now", "Stop now") { listOf(cmd("diesel_stop", "clean" to false)) },
+            ) else listOf(
+                Action("run", "Run", params = listOf(
+                    Control("level", "Power", Control.Type.CHOICE, "low",
+                        options = listOf(Option("low", "Low · ${lvl("low")}"), Option("mid", "Mid · ${lvl("mid")}"), Option("high", "High · ${lvl("high")}"))) {},
+                    Control("minutes", "For", Control.Type.CHOICE, "60",
+                        options = listOf(Option("20", "20 min"), Option("60", "1 h"), Option("120", "2 h"), Option("0", "Until off"))) {},
+                )) { pp -> listOf(cmd("diesel", "level" to pp.getString("level"), "minutes" to pp.getString("minutes").toInt())) },
+                Action("cleanout", "Clean-out burn") { listOf(cmd("diesel_cleanout")) },
+            ))
+
+        // --- Victron (read-only broadcasts) ---
+        val vj = victron.json()
+        for (name in vj.keys()) {
+            val v = vj.getJSONObject(name)
+            val ok = v.has("age_s")
+            val type = v.optString("type")
+            fun r(k: String, label: String, unit: String?) = if (v.has(k)) Reading(k, label, v.opt(k), unit) else null
+            out += Device(name, when (type) { "solar_charger" -> "Solar (MPPT)"; "ac_charger" -> "Charger"; "battery_monitor" -> "Battery monitor"; else -> name },
+                "victron", ok,
+                status = if (!ok) v.optString("error") else listOfNotNull(v.optString("state_name").ifEmpty { null },
+                    v.opt("pv_power")?.let { "$it W" }, v.opt("battery_voltage")?.let { "$it V" }, v.opt("battery_current")?.let { "$it A" }).joinToString(" · "),
+                readings = listOfNotNull(
+                    r("pv_power", "Solar", "W"), r("battery_voltage", "Battery", "V"), r("battery_current", "Current", "A"),
+                    r("yield_today_kwh", "Today", "kWh"), r("load_current", "Load", "A"), r("temperature", "Temperature", "°C"),
+                    r("soc", "Charge", "%"), r("state_name", "State", null),
+                    v.optInt("error").takeIf { ok && it != 0 }?.let { Reading("error", "Error", "code $it", log = false) },
+                ))
+        }
+
+        // --- the Z1 itself ---
+        val b = battery
+        val m = motion.summary()
+        out += Device("phone", "Wall screen (Z1)", "phone", true,
+            status = "Battery ${b?.opt("percent") ?: "–"}%${if (b?.optBoolean("charging") == true) " · charging" else " · NOT charging"} · app ${BuildConfig.VERSION_NAME}",
+            readings = listOf(
+                Reading("battery", "Battery", b?.opt("percent") as? Number, "%"),
+                Reading("battery_temp", "Battery temp", (b?.opt("temp") as? Number)?.toDouble(), "°C"),
+                Reading("charging", "Charging", b?.optBoolean("charging")),
+                Reading("motion", "Motion", m.optString("state").ifEmpty { null }, log = false),
+            ))
+        return out
     }
 
     private fun startCleanStop(why: String) {
@@ -419,6 +597,18 @@ class Controller(private val ctx: Context) {
 
     fun command(cmd: JSONObject, by: String = "screen"): JSONObject = synchronized(io) {
         Log.i(TAG, "command from $by: $cmd")
+        when (cmd.optString("action")) {
+            "set" -> return set(cmd.optString("device"), cmd.optString("control"), cmd.opt("value"), by)
+            "act" -> return act(cmd.optString("device"), cmd.optString("id"), cmd.optJSONObject("params") ?: JSONObject(), by)
+            "raw" -> { // older remote pages: {device, power?, setpoint?, ...} -> one set per field
+                var last = JSONObject().put("ok", true)
+                for (k in cmd.keys().asSequence().filter { it != "action" && it != "device" }.toList()) {
+                    last = set(cmd.optString("device"), k, cmd.get(k), by)
+                    if (!last.optBoolean("ok")) return last
+                }
+                return last
+            }
+        }
         val err = synchronized(s) {
             when (cmd.optString("action")) {
                 "diesel" -> {
@@ -497,7 +687,6 @@ class Controller(private val ctx: Context) {
                 "ac_quiet" -> { s.put("ac_quiet", cmd.getBoolean("value")); null }
                 "ac_fan" -> { s.put("ac_fan", cmd.getString("value")); null }
                 "dismiss" -> { s.getJSONObject("dismissed").put(cmd.getString("id"), System.currentTimeMillis()); null }
-                "raw" -> rawRelease(cmd.optString("device"))
                 else -> "unknown action"
             }
         }
@@ -508,7 +697,6 @@ class Controller(private val ctx: Context) {
         if (err != null) return JSONObject().put("ok", false).put("error", err)
         save()
         try {
-            if (cmd.optString("action") == "raw") rawWrite(cmd)
             if (cmd.optString("action") == "ac_fan" && s.optLong("dry_until") > System.currentTimeMillis()) {
                 // a fan change during an active dry run applies now (enforce() only sets the fan when entering dry)
                 val a = ac?.status()
@@ -633,8 +821,7 @@ class Controller(private val ctx: Context) {
             .put("battery", battery ?: JSONObject.NULL)
             .put("motion", motion.summary())
             .put("victron", victron.json())
-            .put("manual", JSONObject().put("floor", st.isNull("position")).put("ac", !st.optBoolean("ac_managed") && st.optLong("dry_until") <= now && COOL[st.optString("position")] == null)
-                .put("diesel", st.optString("diesel_phase").isEmpty()))
+            .put("devices", JSONArray(devices().map { it.json() }))
             .put("app", BuildConfig.VERSION_NAME)
     }
 }

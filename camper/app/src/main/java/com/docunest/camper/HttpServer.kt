@@ -14,7 +14,8 @@ import java.util.concurrent.Executors
 /**
  * Minimal HTTP/1.1 server: the bundled UI (assets/web) plus the JSON API the UI uses.
  *   GET  /api/state  -> controller snapshot
- *   POST /api/cmd    -> controller command
+ *   GET  /api/devices -> self-description of every device: readings, controls (ranges/options), actions
+ *   POST /api/cmd    -> controller command ({"action":"set"|"act",...} for any device, see Devices.kt)
  * Serves the Z1's own kiosk (127.0.0.1) and phones on the camper Wi-Fi.
  */
 class HttpServer(private val assets: AssetManager, private val controller: Controller, private val port: Int = 8080) {
@@ -57,6 +58,8 @@ class HttpServer(private val assets: AssetManager, private val controller: Contr
             val out = c.getOutputStream()
             when {
                 method == "GET" && path == "/api/state" -> send(out, 200, "application/json", controller.snapshot().toString().toByteArray())
+                method == "GET" && path == "/api/devices" -> send(out, 200, "application/json",
+                    JSONObject().put("devices", org.json.JSONArray(controller.devices().map { it.json() })).toString(1).toByteArray())
                 method == "GET" && path == "/api/ble" -> send(out, 200, "application/json",
                     org.json.JSONArray(controller.heater.heard.values.sortedByDescending { it.optInt("rssi") }).toString(1).toByteArray())
                 method == "GET" && path == "/api/saved" -> send(out, 200, "application/json", controller.saved().toByteArray())
