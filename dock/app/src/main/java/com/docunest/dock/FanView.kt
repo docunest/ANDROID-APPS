@@ -1,7 +1,11 @@
 package com.docunest.dock
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
+import android.graphics.Matrix
+import android.graphics.Shader
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
@@ -24,6 +28,8 @@ class FanTarget(
     /** Places get wide labelled pills; apps get round icons. */
     val pill: Boolean,
     val subtitle: String? = null,
+    /** Map of the area around a place ([Thumbs]), shown round at the pill's left. */
+    val image: Bitmap? = null,
     val action: () -> Unit,
 ) {
     val rect = RectF()
@@ -44,6 +50,7 @@ class FanView(context: Context, private val targets: List<FanTarget>) : View(con
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = Color.WHITE }
     private val text = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; isFakeBoldText = true }
     private val sub = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(220, 255, 255, 255) }
+    private val picture = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private var cx = 0f
     private var cy = 0f
 
@@ -63,9 +70,11 @@ class FanView(context: Context, private val targets: List<FanTarget>) : View(con
             t.rect.set(x - iconSize / 2, y - iconSize / 2, x + iconSize / 2, y + iconSize / 2)
             clamp(t.rect, screenW, screenH)
         }
-        val pw = min(dp(330), screenW - dp(24)).toFloat()
-        val ph = dp(62).toFloat()
-        val gap = dp(10).toFloat()
+        val pw = min(dp(380), screenW - dp(24)).toFloat()
+        // 6 places + "Show more" must fit a 600 dp-high head unit screen (or a smaller one).
+        val n = pills.size.coerceAtLeast(1)
+        val gap = min(dp(10).toFloat(), (screenH - dp(24)) * 0.02f)
+        val ph = min(dp(66).toFloat(), (screenH - dp(24) - (n - 1) * gap) / n)
         val right = cx < screenW / 2f
         val px = if (right) cx + radius + iconSize / 2 + dp(24) else cx - radius - iconSize / 2 - dp(24) - pw
         val total = pills.size * ph + (pills.size - 1).coerceAtLeast(0) * gap
@@ -111,10 +120,21 @@ class FanView(context: Context, private val targets: List<FanTarget>) : View(con
             if (t.pill) {
                 canvas.drawRoundRect(r, r.height() / 2, r.height() / 2, fill)
                 if (on) canvas.drawRoundRect(r, r.height() / 2, r.height() / 2, stroke)
-                val pad = dp(18).toFloat()
-                text.textSize = dp(18).toFloat()
-                sub.textSize = dp(13).toFloat()
-                val avail = r.width() - pad * 2
+                var pad = dp(18).toFloat()
+                t.image?.let { img ->
+                    // Round map picture filling the pill's left end.
+                    val d = r.height() - dp(8)
+                    val left = r.left + dp(4)
+                    val top = r.top + dp(4)
+                    val m = Matrix().apply { setScale(d / img.width, d / img.height); postTranslate(left, top) }
+                    picture.shader = BitmapShader(img, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply { setLocalMatrix(m) }
+                    canvas.drawCircle(left + d / 2, top + d / 2, d / 2, picture)
+                    pad = d + dp(16)
+                }
+                val big = r.height() >= dp(56)
+                text.textSize = dp(if (big) 18 else 16).toFloat()
+                sub.textSize = dp(if (big) 13 else 12).toFloat()
+                val avail = r.width() - pad - dp(18)
                 val title = TextUtils.ellipsize(t.label, text, avail, TextUtils.TruncateAt.END).toString()
                 if (t.subtitle != null) {
                     canvas.drawText(title, r.left + pad, r.centerY() - dp(2), text)

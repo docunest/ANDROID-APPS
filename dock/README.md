@@ -8,12 +8,12 @@ docunest/MapPal `lib/dock/`).
 | Gesture on the floating button | Result |
 |---|---|
 | **Tap** | Opens the dock panel: ★ Save this spot, places list + map. Tap again to close. |
-| **Press and hold** (~0.3 s), **slide**, **lift** | Slide menu: YouTube, Google Maps, (DVR once set), ★ Save spot, the most recent nearby places (with ~distance) and **Show more…** (full history). Lift on a place → Waze starts navigating. Never lift in between. |
+| **Press and hold** (~0.3 s), **slide**, **lift** | Slide menu: YouTube, Google Maps, (DVR once set), ★ Save spot, the 6 most recent nearby places and **Show more…** (full history). Each place shows a round **map of the area around it** (OpenStreetMap, ~3.7 km across, pin in the middle), direction + distance (`↗ ~23 km`), the town from its address and how long ago — so it's recognised by where it is, not only by name. Lift on a place → Waze starts navigating. Never lift in between. |
 | **Drag** | Move the button anywhere (position is remembered). |
 
 - The button is small (50 dp) and 45 % transparent when idle, fully visible while touched. Both are adjustable in ⚙.
 - **New place from the phone** → a card appears at the top of the screen: tap the name or **Drive · Waze** (one tap), or **Maps** for Google Maps. The button shows an amber count of unseen places.
-- **Places list**: pinned and unseen first, then recently used, each with ~distance. Places more than 150 km away *and* older than 2 days sit under **Show more** — all history kept.
+- **Places list and map**: pinned and unseen first, then recently used, each with the area map (tap = show on the big map), direction + distance and town. Up front (list, map pins, slide menu): places **within 300 km, or sent / driven to in the last 3 days** (the next destination can be far ahead); pinned and new always. The rest sits under **Show more** — all history kept. Where the car is comes from the GPS, else the position saved before the last cold start (it used to be "unknown" after a cold start, which put every place on the map). Area maps are made once per place while there's signal (≤ 4 OSM tiles, same User-Agent as the map) and kept as files, so they show offline (`Thumbs.kt`).
 - **Waze** is opened with a name search (`waze.com/ul?q=<name, address>&navigate=yes`) — the only form that started a route with the place's name in field tests (Waze test #9; 🧪 buttons still in the app for now). Tap the **name** = navigate (Waze; set Google Maps as default in ⚙ if ever wanted). Small **G** = this once in Google Maps. 🗺 = show on map. Long-press = pin / delete / open original link.
 - **Split screen — Waze keeps the route, Google Maps beside it**:
   - Slide menu → **Google Maps** always opens in split screen next to Waze.

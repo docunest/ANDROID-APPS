@@ -49,7 +49,7 @@ class DockService : Service() {
     private var fan: FanView? = null
     private var card: View? = null
     private val main = Handler(Looper.getMainLooper())
-    private val storeListener: () -> Unit = { refreshBadge() }
+    private val storeListener: () -> Unit = { refreshBadge(); prefetchThumbs() }
     private var netCallback: ConnectivityManager.NetworkCallback? = null
     private var syncing = false
 
@@ -95,6 +95,7 @@ class DockService : Service() {
         if (!syncing) {
             syncing = true
             Store.addListener(storeListener)
+            prefetchThumbs()
             Sync.onNewLinks = { if (bubble != null) showCard(it) else notifyNew(it) }
             Sync.start(this)
             registerWakeups()
@@ -279,6 +280,12 @@ class DockService : Service() {
 
     // --- Press-and-slide menu -------------------------------------------
 
+    /** Area maps for what the menu and list show first — made while there's signal, shown offline. */
+    private fun prefetchThumbs() {
+        val here = Near.here(this)
+        Thumbs.prefetch(this, Store.sorted().filter { Near.isMain(here, it) }.take(20))
+    }
+
     private fun fanTargets(): List<FanTarget> {
         val t = mutableListOf<FanTarget>()
         val pkgs = (prefs.fanApps + listOfNotNull(prefs.dvrPackage.takeIf { it.isNotBlank() })).distinct()
@@ -299,16 +306,17 @@ class DockService : Service() {
         val (main, more) = Store.sorted().partition { Near.isMain(here, it) }
         val shown = main.take(prefs.fanLinks.coerceIn(0, 8))
         for (item in shown) {
+            // Recognisable at a glance: direction + distance, town, how long ago — plus the area map.
             val bits = mutableListOf<String>()
-            Near.label(here, item)?.let { bits += it }
             if (item.isNew) bits += "NEW"
-            if (item.kind == "bookmark") bits += "★"
+            Near.label(here, item)?.let { bits += it }
+            Near.town(item.address, item.title)?.let { bits += it }
+            bits += if (item.kind == "bookmark") "★ ${ago(item.recency)}" else ago(item.recency)
             if (item.approximate) bits += "approx."
-            bits += "→ $nav"
             t += FanTarget(
                 item.title, null,
                 if (item.isNew) Color.parseColor("#92400E") else Color.argb(240, 31, 41, 55),
-                pill = true, subtitle = bits.joinToString(" · "),
+                pill = true, subtitle = bits.joinToString(" · ") + " → $nav", image = Thumbs.get(this, item),
             ) { Nav.go(this, item) }
         }
         // Always last: the full history (far & older places included).

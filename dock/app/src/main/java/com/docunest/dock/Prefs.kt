@@ -38,7 +38,7 @@ class Prefs(context: Context) {
 
     /** How many recent places appear in the press-and-slide menu. */
     var fanLinks: Int
-        get() = sp.getInt("fanLinks", 4)
+        get() = sp.getInt("fanLinks", 6)
         set(value) = sp.edit().putInt("fanLinks", value).apply()
 
     var fanBookmarkHere: Boolean

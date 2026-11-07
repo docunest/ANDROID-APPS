@@ -316,8 +316,8 @@ class DockActivity : Activity() {
         }
         main.forEach { list.addView(row(it)) }
         if (more.isNotEmpty()) {
-            // Far away (> 150 km) and older than 2 days: history, one tap away.
-            list.addView(bigButton(if (showMore) "Hide older far places" else "Show more (${more.size}) — far & older", Palette.CARD_HI, 15f) {
+            // Further than 300 km and older than 3 days: history, one tap away (map too).
+            list.addView(bigButton(if (showMore) "Hide far & older places" else "Show more (${more.size}) — over 300 km & older than 3 days", Palette.CARD_HI, 15f) {
                 showMore = !showMore
                 render()
             }.apply {
@@ -331,6 +331,7 @@ class DockActivity : Activity() {
     private fun subtitle(item: Item): String {
         val bits = mutableListOf<String>()
         Near.label(Near.here(this), item)?.let { bits += it }
+        Near.town(item.address, item.title)?.let { bits += it }
         if (item.isNew) bits += "NEW"
         bits += if (item.kind == "bookmark") "★ saved ${ago(item.createdAt)}" else "sent ${ago(item.createdAt)}"
         if (item.approximate) bits += "approx."
@@ -353,6 +354,20 @@ class DockActivity : Activity() {
                 setMargins(0, dp(4), 0, dp(4))
             }
         }
+        // Map of the area around the place: recognise it by where it is. Tap = show it on the big map.
+        val thumb = Thumbs.get(this, item)
+        thumb?.let { bmp ->
+            r.addView(android.widget.ImageView(this).apply {
+                setImageBitmap(bmp)
+                scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                clipToOutline = true
+                outlineProvider = object : android.view.ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: android.graphics.Outline) =
+                        outline.setRoundRect(0, 0, view.width, view.height, dp(10).toFloat())
+                }
+                setOnClickListener { focus(item) }
+            }, LinearLayout.LayoutParams(dp(64), dp(64)).apply { marginEnd = dp(12) })
+        }
         val text = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             minimumHeight = dp(56)
@@ -369,7 +384,7 @@ class DockActivity : Activity() {
         r.addView(bigButton("🧪", Palette.CARD_HI, 16f) {
             startActivity(NavTestActivity.intent(this, item.lat, item.lng, item.title, item.address, item.resolvedUrl ?: item.sourceUrl))
         }, LinearLayout.LayoutParams(dp(56), dp(56)).apply { marginEnd = dp(6) })
-        if (item.hasPoint) {
+        if (item.hasPoint && thumb == null) {
             r.addView(bigButton("🗺", Palette.CARD_HI, 16f) { focus(item) }, LinearLayout.LayoutParams(dp(56), dp(56)).apply { marginEnd = dp(6) })
         }
         r.addView(
