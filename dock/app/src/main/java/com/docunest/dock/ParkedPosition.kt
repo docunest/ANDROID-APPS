@@ -17,7 +17,9 @@ import android.os.SystemClock
  *
  *  - Saves the last good real GPS fix (every 15 s while fixes come; the
  *    last one before the garage is where we are).
- *  - After a start with no sky ([ParkedLogic]), hands that position to
+ *  - Only right after boot, before the van moves ([ParkedLogic]) — never
+ *    mid-travel, not even when the dock restarts (self-update) in a tunnel.
+ *  - After a start with no sky, hands that position to
  *    every app as the GPS position via Android's mock location providers
  *    (gps, network, fused), once a second. Needs the "mock location app"
  *    permission: granted with root (`appops … android:mock_location
@@ -72,7 +74,8 @@ object ParkedPosition {
         started = true
         app = context.applicationContext
         mockOff() // left over from a crash or an update
-        logic = ParkedLogic(hasSaved = saved(app) != null)
+        // Boot = elapsedRealtime 0: the logic refuses unless the dock started within minutes of boot.
+        logic = ParkedLogic(hasSaved = saved(app) != null, bootAt = 0L)
         if (!enabled(app)) logic?.stop("Switched off in settings")
         // The real GPS must be asked during the first look, auto doctor or not.
         GpsDoctor.watch(app, "parked")
@@ -105,6 +108,10 @@ object ParkedPosition {
         app = context.applicationContext
         if (saved(app) == null) {
             problem = "No position saved yet — it's saved while the GPS works."
+            return
+        }
+        if (Sensors.driving() == true) {
+            problem = "Not while driving — only for a parked van."
             return
         }
         if (logic == null) logic = ParkedLogic(hasSaved = true)

@@ -16,10 +16,17 @@ package com.docunest.dock
  *  - PROBING: the real GPS gets [PROBE_MS]. A fix or open sky → DONE;
  *    otherwise back to RESTORED.
  *  - DONE: real GPS only, until the next start (or "use it now").
- * Never restores once the real GPS had a fix, while driving, or after
- * [RESTORE_WINDOW_MS] — a tunnel later in the drive is the auto doctor's.
+ * Only right after the head unit booted, never mid-travel (a stale position
+ * in a tunnel is worse than none):
+ *  - the dock must start within [START_MAX_MS] of boot — a dock restart
+ *    later (self-update while driving, crash) never restores;
+ *  - only within [RESTORE_WINDOW_MS] of boot;
+ *  - never once the van has moved or the real GPS had a fix since boot;
+ *  - shown at most [MAX_SHOWN_MS]; units without an accelerometer (can't
+ *    tell driving) check the real GPS every [PROBE_EVERY_NO_SENSOR_MS].
+ * [bootAt] and the tick times are on the same clock (elapsedRealtime: boot = 0).
  */
-class ParkedLogic(private val hasSaved: Boolean) {
+class ParkedLogic(private val hasSaved: Boolean, private val bootAt: Long = 0L) {
     enum class State { WATCHING, RESTORED, PROBING, DONE }
 
     var state = State.WATCHING
@@ -31,6 +38,7 @@ class ParkedLogic(private val hasSaved: Boolean) {
     private var enteredAt = -1L
     private var drivingSince = -1L
     private var blockedSince = -1L
+    private var shownSince = -1L
 
     /** [realFix] = a fresh fix from the real chip (never our own mock). */
     fun tick(t: Long, realFix: Boolean, strongSats: Int, driving: Boolean?): State {
@@ -40,12 +48,14 @@ class ParkedLogic(private val hasSaved: Boolean) {
         val open = strongSats >= SkyJudge.OPEN_SATS
         if (open) blockedSince = -1 else if (blockedSince < 0) blockedSince = t
 
+        val sinceBoot = t - bootAt
         when (state) {
             State.WATCHING -> when {
+                startedAt - bootAt > START_MAX_MS -> done("Dock started ${startedAt / 60_000} min after boot (update / restart), not a cold start — real GPS only")
                 realFix -> done("Real GPS fix")
-                !hasSaved -> if (t - startedAt > RESTORE_WINDOW_MS) done("No saved position") else why = "No saved position yet"
-                t - startedAt > RESTORE_WINDOW_MS -> done("No GPS yet, but past the first ${RESTORE_WINDOW_MS / 60_000} min — real GPS only")
-                driving == true -> why = "Van is moving — real GPS only"
+                driving == true -> done("Van moved — real GPS only for this drive")
+                sinceBoot > RESTORE_WINDOW_MS -> done("No GPS in the first ${RESTORE_WINDOW_MS / 60_000} min after boot — real GPS only")
+                !hasSaved -> why = "No saved position yet"
                 t - startedAt >= LOOK_MS && blockedSince >= 0 && t - blockedSince >= LOOK_MS ->
                     enter(State.RESTORED, t, "No sky (garage?) — showing where the van was parked")
                 open -> why = "Open sky — the real GPS should fix soon"
@@ -53,13 +63,15 @@ class ParkedLogic(private val hasSaved: Boolean) {
             }
             State.RESTORED -> when {
                 drove -> done("Van is moving — handed back to the real GPS")
-                t - enteredAt >= PROBE_EVERY_MS -> enter(State.PROBING, t, "Checking the real GPS for ${PROBE_MS / 1000} s…")
-                else -> why = "Showing the parked position — real GPS check in ${(PROBE_EVERY_MS - (t - enteredAt)) / 1000} s or when the van moves"
+                t - shownSince > MAX_SHOWN_MS -> done("Parked position shown ${MAX_SHOWN_MS / 60_000} min — handed back to the real GPS")
+                t - enteredAt >= (if (driving == null) PROBE_EVERY_NO_SENSOR_MS else PROBE_EVERY_MS) -> enter(State.PROBING, t, "Checking the real GPS for ${PROBE_MS / 1000} s…")
+                else -> why = "Showing the parked position — real GPS check in ${((if (driving == null) PROBE_EVERY_NO_SENSOR_MS else PROBE_EVERY_MS) - (t - enteredAt)) / 1000} s or when the van moves"
             }
             State.PROBING -> when {
                 realFix -> done("Real GPS fix")
                 open -> done("Sky is back — the real GPS takes over")
                 drove -> done("Van is moving — handed back to the real GPS")
+                t - shownSince > MAX_SHOWN_MS -> done("Parked position shown ${MAX_SHOWN_MS / 60_000} min — handed back to the real GPS")
                 t - enteredAt >= PROBE_MS -> enter(State.RESTORED, t, "Still no sky — showing the parked position again")
             }
             State.DONE -> Unit
@@ -67,12 +79,16 @@ class ParkedLogic(private val hasSaved: Boolean) {
         return state
     }
 
-    /** The person asked for it ("use parked position now"). */
-    fun force(t: Long) = enter(State.RESTORED, t, "Showing the parked position (asked for)")
+    /** The person asked for it ("use parked position now" — refused while driving by the caller). */
+    fun force(t: Long) {
+        shownSince = t
+        enter(State.RESTORED, t, "Showing the parked position (asked for)")
+    }
 
     fun stop(reason: String) = done(reason)
 
     private fun enter(s: State, t: Long, reason: String) {
+        if (s == State.RESTORED && shownSince < 0) shownSince = t
         state = s
         enteredAt = t
         why = reason
@@ -87,7 +103,11 @@ class ParkedLogic(private val hasSaved: Boolean) {
         const val LOOK_MS = 12_000L
         const val DRIVING_MS = 8_000L
         const val PROBE_EVERY_MS = 4 * 60_000L
+        const val PROBE_EVERY_NO_SENSOR_MS = 60_000L
         const val PROBE_MS = 30_000L
-        const val RESTORE_WINDOW_MS = 15 * 60_000L
+        /** Head units start the dock 20–60 s after boot; later = a restart, not a cold start. */
+        const val START_MAX_MS = 3 * 60_000L
+        const val RESTORE_WINDOW_MS = 5 * 60_000L
+        const val MAX_SHOWN_MS = 20 * 60_000L
     }
 }

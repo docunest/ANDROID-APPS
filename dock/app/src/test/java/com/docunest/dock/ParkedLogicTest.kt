@@ -5,11 +5,15 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Cold start at every ignition: when to show the parked position, and when to hand back. One tick per second. */
+/**
+ * Cold start at every ignition: when to show the parked position, and when
+ * to hand back. One tick per second; boot = 0, the dock starts [startAt]
+ * after boot (40 s is typical for a head unit).
+ */
 class ParkedLogicTest {
-    private class Sim(hasSaved: Boolean = true) {
-        val l = ParkedLogic(hasSaved)
-        var t = 0L
+    private class Sim(hasSaved: Boolean = true, startAt: Long = 40_000L) {
+        val l = ParkedLogic(hasSaved, bootAt = 0L)
+        var t = startAt
         fun run(seconds: Int, strong: Int, fix: Boolean = false, driving: Boolean? = false): List<State> =
             List(seconds) { l.tick(t, fix, strong, driving).also { t += 1000 } }
     }
@@ -81,13 +85,46 @@ class ParkedLogicTest {
         assertTrue(s.run(10 * 60, strong = 0).all { it == State.DONE })
     }
 
-    @Test fun onlyInTheFirst15Minutes() {
+    @Test fun onlyInTheFirst5MinutesAfterBoot() {
         val s = Sim()
-        s.run(16 * 60, strong = 6, driving = null) // open sky but no fix (chip trouble — auto doctor's job)
+        s.run(5 * 60, strong = 6, driving = null) // open sky but no fix (chip trouble — auto doctor's job)
         assertEquals(State.DONE, s.l.state)
     }
 
-    @Test fun usingItNowWorksEvenAfterDone() {
+    @Test fun dockRestartedMidDriveInATunnelNeverMocks() {
+        // Self-update installs while driving: the dock restarts 1 h after boot, stopped in a tunnel jam.
+        val s = Sim(startAt = 3600_000L)
+        assertTrue(s.run(30 * 60, strong = 0, driving = false).none { it == State.RESTORED })
+        assertEquals(State.DONE, s.l.state)
+        assertTrue(s.l.why, s.l.why.contains("not a cold start"))
+    }
+
+    @Test fun dockRestartedMidDriveWithoutAccelerometerNeverMocks() {
+        val s = Sim(startAt = 20 * 60_000L)
+        assertTrue(s.run(10 * 60, strong = 0, driving = null).none { it == State.RESTORED })
+    }
+
+    @Test fun movedOnceSinceBootThenStoppedInATunnelNeverMocks() {
+        val s = Sim()
+        s.run(5, strong = 0, driving = true) // pulled out straight away, into the tunnel
+        assertTrue(s.run(4 * 60, strong = 0, driving = false).none { it == State.RESTORED })
+    }
+
+    @Test fun withoutAccelerometerTheRealGpsIsCheckedEveryMinute() {
+        val s = Sim()
+        val states = s.run(12, strong = 0, driving = null) + s.run(3 * 60, strong = 0, driving = null)
+        assertEquals(12 + 60, states.indexOf(State.PROBING))
+    }
+
+    @Test fun shownAtMost20Minutes() {
+        val s = Sim()
+        val states = s.run(25 * 60, strong = 0)
+        val last = states.lastIndexOf(State.RESTORED)
+        assertTrue("last shown at $last s", last in 20 * 60 - 60..20 * 60 + 13)
+        assertEquals(State.DONE, states.last())
+    }
+
+    @Test fun usingItNowWorksEvenAfterDone() { // the button; the screen refuses it while driving
         val s = Sim()
         s.run(5, strong = 8, fix = true)
         s.l.force(s.t)
