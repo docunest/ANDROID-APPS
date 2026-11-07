@@ -389,7 +389,8 @@ class DockActivity : Activity() {
         }
         r.addView(
             bigButton(if (alt == Prefs.NAV_GMAPS) "G" else "W", if (alt == Prefs.NAV_GMAPS) Palette.GMAPS else Palette.WAZE, 18f) {
-                Nav.go(this, item, alt)
+                // G = the place in Google Maps beside Waze (photos, reviews, hours; Directions one tap there).
+                if (alt == Prefs.NAV_GMAPS) Split.preview(this, item) else Nav.go(this, item, alt)
             },
             LinearLayout.LayoutParams(dp(56), dp(56)),
         )
@@ -479,7 +480,9 @@ class DockActivity : Activity() {
         fun go(app: String) = if (item != null) Nav.go(this, item, app) else Nav.goTo(this, lat, lng, app)
         bar.addView(bigButton(if (nav == Prefs.NAV_GMAPS) "Drive · Maps" else "Drive · Waze", if (nav == Prefs.NAV_GMAPS) Palette.GMAPS else Palette.WAZE, 16f) { go(nav) })
         bar.addView(space(6))
-        bar.addView(bigButton(if (alt == Prefs.NAV_GMAPS) "G" else "W", Palette.CARD_HI, 16f) { go(alt) }, LinearLayout.LayoutParams(dp(56), dp(56)))
+        bar.addView(bigButton(if (alt == Prefs.NAV_GMAPS) "G" else "W", Palette.CARD_HI, 16f) {
+            if (alt == Prefs.NAV_GMAPS && item != null) Split.preview(this, item) else go(alt)
+        }, LinearLayout.LayoutParams(dp(56), dp(56)))
         bar.addView(space(6))
         bar.addView(bigButton("🧪", Palette.CARD_HI, 16f) {
             startActivity(NavTestActivity.intent(this, lat, lng, title, item?.address, item?.let { it.resolvedUrl ?: it.sourceUrl }))

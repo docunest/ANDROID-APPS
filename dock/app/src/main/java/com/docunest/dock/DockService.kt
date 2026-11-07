@@ -240,9 +240,9 @@ class DockService : Service() {
                     val f = fan
                     when {
                         f != null -> {
-                            val chosen = if (e.actionMasked == MotionEvent.ACTION_UP) f.selected() else null
+                            val chosen = if (e.actionMasked == MotionEvent.ACTION_UP) f.selectedAction() else null
                             hideFan()
-                            chosen?.action?.invoke()
+                            chosen?.invoke()
                         }
                         dragging -> {
                             prefs.bubbleX = bubbleParams.x
@@ -317,6 +317,8 @@ class DockService : Service() {
                 item.title, null,
                 if (item.isNew) Color.parseColor("#92400E") else Color.argb(240, 31, 41, 55),
                 pill = true, subtitle = bits.joinToString(" · ") + " → $nav", image = Thumbs.get(this, item),
+                // Side quests (a café a passenger sent): the place in Google Maps beside Waze — the route stays.
+                altLabel = "G", alt = { Split.preview(this, item) },
             ) { Nav.go(this, item) }
         }
         // Always last: the full history (far & older places included).

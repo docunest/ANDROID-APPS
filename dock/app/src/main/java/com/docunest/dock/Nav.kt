@@ -50,17 +50,30 @@ object Nav {
     private fun start(context: Context, app: String, lat: Double?, lng: Double?, title: String?, address: String?, url: String?): Boolean {
         val q = Uri.encode(title ?: "")
         val intents = mutableListOf<Intent>()
-        if (app == Prefs.NAV_GMAPS) {
-            if (lat != null && lng != null) intents += view("google.navigation:q=${coord(lat)},${coord(lng)}", Apps.GMAPS)
-            else if (url != null) intents += view(url, Apps.GMAPS)
-            else if (q.isNotEmpty()) intents += view("google.navigation:q=$q", Apps.GMAPS)
-        } else {
+        if (app == Prefs.NAV_GMAPS && Apps.installed(context, Apps.GMAPS)) {
+            // Google Maps only ever beside Waze, never over it.
+            val uri = when {
+                lat != null && lng != null -> "google.navigation:q=${coord(lat)},${coord(lng)}"
+                url != null -> url
+                q.isNotEmpty() -> "google.navigation:q=$q"
+                else -> null
+            }
+            if (uri != null) {
+                Split.navigate(context, uri)
+                return true
+            }
+        } else if (app != Prefs.NAV_GMAPS) {
             wazeLink(title, address, lat, lng)?.let { intents += view(it, Apps.WAZE) }
         }
         // App missing or no coordinates: any map app, then the original link.
         if (lat != null && lng != null) intents += view("geo:$lat,$lng?q=$lat,$lng(${Uri.encode(title ?: "")})", null)
         if (url != null) intents += view(url, null)
         for (i in intents) {
+            // A fallback that would land in Google Maps goes beside Waze too.
+            if (i.`package` == null && i.resolveActivity(context.packageManager)?.packageName == Apps.GMAPS) {
+                Split.openMaps(context, i.dataString)
+                return true
+            }
             if (runCatching { context.startActivity(i) }.isSuccess) return true
         }
         Toast.makeText(context, "No navigation app could open this place", Toast.LENGTH_LONG).show()

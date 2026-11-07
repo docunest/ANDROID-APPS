@@ -18,7 +18,10 @@ import android.widget.Toast
  *              `--windowingMode 4` (Maps → secondary half). Android 10 shell.
  *  - adjacent: just FLAG_ACTIVITY_LAUNCH_ADJACENT — works only when split
  *              screen is already on.
- * Must be called while Waze is in front (from an overlay, not an activity of ours).
+ * Google Maps never opens full screen over Waze: every Google Maps launch
+ * in the dock goes through here, and when split screen can't be made it
+ * says so instead of opening Maps normally. From one of our own screens,
+ * that screen closes first so Waze (behind it) gets the other half.
  */
 object Split {
     const val AUTO = "auto"
@@ -32,8 +35,17 @@ object Split {
     /** Google Maps beside Waze: a place (preview), a search, or just the map. */
     fun openMaps(context: Context, uri: String? = null) {
         val app = context.applicationContext
-        Thread { run(app, uri) }.start()
+        if (context is android.app.Activity) {
+            // Our panel must not be the half next to Maps: close it, Waze is behind it.
+            context.finish()
+            main.postDelayed({ Thread { run(app, uri) }.start() }, 600)
+        } else {
+            Thread { run(app, uri) }.start()
+        }
     }
+
+    /** Turn-by-turn in Google Maps, beside Waze. */
+    fun navigate(context: Context, uri: String) = openMaps(context, uri)
 
     /** The place by name + address (Maps then shows its card, photos, reviews). */
     fun preview(context: Context, item: Item) {
@@ -61,8 +73,9 @@ object Split {
             else -> viaA11y(context, intent) || viaRoot(context, uri) || adjacent(context, intent)
         }
         if (!ok) {
-            toast(context, "Split screen didn't start (method: $method) — opening Maps normally")
-            main.post { runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }
+            // Never full screen over Waze.
+            toast(context, "Split screen didn't start (method: $method), so Google Maps wasn't opened. " +
+                "Put Waze in split screen by hand (recent apps → Waze icon → Split screen), then try again.")
         }
     }
 

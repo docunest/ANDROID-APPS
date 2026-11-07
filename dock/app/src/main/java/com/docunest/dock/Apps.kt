@@ -37,6 +37,10 @@ object Apps {
     }
 
     fun launch(context: Context, pkg: String): Boolean {
+        if (pkg == GMAPS) { // never full screen over Waze
+            Split.openMaps(context)
+            return true
+        }
         val intent = context.packageManager.getLaunchIntentForPackage(pkg)
         if (intent == null) {
             Toast.makeText(context, "$pkg is not installed", Toast.LENGTH_SHORT).show()
