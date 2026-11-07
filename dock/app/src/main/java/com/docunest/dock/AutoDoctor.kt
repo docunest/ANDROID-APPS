@@ -51,7 +51,7 @@ object AutoDoctor {
         }
     }
 
-    fun enabled(context: Context) = context.getSharedPreferences("dock", Context.MODE_PRIVATE).getBoolean(PREF, false)
+    fun enabled(context: Context) = context.getSharedPreferences("dock", Context.MODE_PRIVATE).getBoolean(PREF, true)
 
     fun setEnabled(context: Context, value: Boolean) {
         context.getSharedPreferences("dock", Context.MODE_PRIVATE).edit().putBoolean(PREF, value).apply()
