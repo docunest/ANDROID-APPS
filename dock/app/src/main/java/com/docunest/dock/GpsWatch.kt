@@ -69,7 +69,8 @@ object GpsWatch {
     }
 
     private fun check(cur: Location) {
-        if (cur.provider != LocationManager.GPS_PROVIDER) return
+        if (cur.provider != LocationManager.GPS_PROVIDER || cur.isMockFix()) return
+        ParkedPosition.save(app, cur)
         fixesSeen++
         val what = detector.feed(
             GlitchDetector.Fix(

@@ -135,6 +135,8 @@ class SettingsActivity : Activity() {
         section("GPS")
         col.addView(label("Auto doctor: watches the GPS while the dock runs and starts the GPS doctor's fixes by itself when it breaks. Waits out tunnels, underground car parks and places where the GPS always drops.", 13f, Palette.MUTED))
         switch("GPS auto doctor", AutoDoctor.enabled(this)) { AutoDoctor.setEnabled(this, it) }
+        col.addView(label("Parked position: after a start with no sky (garage), give Waze the last saved GPS position until the van moves, so a route can be set. The real GPS is paused meanwhile and gets it back at once when you drive or the sky shows.", 13f, Palette.MUTED))
+        switch("Show parked position after start", ParkedPosition.enabled(this)) { ParkedPosition.setEnabled(this, it) }
 
         section("Updates")
         col.addView(label("Build ${BuildConfig.VERSION_CODE}. New builds from GitHub install by themselves (root), checked when the dock starts and every 3 min.", 13f, Palette.MUTED))

@@ -273,6 +273,8 @@ class DockActivity : Activity() {
         val auto = AutoDoctor.call?.mode
         val (text, color) = when {
             !allowed || !GpsDoctor.locationOn(this) || !GpsDoctor.gpsEnabled(lm) -> "📡 GPS off · fix" to Palette.RED
+            ParkedPosition.mocking -> "📡 Parked spot · no GPS yet" to Palette.WAZE
+            fresh && last!!.isMockFix() -> "📡 Fake position (mock app?)" to Palette.AMBER
             fresh -> "📡 GPS ±${last!!.accuracy.toInt()} m" to Palette.GMAPS
             GpsDoctor.running -> "📡 Fixing GPS…" to Palette.AMBER
             auto == SkyJudge.Mode.TUNNEL -> "📡 Tunnel · waiting" to Palette.MUTED

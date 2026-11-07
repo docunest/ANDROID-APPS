@@ -134,6 +134,7 @@ object GpsDoctor {
 
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
+            if (location.isMockFix()) return // our parked position (or a fake-GPS app) is not the chip
             fix = location
             fixAt = now()
             changed()
@@ -244,6 +245,7 @@ object GpsDoctor {
         if (!Locator.hasPermission(context)) return "perm" to "Dock isn't allowed to use location."
         if (!locationOn(context)) return "off" to "Location is switched off on this device."
         if (!gpsEnabled(lm)) return "off" to "GPS is switched off (only Wi-Fi / mobile location is on)."
+        if (ParkedPosition.mocking) return "parked" to "Showing the parked position — the real GPS is paused until the van moves (or press Fix GPS)."
         if (hasFix()) return "ok" to "GPS works: ±${fix!!.accuracy.toInt()} m${satellitesInUse()}."
         val t = now()
         if (!chipTalks()) {
@@ -292,6 +294,8 @@ object GpsDoctor {
     fun fix(context: Context, byAuto: Boolean = false) {
         if (running) return
         val app = context.applicationContext
+        // The parked position pauses the real chip: no fix can work through that.
+        if (ParkedPosition.holdsGps) ParkedPosition.stop("GPS doctor is fixing the real GPS")
         val (symptom, _) = diagnose(app)
         steps = plan(app, symptom)
         cancelled = false

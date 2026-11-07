@@ -39,6 +39,8 @@ class GpsDoctorActivity : Activity() {
     private lateinit var glitchText: TextView
     private lateinit var autoButton: TextView
     private lateinit var autoText: TextView
+    private lateinit var parkedText: TextView
+    private lateinit var parkedButton: TextView
     private lateinit var statsText: TextView
     private lateinit var runsText: TextView
     private var ticks = 0
@@ -151,6 +153,17 @@ class GpsDoctorActivity : Activity() {
         left.addView(autoButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
         autoText = label("", 13f, Palette.MUTED).apply { setPadding(0, dp(4), 0, 0) }
         left.addView(autoText)
+        left.addView(space(10))
+        left.addView(label("Parked position", 16f, bold = true))
+        parkedText = label("", 13f, Palette.MUTED)
+        left.addView(parkedText)
+        left.addView(space(4))
+        parkedButton = bigButton("", Palette.CARD_HI, 15f) {
+            if (ParkedPosition.mocking) ParkedPosition.stop("Handed back to the real GPS (asked for)")
+            else ParkedPosition.useNow(this)
+            render()
+        }
+        left.addView(parkedButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
         left.addView(space(10))
         val manual = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         manual.addView(bigButton("Location settings", Palette.CARD_HI, 14f) {
@@ -288,6 +301,17 @@ class GpsDoctorActivity : Activity() {
         val autoOn = AutoDoctor.enabled(this)
         autoButton.text = if (autoOn) "Auto doctor: ON" else "Auto doctor: off"
         autoButton.background = rounded(if (autoOn) Palette.GMAPS else Palette.CARD_HI, dp(14).toFloat())
+        val saved = ParkedPosition.saved(this)
+        parkedText.text = listOfNotNull(
+            "After a start with no sky (garage), Waze gets the last saved position until the van moves, so you can set a route. " +
+                if (ParkedPosition.enabled(this)) "On." else "Off (⚙ → GPS).",
+            saved?.let { "Saved: %.5f, %.5f ±%d m, %s".format(java.util.Locale.US, it.lat, it.lng, it.acc.toInt(), ago(it.at)) } ?: "Saved: nothing yet (saved while the GPS works).",
+            ParkedPosition.logic?.let { "Now: ${it.why}" },
+            ParkedPosition.problem.takeIf { it.isNotEmpty() },
+        ).joinToString("\n")
+        parkedText.setTextColor(if (ParkedPosition.problem.isNotEmpty()) Palette.AMBER else Palette.MUTED)
+        parkedButton.text = if (ParkedPosition.mocking) "Hand back to real GPS" else "Use parked position now"
+        parkedButton.background = rounded(if (ParkedPosition.mocking) Palette.WAZE else Palette.CARD_HI, dp(14).toFloat())
         autoText.text = AutoDoctor.status() + (AutoDoctor.call?.takeIf { !autoOn && it.mode != SkyJudge.Mode.OK }?.let { "\nNow: ${it.why}" } ?: "")
         fixButton.background = rounded(if (d.running) Palette.RED else Palette.BLUE, dp(14).toFloat())
         summary.text = d.summary

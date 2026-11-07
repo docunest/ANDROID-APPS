@@ -99,6 +99,11 @@ object AutoDoctor {
             call = null
             return
         }
+        // Parked position shown / real GPS being checked: the chip is paused on purpose.
+        if (ParkedPosition.holdsGps) {
+            call = SkyJudge.Call(SkyJudge.Mode.COVERED, ParkedPosition.logic?.why ?: "Showing the parked position")
+            return
+        }
         val j = judge ?: SkyJudge { FixHistory.deadZones(app) }.also { judge = it; it.seed(lastKnown()) }
         val now = SystemClock.elapsedRealtime()
         val f = GpsDoctor.fix
@@ -154,6 +159,8 @@ object AutoDoctor {
 
     @SuppressLint("MissingPermission") // checked by Locator.hasPermission()
     private fun lastKnown(): SkyJudge.Fix? {
+        // Ours survives the cold start (Android's own last-known is wiped with it).
+        ParkedPosition.saved(app)?.let { return SkyJudge.Fix(it.lat, it.lng, 0f) }
         if (!Locator.hasPermission(app)) return null
         val lm = app.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         val l = runCatching { lm.getLastKnownLocation(LocationManager.GPS_PROVIDER) }.getOrNull() ?: return null
