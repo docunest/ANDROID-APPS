@@ -283,7 +283,9 @@ class DockService : Service() {
     /** Area maps for what the menu and list show first — made while there's signal, shown offline. */
     private fun prefetchThumbs() {
         val here = Near.here(this)
-        Thumbs.prefetch(this, Store.sorted().filter { Near.isMain(here, it) }.take(20))
+        val top = Store.sorted().filter { Near.isMain(here, it) }.take(20)
+        Thumbs.prefetch(this, top)
+        Photos.prefetch(this, top)
     }
 
     private fun fanTargets(): List<FanTarget> {
@@ -316,7 +318,7 @@ class DockService : Service() {
             t += FanTarget(
                 item.title, null,
                 if (item.isNew) Color.parseColor("#92400E") else Color.argb(240, 31, 41, 55),
-                pill = true, subtitle = bits.joinToString(" · ") + " → $nav", image = Thumbs.get(this, item),
+                pill = true, subtitle = bits.joinToString(" · ") + " → $nav", image = Photos.get(this, item) ?: Thumbs.get(this, item),
                 // Side quests (a café a passenger sent): the place in Google Maps beside Waze — the route stays.
                 altLabel = "G", alt = { Split.preview(this, item) },
             ) { Nav.go(this, item) }

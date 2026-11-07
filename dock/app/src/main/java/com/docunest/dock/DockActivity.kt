@@ -22,6 +22,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import org.json.JSONObject
 import org.osmdroid.config.Configuration as OsmConfig
 import org.osmdroid.events.MapEventsReceiver
@@ -354,7 +355,23 @@ class DockActivity : Activity() {
                 setMargins(0, dp(4), 0, dp(4))
             }
         }
-        // Map of the area around the place: recognise it by where it is. Tap = show it on the big map.
+        // Photo of the place (kept 30 days) and the map of the area around it. Tap either = show on the big map.
+        Photos.get(this, item)?.let { bmp ->
+            r.addView(android.widget.ImageView(this).apply {
+                setImageBitmap(bmp)
+                scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                clipToOutline = true
+                outlineProvider = object : android.view.ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: android.graphics.Outline) =
+                        outline.setRoundRect(0, 0, view.width, view.height, dp(10).toFloat())
+                }
+                contentDescription = Photos.credit(this@DockActivity, item)
+                setOnClickListener { focus(item) }
+                setOnLongClickListener {
+                    Toast.makeText(this@DockActivity, "📷 " + (Photos.credit(this@DockActivity, item) ?: "photo"), Toast.LENGTH_SHORT).show(); true
+                }
+            }, LinearLayout.LayoutParams(dp(96), dp(64)).apply { marginEnd = dp(8) })
+        }
         val thumb = Thumbs.get(this, item)
         thumb?.let { bmp ->
             r.addView(android.widget.ImageView(this).apply {
