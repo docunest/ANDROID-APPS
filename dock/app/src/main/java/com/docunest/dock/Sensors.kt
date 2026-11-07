@@ -28,11 +28,19 @@ object Sensors {
         private set
     @Volatile var hasReading = false
         private set
+    /** [shake] smoothed over about a second. */
+    @Volatile var shakeAvg = 0f
+        private set
 
     private var rawPitch = 0f
     private var rawRoll = 0f
     private val g = FloatArray(3)
     private var listening: SensorEventListener? = null
+    /** Who needs readings: "screen" (GPS doctor open), "auto" (auto doctor's driving check). */
+    private val holders = mutableSetOf<String>()
+    /** Last time the van clearly moved (vibration / acceleration), elapsedRealtime. */
+    @Volatile var lastMovedAt = 0L
+        private set
 
     fun list(context: Context): List<Found> {
         val sm = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -46,7 +54,12 @@ object Sensors {
         ).map { (label, type) -> Found(label, sm.getDefaultSensor(type)) }
     }
 
-    fun start(context: Context) {
+    /** Driving = clear vibration in the last 20 s. Null when the unit has no accelerometer. */
+    fun driving(): Boolean? =
+        if (listening == null || !hasReading) null else android.os.SystemClock.elapsedRealtime() - lastMovedAt < 20_000
+
+    fun start(context: Context, who: String = "screen") {
+        holders += who
         if (listening != null) return
         val sm = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
         val accel = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) ?: return
@@ -63,6 +76,10 @@ object Sensors {
                 roll = rawRoll - sp.getFloat("levelRoll0", 0f)
                 val now = sqrt(e.values[0] * e.values[0] + e.values[1] * e.values[1] + e.values[2] * e.values[2])
                 shake = abs(now - SensorManager.GRAVITY_EARTH) / SensorManager.GRAVITY_EARTH
+                // Road vibration averaged over ~1 s: one door slam isn't driving, minutes of road are.
+                // 0.05 g is a first guess — the doctor screen shows the live value to tune it.
+                shakeAvg += 0.05f * (shake - shakeAvg)
+                if (shakeAvg > 0.05f) lastMovedAt = android.os.SystemClock.elapsedRealtime()
                 hasReading = true
             }
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
@@ -71,7 +88,9 @@ object Sensors {
         listening = l
     }
 
-    fun stop(context: Context) {
+    fun stop(context: Context, who: String = "screen") {
+        holders -= who
+        if (holders.isNotEmpty()) return
         val l = listening ?: return
         (context.getSystemService(Context.SENSOR_SERVICE) as SensorManager).unregisterListener(l)
         listening = null

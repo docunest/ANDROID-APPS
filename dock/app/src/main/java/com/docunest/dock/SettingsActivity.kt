@@ -132,6 +132,10 @@ class SettingsActivity : Activity() {
         slider("Size", prefs.bubbleSizeDp, 32, 96, " dp") { prefs.bubbleSizeDp = it; DockService.start(this, DockService.ACTION_RELAYOUT) }
         slider("Opacity when idle", prefs.bubbleAlpha, 15, 100, " %") { prefs.bubbleAlpha = it; DockService.start(this, DockService.ACTION_RELAYOUT) }
 
+        section("GPS")
+        col.addView(label("Auto doctor: watches the GPS while the dock runs and starts the GPS doctor's fixes by itself when it breaks. Waits out tunnels, underground car parks and places where the GPS always drops.", 13f, Palette.MUTED))
+        switch("GPS auto doctor", AutoDoctor.enabled(this)) { AutoDoctor.setEnabled(this, it) }
+
         section("Updates")
         col.addView(label("Build ${BuildConfig.VERSION_CODE}. New builds from GitHub install by themselves (root), checked when the dock starts and every 3 min.", 13f, Palette.MUTED))
         switch("Install updates automatically", prefs.autoUpdate) { prefs.autoUpdate = it }

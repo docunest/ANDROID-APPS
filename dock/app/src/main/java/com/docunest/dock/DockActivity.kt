@@ -270,9 +270,13 @@ class DockActivity : Activity() {
         val allowed = Locator.hasPermission(this)
         val last = if (allowed) runCatching { lm.getLastKnownLocation(LocationManager.GPS_PROVIDER) }.getOrNull() else null
         val fresh = last != null && SystemClock.elapsedRealtimeNanos() - last.elapsedRealtimeNanos < 30_000_000_000L
+        val auto = AutoDoctor.call?.mode
         val (text, color) = when {
             !allowed || !GpsDoctor.locationOn(this) || !GpsDoctor.gpsEnabled(lm) -> "📡 GPS off · fix" to Palette.RED
             fresh -> "📡 GPS ±${last!!.accuracy.toInt()} m" to Palette.GMAPS
+            GpsDoctor.running -> "📡 Fixing GPS…" to Palette.AMBER
+            auto == SkyJudge.Mode.TUNNEL -> "📡 Tunnel · waiting" to Palette.MUTED
+            auto == SkyJudge.Mode.COVERED || auto == SkyJudge.Mode.DEAD_ZONE -> "📡 Under cover · waiting" to Palette.MUTED
             else -> "📡 No GPS fix · fix" to Palette.AMBER
         }
         gpsChip.text = text

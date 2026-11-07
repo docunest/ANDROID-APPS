@@ -27,8 +27,13 @@ import kotlin.math.abs
  * GPS troubleshooting. Listens to the GPS chip itself (satellites, signal,
  * raw NMEA, fixes) and says in plain words what's wrong; [fix] then works
  * down a ladder of fixes, each followed by up to a few minutes of waiting
- * for a real GPS fix, and stops at the first one that brings it back. The
- * one that worked is remembered and tried first next time.
+ * for a real GPS fix, and stops at the first one that brings it back.
+ *
+ * Every fix tried is recorded ([FixHistory]): did a fix follow, and how
+ * long it took. [Planner] orders the next run from that — fixes still short
+ * of [FixStats.MIN_TRIES] go first so every one gets measured, then the
+ * fastest expected. Tries spoiled by a suddenly blocked sky (tunnel) or
+ * Stop are kept but not counted.
  *
  * Only fixes from the GPS provider count — never Wi-Fi/mobile positions.
  * Times are taken from [SystemClock.elapsedRealtime] because a wrong wall
@@ -41,7 +46,24 @@ object GpsDoctor {
     private const val CLOCK_OFF_MS = 2 * 60_000L
     private const val WEAK_CN0 = 20f
 
-    enum class State { PENDING, RUNNING, OK, NO_FIX, SKIPPED }
+    enum class State { PENDING, RUNNING, OK, NO_FIX, SKIPPED, VOID }
+
+    /** The fixes that compete (the planner orders them): id, title, what, default wait. */
+    private val REMEDIES = listOf(
+        Step("listen", "Just wait", "Keep asking the GPS and wait (the baseline every fix is compared with)", 60_000),
+        Step("clock", "Fix the clock", "Compare with internet time; set it if wrong", 90_000),
+        Step("assist", "Fresh satellite data", "Download orbit data (XTRA) + time", 120_000),
+        Step("warm", "Warm restart", "Forget position + orbits, reload them", 150_000),
+        Step("toggle", "Restart GPS", "Switch GPS off and on (root)", 120_000),
+        Step("cold", "Cold start", "Forget everything, search the sky from scratch", 180_000),
+        Step("driver", "Restart GPS driver", "Restart the GPS driver process (root)", 180_000),
+    )
+    val remedyIds: List<String> get() = REMEDIES.map { it.id }
+    fun title(id: String) = (REMEDIES.firstOrNull { it.id == id } ?: when (id) {
+        "permission" -> Step(id, "Allow location", "", 0)
+        "location" -> Step(id, "Switch location on", "", 0)
+        else -> null
+    })?.title ?: id
 
     class Step(val id: String, val title: String, val what: String, val waitMs: Long) {
         @Volatile var state = State.PENDING
@@ -53,6 +75,11 @@ object GpsDoctor {
     // --- Live readings (written on the main thread, read anywhere) ----------
     @Volatile var satsHeard = 0
     @Volatile var satsUsed = 0
+    /** Satellites heard at ≥ 25 dB-Hz: four or more = the antenna sees open sky. */
+    @Volatile var strongSats = 0
+    /** When strong satellites last numbered 4+, and when they then collapsed to ≤ 1 within seconds (tunnel). */
+    @Volatile var lastOpenSkyAt = 0L
+    @Volatile var skyCollapsedAt = 0L
     /** Average of the best four signals, dB-Hz (≥ 25 good, < 20 weak). */
     @Volatile var topCn0 = 0f
     @Volatile var systems = ""
@@ -74,6 +101,11 @@ object GpsDoctor {
         private set
     @Volatile var summary = ""
         private set
+    /** The run going on (or last run) was started by the auto doctor. */
+    @Volatile var auto = false
+        private set
+    /** Called on the worker thread when a run ends: "fixed", "failed", "stopped", "paused", "blocked". */
+    @Volatile var onRunEnd: ((String) -> Unit)? = null
     private val log = ArrayList<String>()
     fun logLines(): List<String> = synchronized(log) { log.toList() }
 
@@ -96,8 +128,9 @@ object GpsDoctor {
     // --- Listening to the chip ----------------------------------------------
 
     private var watching = false
-    /** The doctor screen is open — fixes may restart listening only then. */
-    private var wanted = false
+    /** Who wants the chip listened to: "screen" (doctor open), "auto" (auto doctor on). */
+    private val wanted = mutableSetOf<String>()
+    val isWatching: Boolean get() = watching
 
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
@@ -131,6 +164,11 @@ object GpsDoctor {
             }
             satsHeard = heard
             satsUsed = used
+            val strong = cn0s.count { it >= 25f }
+            val t = now()
+            if (strong >= 4) lastOpenSkyAt = t
+            else if (strong <= 1 && lastOpenSkyAt > 0 && t - lastOpenSkyAt < 6_000) skyCollapsedAt = t
+            strongSats = strong
             topCn0 = cn0s.sortedDescending().take(4).takeIf { it.isNotEmpty() }?.average()?.toFloat() ?: 0f
             systems = bySystem.entries.joinToString(" · ") { "${it.key} ${it.value}" }
             lastStatusAt = now()
@@ -147,20 +185,20 @@ object GpsDoctor {
         lastNmeaAt = now()
     }
 
-    /** Start listening (main thread). Keeps the GPS chip working while the doctor screen is open. */
-    fun watch(context: Context) {
-        wanted = true
-        listen(context)
+    /** Start listening (main thread). Keeps the GPS chip working while the doctor screen is open or auto is on. */
+    fun watch(context: Context, who: String = "screen") {
+        wanted += who
+        listen(context.applicationContext)
     }
 
-    fun unwatch(context: Context) {
-        wanted = false
-        stopListening(context)
+    fun unwatch(context: Context, who: String = "screen") {
+        wanted -= who
+        if (wanted.isEmpty()) stopListening(context.applicationContext)
     }
 
     @SuppressLint("MissingPermission") // checked by Locator.hasPermission()
     private fun listen(context: Context) {
-        if (watching || !wanted || !Locator.hasPermission(context)) return
+        if (watching || wanted.isEmpty() || !Locator.hasPermission(context)) return
         val lm = lm(context)
         runCatching { lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener, Looper.getMainLooper()) }
             .onFailure { note("Can't ask the GPS provider: ${it.message}") }
@@ -168,7 +206,7 @@ object GpsDoctor {
         runCatching { lm.addNmeaListener(nmeaListener, main) }
         watching = true
         watchingSince = now()
-        if (steps.isEmpty()) steps = plan(context)
+        if (steps.isEmpty()) steps = runCatching { plan(context) }.getOrDefault(emptyList())
         changed()
     }
 
@@ -191,74 +229,102 @@ object GpsDoctor {
         return now() - fixAt < FRESH_MS && (!f.hasAccuracy() || f.accuracy <= GOOD_ACCURACY_M)
     }
 
-    fun verdict(context: Context): String {
-        val lm = lm(context)
-        if (!Locator.hasPermission(context)) return "Dock isn't allowed to use location."
-        if (!locationOn(context)) return "Location is switched off on this device."
-        if (!gpsEnabled(lm)) return "GPS is switched off (only Wi-Fi / mobile location is on)."
-        if (hasFix()) return "GPS works: ±${fix!!.accuracy.toInt()} m${satellitesInUse()}."
+    fun chipTalks(): Boolean {
         val t = now()
-        val chipTalks = t - lastNmeaAt < 10_000 || t - lastStatusAt < 10_000
-        if (!chipTalks) {
-            return if (t - watchingSince < 20_000) "Listening to the GPS chip…"
-            else "No data from the GPS chip at all — its driver isn't running, or the chip is unplugged."
+        return t - lastNmeaAt < 10_000 || t - lastStatusAt < 10_000
+    }
+
+    fun settingsOk(context: Context) = Locator.hasPermission(context) && locationOn(context) && gpsEnabled(lm(context))
+
+    fun verdict(context: Context): String = diagnose(context).second
+
+    /** (symptom code, sentence). The code groups the fix statistics: what helps with *this* kind of trouble. */
+    fun diagnose(context: Context): Pair<String, String> {
+        val lm = lm(context)
+        if (!Locator.hasPermission(context)) return "perm" to "Dock isn't allowed to use location."
+        if (!locationOn(context)) return "off" to "Location is switched off on this device."
+        if (!gpsEnabled(lm)) return "off" to "GPS is switched off (only Wi-Fi / mobile location is on)."
+        if (hasFix()) return "ok" to "GPS works: ±${fix!!.accuracy.toInt()} m${satellitesInUse()}."
+        val t = now()
+        if (!chipTalks()) {
+            return if (t - watchingSince < 20_000) "starting" to "Listening to the GPS chip…"
+            else "silent" to "No data from the GPS chip at all — its driver isn't running, or the chip is unplugged."
         }
-        clockOffsetMs?.let { if (abs(it) > CLOCK_OFF_MS) return "The clock is ${duration(abs(it))} off — the GPS can't use its saved satellite data." }
-        if (satsHeard == 0) return "The GPS chip runs but hears no satellites — antenna cable/connector, or something metal above it."
-        if (topCn0 < WEAK_CN0) return "Satellites heard, but very weak (%.0f dB-Hz) — antenna or what's above it.".format(topCn0)
-        return "${plural(satsHeard, "satellite")} heard well but no fix yet — usually stale satellite data (a reset helps)."
+        clockOffsetMs?.let { if (abs(it) > CLOCK_OFF_MS) return "clock" to "The clock is ${duration(abs(it))} off — the GPS can't use its saved satellite data." }
+        if (satsHeard == 0) return "nosats" to "The GPS chip runs but hears no satellites — antenna cable/connector, something metal above it, or a tunnel / car park."
+        if (topCn0 < WEAK_CN0) return "weak" to "Satellites heard, but very weak (%.0f dB-Hz) — antenna or what's above it.".format(topCn0)
+        return "nofix" to "${plural(satsHeard, "satellite")} heard well but no fix yet — usually stale satellite data (a reset helps)."
+    }
+
+    fun symptomLabel(code: String) = when (code) {
+        "perm" -> "no permission"
+        "off" -> "location off"
+        "silent" -> "chip silent"
+        "clock" -> "wrong clock"
+        "nosats" -> "no satellites"
+        "weak" -> "weak signal"
+        "nofix" -> "satellites, no fix"
+        "nosky" -> "no sky for long"
+        "starting" -> "just started"
+        "ok" -> "was working"
+        else -> code
     }
 
     // --- Fixes --------------------------------------------------------------
 
-    private fun plan(context: Context): List<Step> {
-        val all = listOf(
+    /** Prerequisites first (they only act when needed), then the remedies in the planner's order. */
+    private fun plan(context: Context, symptom: String = diagnose(context).first): List<Step> {
+        val attempts = FixHistory.attempts(context)
+        val overall = FixStats.summarize(attempts)
+        val order = Planner.order(REMEDIES.map { it.id to (it.waitMs / 1000).toInt() }, attempts, symptom)
+        val remedies = order.map { id ->
+            val r = REMEDIES.first { it.id == id }
+            val wait = Planner.waitSecs(overall[id], (r.waitMs / 1000).toInt()) * 1000L
+            Step(r.id, r.title, r.what, wait)
+        }
+        return listOf(
             Step("permission", "Allow location", "Give Dock location access", 30_000),
             Step("location", "Switch location on", "Location + GPS on", 60_000),
-            Step("listen", "Ask GPS and wait", "Keep the GPS busy and wait for a fix", 60_000),
-            Step("clock", "Fix the clock", "Compare with internet time; set it if wrong", 90_000),
-            Step("assist", "Fresh satellite data", "Download orbit data (XTRA) + time", 120_000),
-            Step("warm", "Warm restart", "Forget position + orbits, reload them", 150_000),
-            Step("toggle", "Restart GPS", "Switch GPS off and on (root)", 120_000),
-            Step("cold", "Cold start", "Forget everything, search the sky from scratch", 180_000),
-            Step("driver", "Restart GPS driver", "Restart the GPS driver process (root)", 180_000),
-        )
-        // What worked last time goes right after the quick "ask and wait".
-        val worked = context.getSharedPreferences("dock", Context.MODE_PRIVATE).getString("gpsFixWorked", null)
-        val remembered = all.firstOrNull { it.id == worked && it.id !in setOf("permission", "location", "listen") }
-            ?: return all
-        val rest = all - remembered
-        val at = rest.indexOfFirst { it.id == "listen" } + 1
-        return rest.take(at) + remembered + rest.drop(at)
+        ) + remedies
     }
 
-    /** Run the ladder. Call [watch] first (the doctor screen does). */
-    fun fix(context: Context) {
+    /** Run the ladder. Call [watch] first (the doctor screen and the auto doctor do). */
+    fun fix(context: Context, byAuto: Boolean = false) {
         if (running) return
         val app = context.applicationContext
-        steps = plan(app)
+        val (symptom, _) = diagnose(app)
+        steps = plan(app, symptom)
         cancelled = false
         running = true
-        summary = "Working…"
+        auto = byAuto
+        summary = if (byAuto) "Auto doctor working…" else "Working…"
         synchronized(log) { log.clear() }
         changed()
-        worker.post { ladder(app) }
+        worker.post { ladder(app, symptom, byAuto) }
     }
 
     fun cancel() {
         if (running) cancelled = true
     }
 
-    private fun ladder(context: Context) {
+    private fun ladder(context: Context, symptom: String, byAuto: Boolean) {
+        val runId = System.currentTimeMillis()
+        val runStart = now()
         hasRoot = Root.run("id")
-        note("Root: ${if (hasRoot == true) "yes" else "no — root-only fixes are skipped"}")
+        note("${if (byAuto) "Auto doctor" else "Fix GPS"} · trouble: ${symptomLabel(symptom)} · root: ${if (hasRoot == true) "yes" else "no — root-only fixes are skipped"}")
+        // Pressing Fix while the GPS works tests the buttons, not the fixes: don't count it.
+        val counted = symptom != "ok"
+        if (!counted) note("GPS was working at the start — this run isn't counted in the statistics")
         clockOffsetMs = networkTime(context)?.let { System.currentTimeMillis() - it }
         var fixedBy: Step? = null
         var blocked = false
+        var paused = false
+        var order = 0
         for (step in steps) {
             if (cancelled) break
             step.state = State.RUNNING
             changed()
+            val stepStart = now()
             val ready = runCatching { act(context, step) }.getOrElse { step.note = "Error: ${it.message}"; false }
             if (!ready) {
                 if (step.state == State.RUNNING) step.state = State.SKIPPED
@@ -270,33 +336,56 @@ object GpsDoctor {
                 }
                 continue
             }
+            order++
             note("${step.title}: ${step.note.ifEmpty { "done" }} — waiting up to ${duration(step.waitMs)} for a fix")
-            if (waitForFix(step)) {
-                step.state = State.OK
+            val outcome = waitForFix(step)
+            val secs = ((now() - stepStart) / 1000).toInt()
+            step.state = when (outcome) {
+                FixStats.Outcome.FIXED -> State.OK
+                FixStats.Outcome.NO_FIX -> State.NO_FIX
+                FixStats.Outcome.VOID -> State.VOID
+            }
+            if (counted && step.id in remedyIds) {
+                FixHistory.add(context, FixStats.Attempt(runId, System.currentTimeMillis(), step.id, symptom, byAuto, outcome, secs, (step.waitMs / 1000).toInt(), order))
+            }
+            changed()
+            if (outcome == FixStats.Outcome.FIXED) {
                 fixedBy = step
                 break
             }
-            if (step.state == State.RUNNING) step.state = State.NO_FIX
-            changed()
+            if (outcome == FixStats.Outcome.VOID && !cancelled) {
+                paused = true
+                break
+            }
         }
         running = false
+        val total = now() - runStart
         val f = fix
-        summary = when {
-            fixedBy != null -> {
-                context.getSharedPreferences("dock", Context.MODE_PRIVATE).edit().putString("gpsFixWorked", fixedBy.id).apply()
-                "Fixed by \"${fixedBy.title}\" — ±${f?.accuracy?.toInt() ?: "?"} m${satellitesInUse()}."
-            }
-            cancelled -> "Stopped."
-            blocked -> "Can't go on: ${verdict(context)}"
-            else -> "Nothing brought the GPS back. ${verdict(context)}" + advice()
+        val result = when {
+            fixedBy != null -> "fixed"
+            cancelled -> "stopped"
+            paused -> "paused"
+            blocked -> "blocked"
+            else -> "failed"
+        }
+        summary = when (result) {
+            "fixed" -> "Fixed by \"${fixedBy!!.title}\" in ${duration(total)} — ±${f?.accuracy?.toInt() ?: "?"} m${satellitesInUse()}."
+            "stopped" -> "Stopped."
+            "paused" -> "Paused: the sky was suddenly blocked (tunnel / car park?) — that try isn't counted. " +
+                if (byAuto) "The auto doctor carries on once the sky is back." else "Try again in the open."
+            "blocked" -> "Can't go on: ${verdict(context)}"
+            else -> "Nothing brought the GPS back (${duration(total)}). ${verdict(context)}" + advice()
         }
         note(summary)
+        if (counted) FixHistory.add(context, FixStats.Run(runId, byAuto, symptom, result, fixedBy?.id, (total / 1000).toInt(), order))
         steps.filter { it.state == State.PENDING }.forEach { it.state = State.SKIPPED; it.note = when {
             cancelled -> "stopped"
+            paused -> "paused"
             fixedBy != null -> "not needed"
             else -> "not tried"
         } }
         changed()
+        runCatching { onRunEnd?.invoke(result) }
     }
 
     /** Some chips never say which satellites they use — then say nothing. */
@@ -321,7 +410,7 @@ object GpsDoctor {
         when (step.id) {
             "permission" -> {
                 if (Locator.hasPermission(context)) return skip(step, "already allowed")
-                if (root) Root.grantAll(context) else askUser?.invoke("permission")
+                if (root) Root.grantAll(context) else askUser?.invoke("permission") ?: return noFix(step, "needs you — open the GPS doctor and allow location")
                 if (!waitUntil(60_000) { Locator.hasPermission(context) }) return noFix(step, "still not allowed — Dock can't see the GPS")
                 onMain { listen(context) }
                 step.note = "allowed"
@@ -336,7 +425,7 @@ object GpsDoctor {
                         "settings put secure location_providers_allowed +gps",
                         "settings put secure location_providers_allowed +network",
                     )
-                } else askUser?.invoke("location")
+                } else askUser?.invoke("location") ?: return noFix(step, "needs you — switch on Location / GPS")
                 if (!waitUntil(60_000) { locationOn(context) && gpsEnabled(lm) }) return noFix(step, "location / GPS still off")
                 rewatch(context)
                 step.note = "switched on"
@@ -344,7 +433,7 @@ object GpsDoctor {
             }
             "listen" -> {
                 rewatch(context)
-                step.note = "asking the GPS once a second"
+                step.note = "asking the GPS once a second, changing nothing"
                 return true
             }
             "clock" -> {
@@ -358,7 +447,7 @@ object GpsDoctor {
                         "date -u ${utc.format(Date(netNow))}",
                         "am broadcast -a android.intent.action.TIME_SET",
                     )
-                } else {
+                } else if (askUser != null) {
                     askUser?.invoke("date")
                     waitUntil(60_000) { networkOffsetOk(context) }
                 }
@@ -423,21 +512,33 @@ object GpsDoctor {
         return false
     }
 
-    /** The self-check: a GPS fix that arrived after the step, good enough to drive on. */
-    private fun waitForFix(step: Step): Boolean {
+    /**
+     * The self-check: a GPS fix that arrived after the step, good enough to
+     * drive on. VOID when the sky was suddenly blocked meanwhile (all strong
+     * satellites gone within seconds = tunnel / car park entrance) or Stop.
+     */
+    private fun waitForFix(step: Step): FixStats.Outcome {
         val start = now()
         step.endsAt = start + step.waitMs
         changed()
         while (!cancelled && now() < step.endsAt) {
             if (fixAt > start && hasFix()) {
                 step.note += " → fix after ${duration(now() - start)}"
-                return true
+                return FixStats.Outcome.FIXED
+            }
+            if (skyCollapsedAt > start) {
+                step.note += " → sky suddenly blocked (tunnel?) — not counted"
+                return FixStats.Outcome.VOID
             }
             SystemClock.sleep(1000)
             changed()
         }
-        step.note += if (cancelled) " → stopped" else " → no fix in ${duration(step.waitMs)} (heard $satsHeard, used $satsUsed)"
-        return false
+        if (cancelled) {
+            step.note += " → stopped (not counted)"
+            return FixStats.Outcome.VOID
+        }
+        step.note += " → no fix in ${duration(step.waitMs)} (heard $satsHeard, strong $strongSats, used $satsUsed)"
+        return FixStats.Outcome.NO_FIX
     }
 
     private fun waitUntil(ms: Long, ok: () -> Boolean): Boolean {
