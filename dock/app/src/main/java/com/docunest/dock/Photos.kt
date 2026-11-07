@@ -60,7 +60,7 @@ object Photos {
         if (none.exists() && fresh(none, MISS_MS)) return
         synchronized(pending) {
             if (id in pending) return
-            if ((failedAt[id] ?: 0L) > System.currentTimeMillis() - 5 * 60_000L) return // no signal: later
+            if ((failedAt[id] ?: 0L) > System.currentTimeMillis() - 30 * 60_000L) return // no signal / server: later
             pending += id
         }
         worker.execute {
@@ -96,7 +96,10 @@ object Photos {
                     memory.put(id, bmp)
                     return true
                 }
+                // Only the server's explicit "looked, there is none" — a plain 404 (server not
+                // updated yet, item gone) is retried later instead of remembered for a week.
                 404 -> {
+                    if (c.getHeaderField("X-Photo-Source") != "none") throw java.io.IOException("photo 404 (no answer)")
                     File(context.filesDir, "photos").mkdirs()
                     file(context, id, "none").writeText("")
                     return false
