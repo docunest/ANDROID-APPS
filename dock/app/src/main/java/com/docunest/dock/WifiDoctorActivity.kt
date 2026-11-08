@@ -87,6 +87,8 @@ class WifiDoctorActivity : Activity() {
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         buttons.addView(bigButton("Reconnect now", Palette.BLUE, 16f) { WifiDoctor.reconnectNow() }, LinearLayout.LayoutParams(0, dp(60), 1f))
         buttons.addView(space(8))
+        buttons.addView(bigButton("Kick Bluetooth", Palette.CARD_HI, 15f) { WifiDoctor.kickNow() }, LinearLayout.LayoutParams(0, dp(60), 1f))
+        buttons.addView(space(8))
         buttons.addView(bigButton("Wi-Fi settings", Palette.CARD_HI, 15f) {
             val panel = if (Build.VERSION.SDK_INT >= 29) Settings.Panel.ACTION_WIFI else Settings.ACTION_WIFI_SETTINGS
             runCatching { startActivity(Intent(panel)) }.onFailure { runCatching { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) } }
@@ -94,6 +96,7 @@ class WifiDoctorActivity : Activity() {
         left.addView(buttons)
         left.addView(space(6))
         left.addView(toggle("Reconnect by itself (root: forces a rejoin, clears Android's no-internet block, restarts Wi-Fi if needed)", WifiDoctor.autoFix) { WifiDoctor.autoFix = it })
+        left.addView(toggle("Bluetooth kick: no hotspot visible but the iPhone is on the car's Bluetooth → Bluetooth off/on, so the iPhone's automation switches its hotspot on (never during a call)", WifiDoctor.btKick) { WifiDoctor.btKick = it })
         left.addView(toggle("Keep-alive ping to the hotspot every 15 s (may stop the iPhone dropping an idle hotspot)", WifiDoctor.keepAlive) { WifiDoctor.keepAlive = it })
         left.addView(label("Internet is checked once a minute through Wi-Fi (~1 KB of iPhone data).", 12f, Palette.MUTED))
 
@@ -151,7 +154,12 @@ class WifiDoctorActivity : Activity() {
             },
         )
         val signal = if (w.connected) "${w.rssi} dBm · ${quality(w.rssi)} · ${band(w.freqMhz)} · ${w.linkMbps} Mbit/s" else "—"
-        val seen = if (w.targetSeenAt > 0) "${w.targetSeenRssi} dBm, ${GpsDoctor.duration(now - w.targetSeenAt)} ago" else "not yet"
+        val seen = if (w.oursSeenAt > 0) w.oursVisible.entries.joinToString { "${it.key} ${it.value} dBm" }.ifEmpty { "—" } + ", ${GpsDoctor.duration(now - w.oursSeenAt)} ago" else "not yet"
+        val bt = when (BtKick.phoneConnected()) {
+            true -> "${BtKick.phone} connected" + (if (BtKick.since >= 0) " ${GpsDoctor.duration(now - BtKick.since)}" else "") + if (BtKick.inCall(this)) " · in a call" else ""
+            false -> "no phone connected"
+            null -> "Android can't see the car's Bluetooth (off, or a separate Bluetooth module) — kick not possible"
+        }
         live.text = listOf(
             "Wi-Fi ${if (w.enabled) "on ✓" else "off ✗"} · Root ${when (w.hasRoot) { true -> "yes"; false -> "no"; null -> "?" }}",
             "Network: ${if (w.connected) (w.ssid ?: "connected") else "not connected"}" + (w.target?.let { "   (keeping: $it)" } ?: ""),
@@ -163,7 +171,10 @@ class WifiDoctorActivity : Activity() {
                 else -> "no (${w.gateway})"
             },
             "Internet: " + when (w.internet) { true -> "works ✓"; false -> "none ✗ for ${GpsDoctor.duration(now - w.noInternetSince)}"; null -> if (w.connected) "checking…" else "—" },
-            "Hotspot seen in scan: $seen",
+            "Your networks: ${w.ours.joinToString().ifEmpty { "learning…" }}",
+            "Seen in scan: $seen",
+            "Bluetooth: $bt",
+            "Bluetooth kick: " + (BtKick.summary(this) ?: "not used yet") + if (BtKick.pendingAt > 0) " · waiting for a hotspot…" else "",
             if (w.connected) "Up for: ${if (w.upSince > 0) GpsDoctor.duration(now - w.upSince) else "—"}" else "Down for: ${GpsDoctor.duration(now - w.downSince)} · rejoin tries ${w.restarts}",
             "Android auto-join: " + (w.joinStatus?.let { if (it.contains("DISABLED")) "blocked ✗ ($it)" else "allowed ✓" } ?: if (w.hasRoot == true) "checked on a drop" else "unknown (needs root)"),
         ).joinToString("\n")

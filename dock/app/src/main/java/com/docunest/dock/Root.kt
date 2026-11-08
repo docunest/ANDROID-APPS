@@ -28,6 +28,8 @@ object Root {
             // Parked position after a cold start in a garage (mock location provider).
             "appops set $pkg android:mock_location allow",
             "pm grant $pkg android.permission.POST_NOTIFICATIONS 2>/dev/null; true",
+            // Bluetooth kick (Android 12+ runtime permission; older ones are install-time).
+            "pm grant $pkg android.permission.BLUETOOTH_CONNECT 2>/dev/null; true",
             "dumpsys deviceidle whitelist +$pkg",
         ).also { enableSplitService(context) }
     }

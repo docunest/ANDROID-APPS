@@ -15,6 +15,10 @@
         tools:ignore="MockLocation,ProtectedPermissions" />
     <!-- Wi-Fi doctor: state, scans for the hotspot. -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Wi-Fi doctor's Bluetooth kick: see the iPhone on the car's Bluetooth, switch Bluetooth off/on. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <!-- The floating button, fan menu and new-link card are overlays. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />

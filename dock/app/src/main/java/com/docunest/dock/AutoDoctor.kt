@@ -28,7 +28,8 @@ import android.os.SystemClock
 object AutoDoctor {
     private const val PREF = "autoGpsDoctor"
     private const val CHANNEL = "gps-doctor"
-    private const val NOTE_ID = 7
+    /** Not 7: that's the Wi-Fi doctor's "hotspot not visible" notification. */
+    private const val NOTE_ID = 17
 
     @Volatile var call: SkyJudge.Call? = null
         private set

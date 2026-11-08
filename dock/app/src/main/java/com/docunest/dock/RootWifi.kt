@@ -10,6 +10,7 @@ import android.os.IBinder
  * (NETWORK_SELECTION_..._DISABLED_NO_INTERNET_*) — the iPhone hotspot after
  * a tunnel — and never rejoins it by itself; a "user" connect clears that.
  *
+ *   list                prints every saved network's SSID (hex), comma-separated
  *   status <ssid-hex>   prints "<netId> <selection status> <disable reason>"
  *   enable <ssid-hex>   enable + connect; prints "ok <netId>" or the problem
  *
@@ -26,6 +27,11 @@ object RootWifi {
 
     private fun run(args: Array<String>): String {
         val op = args.getOrNull(0) ?: return "error no command"
+        if (op == "list") {
+            return "list " + configured(service()).mapNotNull { c ->
+                c.SSID?.trim('"')?.takeIf { it.isNotEmpty() }?.toByteArray(Charsets.UTF_8)?.joinToString("") { "%02x".format(it) }
+            }.joinToString(",")
+        }
         val ssid = args.getOrNull(1)?.let { String(it.chunked(2).map { b -> b.toInt(16).toByte() }.toByteArray(), Charsets.UTF_8) }
             ?: return "error no ssid"
         val wifi = service()

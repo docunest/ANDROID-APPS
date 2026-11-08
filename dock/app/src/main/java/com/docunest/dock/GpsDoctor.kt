@@ -477,6 +477,8 @@ object GpsDoctor {
             }
             "toggle" -> {
                 if (!root) return skip(step, "needs root")
+                // Location off hides Wi-Fi scan results on Android 10 — never while the Wi-Fi doctor is finding the hotspot.
+                if (!WifiDoctor.connected) return skip(step, "Wi-Fi is reconnecting — switching location off would hide its scans")
                 pauseGps(context) {
                     if (Build.VERSION.SDK_INT >= 30) Root.run("cmd location set-location-enabled false", "sleep 3", "cmd location set-location-enabled true")
                     else Root.run("settings put secure location_providers_allowed -gps", "sleep 3", "settings put secure location_providers_allowed +gps")
