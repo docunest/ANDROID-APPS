@@ -7,22 +7,30 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.view.View
 
-/** The floating button: dark circle, 2×2 "apps" glyph, amber badge for new places. */
+/** The floating button: dark circle, 2×2 "apps" glyph, amber badge for new places, GPS dot ([GpsDot]). */
 class BubbleView(context: Context) : View(context) {
     var badge: Int = 0
         set(value) { field = value; invalidate() }
     var pressedLook: Boolean = false
         set(value) { field = value; invalidate() }
+    /** Idle see-through look (⚙ opacity) for the button body; the GPS dot always stays fully visible. */
+    var fade: Float = 1f
+        set(value) { if (field != value) { field = value; invalidate() } }
+    /** Colour of the GPS dot (bottom-left); null = no dot. */
+    var gpsDot: Int? = null
+        set(value) { if (field != value) { field = value; invalidate() } }
 
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
     private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = Color.argb(200, 255, 255, 255) }
     private val glyph = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
     private val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Palette.AMBER }
+    private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val badgeText = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK; textAlign = Paint.Align.CENTER; isFakeBoldText = true }
 
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
         val r = w / 2f
+        val layer = canvas.saveLayerAlpha(0f, 0f, w, height.toFloat(), (fade.coerceIn(0f, 1f) * 255).toInt())
         bg.color = if (pressedLook) Palette.BLUE else Color.argb(235, 17, 24, 39)
         canvas.drawCircle(r, r, r - 1, bg)
         ring.strokeWidth = w * 0.04f
@@ -39,6 +47,15 @@ class BubbleView(context: Context) : View(context) {
             canvas.drawCircle(w - br, br, br, badgePaint)
             badgeText.textSize = br * 1.3f
             canvas.drawText(if (badge > 9) "9+" else badge.toString(), w - br, br + badgeText.textSize * 0.36f, badgeText)
+        }
+        canvas.restoreToCount(layer)
+        gpsDot?.let { c ->
+            // White ring so black (tunnel) and red read on the dark button.
+            val dr = w * 0.15f
+            dotPaint.color = Color.WHITE
+            canvas.drawCircle(dr + 1, w - dr - 1, dr, dotPaint)
+            dotPaint.color = c
+            canvas.drawCircle(dr + 1, w - dr - 1, dr * 0.72f, dotPaint)
         }
     }
 }

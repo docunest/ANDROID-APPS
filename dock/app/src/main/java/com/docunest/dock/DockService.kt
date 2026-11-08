@@ -182,7 +182,7 @@ class DockService : Service() {
     private fun addBubble() {
         val size = dp(prefs.bubbleSizeDp.coerceIn(32, 96))
         val view = BubbleView(this).apply {
-            alpha = idleAlpha()
+            fade = idleAlpha()
             contentDescription = "Dock"
         }
         bubbleParams = overlayParams(size, size).apply {
@@ -211,7 +211,7 @@ class DockService : Service() {
                     downX = e.rawX; downY = e.rawY
                     startX = bubbleParams.x; startY = bubbleParams.y
                     dragging = false
-                    view.alpha = 1f
+                    view.fade = 1f
                     view.pressedLook = true
                     v.postDelayed(openFan, holdMs)
                 }
@@ -236,7 +236,7 @@ class DockService : Service() {
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     v.removeCallbacks(openFan)
                     view.pressedLook = false
-                    view.alpha = idleAlpha()
+                    view.fade = idleAlpha()
                     val f = fan
                     when {
                         f != null -> {
@@ -257,6 +257,8 @@ class DockService : Service() {
         wm.addView(view, bubbleParams)
         bubble = view
         refreshBadge()
+        main.removeCallbacks(gpsDotLoop)
+        main.post(gpsDotLoop)
     }
 
     private fun relayoutBubble() {
@@ -264,7 +266,7 @@ class DockService : Service() {
         val size = dp(prefs.bubbleSizeDp.coerceIn(32, 96))
         bubbleParams.width = size
         bubbleParams.height = size
-        b.alpha = idleAlpha()
+        b.fade = idleAlpha()
         runCatching { wm.updateViewLayout(b, bubbleParams) }
     }
 
@@ -276,6 +278,34 @@ class DockService : Service() {
 
     private fun refreshBadge() {
         bubble?.badge = Store.all().count { it.isNew }
+    }
+
+    // GPS dot on the button, once a second (cheap: only redraws when the colour changes).
+    private val gpsDotLoop = object : Runnable {
+        override fun run() {
+            refreshGpsDot()
+            main.postDelayed(this, 1000)
+        }
+    }
+
+    private fun refreshGpsDot() {
+        val b = bubble ?: return
+        if (!prefs.gpsDot) {
+            b.gpsDot = null
+            return
+        }
+        val now = android.os.SystemClock.elapsedRealtime()
+        val mode = AutoDoctor.call?.mode
+        val level = GpsDot.level(
+            settingsOk = GpsDoctor.settingsOk(this),
+            emulated = ParkedPosition.mocking,
+            fixAgeMs = GpsWatch.lastFixAt.takeIf { it > 0 }?.let { now - it },
+            accuracyM = GpsWatch.lastAccuracy,
+            noSky = mode == SkyJudge.Mode.TUNNEL || mode == SkyJudge.Mode.COVERED || mode == SkyJudge.Mode.DEAD_ZONE,
+            asked = GpsDoctor.isWatching,
+        )
+        b.gpsDot = level.color
+        b.contentDescription = "GPS: ${level.label}"
     }
 
     // --- Press-and-slide menu -------------------------------------------

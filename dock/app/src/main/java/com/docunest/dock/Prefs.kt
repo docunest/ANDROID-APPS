@@ -71,6 +71,11 @@ class Prefs(context: Context) {
         get() = sp.getInt("bubbleY", 300)
         set(value) = sp.edit().putInt("bubbleY", value).apply()
 
+    /** GPS-state dot on the floating button. */
+    var gpsDot: Boolean
+        get() = sp.getBoolean("gpsDot", true)
+        set(value) = sp.edit().putBoolean("gpsDot", value).apply()
+
     var startOnBoot: Boolean
         get() = sp.getBoolean("startOnBoot", true)
         set(value) = sp.edit().putBoolean("startOnBoot", value).apply()

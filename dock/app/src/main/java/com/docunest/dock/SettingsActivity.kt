@@ -137,6 +137,8 @@ class SettingsActivity : Activity() {
         switch("GPS auto doctor", AutoDoctor.enabled(this)) { AutoDoctor.setEnabled(this, it) }
         col.addView(label("Parked position: after a start with no sky (garage), give Waze the last saved GPS position until the van moves, so a route can be set. The real GPS is paused meanwhile and gets it back at once when you drive or the sky shows.", 13f, Palette.MUTED))
         switch("Show parked position after start", ParkedPosition.enabled(this)) { ParkedPosition.setEnabled(this, it) }
+        col.addView(label("GPS dot on the floating button: pink = parked position (emulated), blue = really good (±10 m), green = OK (±25 m), orange = barely, black = no sky (tunnel / car park), red = gone, grey = GPS not in use.", 13f, Palette.MUTED))
+        switch("GPS dot on the button", prefs.gpsDot) { prefs.gpsDot = it; DockService.start(this, DockService.ACTION_RELAYOUT) }
 
         section("Updates")
         col.addView(label("Build ${BuildConfig.VERSION_CODE}. New builds from GitHub install by themselves (root), checked when the dock starts and every 3 min.", 13f, Palette.MUTED))
