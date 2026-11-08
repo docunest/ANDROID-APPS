@@ -7,7 +7,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.view.View
 
-/** The floating button: dark circle, 2×2 "apps" glyph, amber badge for new places, GPS dot ([GpsDot]). */
+/** The floating button: dark circle, 2×2 "apps" glyph, amber badge for new places, GPS dot ([GpsDot]) and Wi-Fi dot ([WifiDot]). */
 class BubbleView(context: Context) : View(context) {
     var badge: Int = 0
         set(value) { field = value; invalidate() }
@@ -15,6 +15,9 @@ class BubbleView(context: Context) : View(context) {
         set(value) { field = value; invalidate() }
     /** Idle see-through look (⚙ opacity) for the button body; the GPS dot always stays fully visible. */
     var fade: Float = 1f
+        set(value) { if (field != value) { field = value; invalidate() } }
+    /** Colour of the Wi-Fi dot (bottom-right); null = no dot. */
+    var wifiDot: Int? = null
         set(value) { if (field != value) { field = value; invalidate() } }
     /** Colour of the GPS dot (bottom-left); null = no dot. */
     var gpsDot: Int? = null
@@ -56,6 +59,13 @@ class BubbleView(context: Context) : View(context) {
             canvas.drawCircle(dr + 1, w - dr - 1, dr, dotPaint)
             dotPaint.color = c
             canvas.drawCircle(dr + 1, w - dr - 1, dr * 0.72f, dotPaint)
+        }
+        wifiDot?.let { c ->
+            val dr = w * 0.15f
+            dotPaint.color = Color.WHITE
+            canvas.drawCircle(w - dr - 1, w - dr - 1, dr, dotPaint)
+            dotPaint.color = c
+            canvas.drawCircle(w - dr - 1, w - dr - 1, dr * 0.72f, dotPaint)
         }
     }
 }

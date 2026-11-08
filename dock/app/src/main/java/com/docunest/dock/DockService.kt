@@ -290,6 +290,7 @@ class DockService : Service() {
 
     private fun refreshGpsDot() {
         val b = bubble ?: return
+        refreshWifiDot(b)
         if (!prefs.gpsDot) {
             b.gpsDot = null
             return
@@ -306,6 +307,22 @@ class DockService : Service() {
         )
         b.gpsDot = level.color
         b.contentDescription = "GPS: ${level.label}"
+    }
+
+    private fun refreshWifiDot(b: BubbleView) {
+        if (!prefs.wifiDot) {
+            b.wifiDot = null
+            return
+        }
+        val w = WifiDoctor
+        val level = WifiDot.level(
+            enabled = w.enabled,
+            connected = w.connected,
+            internet = w.internet,
+            oursVisible = android.os.SystemClock.elapsedRealtime() - w.oursSeenAt < 6_000,
+            kickPending = BtKick.pendingAt > 0,
+        )
+        b.wifiDot = level.color
     }
 
     // --- Press-and-slide menu -------------------------------------------

@@ -76,6 +76,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("gpsDot", true)
         set(value) = sp.edit().putBoolean("gpsDot", value).apply()
 
+    /** Wi-Fi-state dot on the floating button. */
+    var wifiDot: Boolean
+        get() = sp.getBoolean("wifiDot", true)
+        set(value) = sp.edit().putBoolean("wifiDot", value).apply()
+
     var startOnBoot: Boolean
         get() = sp.getBoolean("startOnBoot", true)
         set(value) = sp.edit().putBoolean("startOnBoot", value).apply()

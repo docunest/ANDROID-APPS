@@ -139,6 +139,8 @@ class SettingsActivity : Activity() {
         switch("Show parked position after start", ParkedPosition.enabled(this)) { ParkedPosition.setEnabled(this, it) }
         col.addView(label("GPS dot on the floating button: pink = parked position (emulated), blue = really good (±10 m), green = OK (±25 m), orange = barely, black = no sky (tunnel / car park), red = gone, grey = GPS not in use.", 13f, Palette.MUTED))
         switch("GPS dot on the button", prefs.gpsDot) { prefs.gpsDot = it; DockService.start(this, DockService.ACTION_RELAYOUT) }
+        col.addView(label("Wi-Fi dot (bottom-right): green = internet works, orange = connected but no internet (iPhone has no data — tunnel), blue = hotspot visible, joining, purple = Bluetooth kicked, waiting for the hotspot, red = lost, grey = Wi-Fi off.", 13f, Palette.MUTED))
+        switch("Wi-Fi dot on the button", prefs.wifiDot) { prefs.wifiDot = it }
 
         section("Updates")
         col.addView(label("Build ${BuildConfig.VERSION_CODE}. New builds from GitHub install by themselves (root), checked when the dock starts and every 3 min.", 13f, Palette.MUTED))
