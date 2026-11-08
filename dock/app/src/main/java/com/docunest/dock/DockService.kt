@@ -280,49 +280,63 @@ class DockService : Service() {
         bubble?.badge = Store.all().count { it.isNew }
     }
 
-    // GPS dot on the button, once a second (cheap: only redraws when the colour changes).
+    // Status ring on the button (GPS left, Wi-Fi right), once a second — redrawn only when it changes.
     private val gpsDotLoop = object : Runnable {
         override fun run() {
-            refreshGpsDot()
+            runCatching { refreshRing() }
             main.postDelayed(this, 1000)
         }
     }
 
-    private fun refreshGpsDot() {
+    private fun refreshRing() {
         val b = bubble ?: return
-        refreshWifiDot(b)
-        if (!prefs.gpsDot) {
-            b.gpsDot = null
-            return
+        GpsWatch.start(this) // idempotent: may not have started if location was granted after the dock
+        val g = gpsLevel()
+        val w = wifiLevel()
+        b.gpsArc = if (prefs.gpsDot) GpsDot.arc(g) else Ring.FINE
+        b.wifiArc = if (prefs.wifiDot) WifiDot.arc(w) else Ring.FINE
+        b.contentDescription = "Dock · GPS ${g.label} · Wi-Fi ${w.label}"
+    }
+
+    /** Freshest real fix from the background listener, the GPS doctor's own listener, or Android's last known. */
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun freshestFix(now: Long): Pair<Long, Float?>? {
+        val cands = mutableListOf<Pair<Long, Float?>>()
+        if (GpsWatch.lastFixAt > 0) cands += GpsWatch.lastFixAt to GpsWatch.lastAccuracy
+        GpsDoctor.fix?.takeIf { GpsDoctor.fixAt > 0 }?.let { cands += GpsDoctor.fixAt to (if (it.hasAccuracy()) it.accuracy else null) }
+        if (Locator.hasPermission(this)) runCatching {
+            val lm = getSystemService(LOCATION_SERVICE) as android.location.LocationManager
+            lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)?.takeIf { !it.isMockFix() }?.let {
+                cands += (now - (android.os.SystemClock.elapsedRealtimeNanos() - it.elapsedRealtimeNanos) / 1_000_000) to (if (it.hasAccuracy()) it.accuracy else null)
+            }
         }
+        return cands.maxByOrNull { it.first }
+    }
+
+    private fun gpsLevel(): GpsDot.Level {
         val now = android.os.SystemClock.elapsedRealtime()
         val mode = AutoDoctor.call?.mode
-        val level = GpsDot.level(
+        val fix = freshestFix(now)
+        return GpsDot.level(
             settingsOk = GpsDoctor.settingsOk(this),
             emulated = ParkedPosition.mocking,
-            fixAgeMs = GpsWatch.lastFixAt.takeIf { it > 0 }?.let { now - it },
-            accuracyM = GpsWatch.lastAccuracy,
+            fixAgeMs = fix?.let { now - it.first },
+            accuracyM = fix?.second,
             noSky = mode == SkyJudge.Mode.TUNNEL || mode == SkyJudge.Mode.COVERED || mode == SkyJudge.Mode.DEAD_ZONE,
             asked = GpsDoctor.isWatching,
         )
-        b.gpsDot = level.color
-        b.contentDescription = "GPS: ${level.label}"
     }
 
-    private fun refreshWifiDot(b: BubbleView) {
-        if (!prefs.wifiDot) {
-            b.wifiDot = null
-            return
-        }
+    private fun wifiLevel(): WifiDot.Level {
         val w = WifiDoctor
-        val level = WifiDot.level(
+        return WifiDot.level(
             enabled = w.enabled,
             connected = w.connected,
             internet = w.internet,
             oursVisible = android.os.SystemClock.elapsedRealtime() - w.oursSeenAt < 6_000,
             kickPending = BtKick.pendingAt > 0,
+            link = w.link.level(),
         )
-        b.wifiDot = level.color
     }
 
     // --- Press-and-slide menu -------------------------------------------

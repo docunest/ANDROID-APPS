@@ -164,6 +164,8 @@ class WifiDoctorActivity : Activity() {
             "Wi-Fi ${if (w.enabled) "on ✓" else "off ✗"} · Root ${when (w.hasRoot) { true -> "yes"; false -> "no"; null -> "?" }}",
             "Network: ${if (w.connected) (w.ssid ?: "connected") else "not connected"}" + (w.target?.let { "   (keeping: $it)" } ?: ""),
             "Signal: $signal",
+            "Link quality (ping to hotspot, last ~30 s): " + if (w.connected) w.link.text() else "—",
+            "Before the last drop: " + (w.beforeLastDrop ?: "—"),
             "Hotspot answers: " + when {
                 !w.connected -> "—"
                 w.gatewayPingMs != null -> "yes, ${w.gatewayPingMs} ms (${w.gateway})"

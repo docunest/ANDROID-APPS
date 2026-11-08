@@ -94,6 +94,19 @@ object WifiDoctor {
     @Volatile var oursVisible: Map<String, Int> = emptyMap()
     @Volatile var oursSeenAt = 0L
     private val plan = WifiPlan()
+    /** Rolling ping meter to the hotspot (every 2 s while connected) — the "about to drop" hint. */
+    val link = LinkQuality()
+    /** What the link looked like just before the last drop (for the toast and the event). */
+    @Volatile var beforeLastDrop: String? = null
+    private val pingThread = HandlerThread("wifi-ping").apply { start() }
+    private val pinger = Handler(pingThread.looper)
+    private val pingLoop = object : Runnable {
+        override fun run() {
+            val gw = gateway
+            if (connected && gw != null) link.add(ping(gw, waitSec = 1))
+            pinger.postDelayed(this, 2_000L)
+        }
+    }
     /** Android's auto-join state for the hotspot (root), e.g. "PERMANENTLY_DISABLED NO_INTERNET_PERMANENT". */
     @Volatile var joinStatus: String? = null
     @Volatile var lastAction = ""
@@ -197,6 +210,7 @@ object WifiDoctor {
             loadOurs()
         }
         worker.post(tick)
+        pinger.post(pingLoop)
     }
 
     /** "Reconnect now" on the doctor screen: skip the waiting. */
@@ -300,6 +314,7 @@ object WifiDoctor {
         downSince = 0L
         upSince = now()
         restarts = 0
+        link.clear()
         lastAction = ""
         internet = null
         lastProbeAt = 0L
@@ -310,6 +325,16 @@ object WifiDoctor {
     }
 
     private fun lost() {
+        // How the link was just before: justified by bad reception, or sudden? Toast now, stored with the event.
+        val (justified, before) = LinkQuality.beforeDrop(lastRssis.lastOrNull() ?: rssi, lastRssis.maxOrNull() ?: rssi, link)
+        beforeLastDrop = before
+        val lostName = ssid ?: "Wi-Fi"
+        main.post {
+            runCatching {
+                android.widget.Toast.makeText(app, "📶 Wi-Fi lost ($lostName). $before", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+        link.clear()
         runCatching { loadOurs() } // a network saved since the last drop counts too
         downSince = now()
         upSince = 0L
@@ -335,7 +360,7 @@ object WifiDoctor {
                 else explain(reason, visible, lastSeen, lastGood)
                 val block = joinStatus?.takeIf { it.contains("DISABLED") }
                     ?.let { " Android has also blocked auto-join for it ($it) — it won't rejoin by itself; Dock clears that." } ?: ""
-                record("Lost $name", why + block, fault, null, pendingAfter)
+                record("Lost $name", why + block + " " + before, fault, null, pendingAfter)
             }
             dropPending = false
             pendingAfter = null
@@ -497,9 +522,9 @@ object WifiDoctor {
 
     // --- Measurements -----------------------------------------------------------
 
-    private fun ping(host: String): Int? = runCatching {
+    private fun ping(host: String, waitSec: Int = 2): Int? = runCatching {
         val iface = gatewayIface
-        val cmd = if (iface != null) listOf("ping6", "-c", "1", "-W", "2", "$host%$iface") else listOf("ping", "-c", "1", "-W", "2", host)
+        val cmd = if (iface != null) listOf("ping6", "-c", "1", "-W", "$waitSec", "$host%$iface") else listOf("ping", "-c", "1", "-W", "$waitSec", host)
         val p = ProcessBuilder(cmd).redirectErrorStream(true).start()
         val out = p.inputStream.bufferedReader().readText()
         if (p.waitFor() != 0) null
