@@ -80,6 +80,7 @@ object BtKick {
         if (name != null && phone == null) since = SystemClock.elapsedRealtime()
         if (name == null) since = -1
         phone = name
+        DebugLog.change("BT", "phone", if (!usable) "Android can't read Bluetooth" else name ?: "none")
     }
 
     /** Hidden but long-standing BluetoothDevice.isConnected() (ACL link up). */
@@ -103,7 +104,10 @@ object BtKick {
 
     /** Bluetooth off, 2 s, on (root `svc bluetooth`, else the adapter API). Blocking — worker thread. */
     @SuppressLint("MissingPermission")
-    fun kick(): String {
+    fun kick(): String = doKick().also { DebugLog.log("BT", "kick: $it (phone ${phone ?: "?"})") }
+
+    @SuppressLint("MissingPermission")
+    private fun doKick(): String {
         pendingAt = SystemClock.elapsedRealtime()
         if (Root.run("svc bluetooth disable", "sleep 2", "svc bluetooth enable")) return "Bluetooth off/on (root)"
         val adapter = (app.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter ?: return "no Bluetooth"
@@ -124,6 +128,7 @@ object BtKick {
     }
 
     private fun record(worked: Boolean, secs: Int) {
+        DebugLog.log("BT", if (worked) "kick worked: hotspot after $secs s" else "kick didn't bring a hotspot within ${secs} s")
         val sp = app.getSharedPreferences("dock", Context.MODE_PRIVATE)
         val lines = sp.getString("btKicks", "")!!.split('\n').filter { it.isNotBlank() } + "${System.currentTimeMillis()}|${if (worked) 1 else 0}|$secs"
         sp.edit().putString("btKicks", lines.takeLast(KEEP).joinToString("\n")).apply()

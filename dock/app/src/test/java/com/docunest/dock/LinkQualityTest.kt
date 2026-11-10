@@ -31,6 +31,19 @@ class LinkQualityTest {
         assertEquals(Level.GREAT, l.level())
     }
 
+    @Test fun thresholdsFollowTheLinksOwnNormal() {
+        // A link that's always ~80 ms (e.g. through Starlink) is normal for it, not "ok".
+        val slow = LinkQuality()
+        repeat(40) { slow.add(80) }
+        assertEquals(80, slow.baseline())
+        assertEquals(Level.GREAT, slow.level())
+        // A fast hotspot (~8 ms) jumping to 120 ms: still within the fixed floors (ok), never "great"-inflated.
+        val fast = LinkQuality()
+        repeat(40) { fast.add(8) }
+        repeat(15) { fast.add(120) }
+        assertEquals(Level.OK, fast.level())
+    }
+
     @Test fun dropJustifiedByBadReception() {
         val (justified, text) = LinkQuality.beforeDrop(-82, -60, q(300, 450, null, 500))
         assertTrue(justified)

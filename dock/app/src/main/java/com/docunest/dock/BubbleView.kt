@@ -10,9 +10,8 @@ import android.view.View
 
 /**
  * The floating button: dark circle, 2×2 "apps" glyph, amber badge for new
- * places, and its outline as a status ring ([Ring]): left half GPS, right
- * half Wi-Fi — the normal white outline while all is fine, a thicker
- * coloured half only when something is off.
+ * places, and status marks on its outline ([Ring]): a short arc growing from
+ * the bottom — GPS to the left, Wi-Fi to the right — only when something is off.
  */
 class BubbleView(context: Context) : View(context) {
     var badge: Int = 0
@@ -43,12 +42,7 @@ class BubbleView(context: Context) : View(context) {
         bg.color = if (pressedLook) Palette.BLUE else Color.argb(235, 17, 24, 39)
         canvas.drawCircle(r, r, r - 1, bg)
         ring.strokeWidth = w * 0.04f
-        val oval = RectF(ring.strokeWidth, ring.strokeWidth, w - ring.strokeWidth, w - ring.strokeWidth)
-        when {
-            gpsArc.fine && wifiArc.fine -> canvas.drawCircle(r, r, r - ring.strokeWidth, ring) // exactly the old look
-            gpsArc.fine -> canvas.drawArc(oval, 90f, 180f, false, ring)
-            wifiArc.fine -> canvas.drawArc(oval, 270f, 180f, false, ring)
-        }
+        canvas.drawCircle(r, r, r - ring.strokeWidth, ring) // the normal outline, always
         val s = w * 0.15f
         val gap = w * 0.06f
         for (dx in listOf(-1, 1)) for (dy in listOf(-1, 1)) {
@@ -63,15 +57,18 @@ class BubbleView(context: Context) : View(context) {
             canvas.drawText(if (badge > 9) "9+" else badge.toString(), w - br, br + badgeText.textSize * 0.36f, badgeText)
         }
         canvas.restoreToCount(layer)
-        // A half that's off: thicker, coloured, never faded with the idle button. Left = GPS (90°→270°), right = Wi-Fi.
-        val sw = w * 0.085f
+        // Something off: a short arc grows from the bottom — GPS to the left, Wi-Fi to the right.
+        // ~1/10 of the circle for a warning, ~1/6 when it's gone. Never faded with the idle button.
+        val sw = w * 0.065f
         val o = RectF(sw / 2, sw / 2, w - sw / 2, w - sw / 2)
-        for ((arc, start) in listOf(gpsArc to 90f, wifiArc to 270f)) {
+        for ((arc, gps) in listOf(gpsArc to true, wifiArc to false)) {
             if (arc.fine) continue
+            val len = if (arc.major) Ring.MAJOR_DEG else Ring.MINOR_DEG
             alertPaint.strokeWidth = sw
             alertPaint.color = arc.color
-            alertPaint.pathEffect = if (arc.dashed) DashPathEffect(floatArrayOf(sw * 1.1f, sw * 0.9f), 0f) else null
-            canvas.drawArc(o, start + 6f, 168f, false, alertPaint)
+            alertPaint.pathEffect = if (arc.dashed) DashPathEffect(floatArrayOf(sw * 0.9f, sw * 0.9f), 0f) else null
+            // Android angles: 90° = bottom; clockwise is towards the left side.
+            canvas.drawArc(o, if (gps) 93f else 87f - len, len, false, alertPaint)
         }
     }
 }

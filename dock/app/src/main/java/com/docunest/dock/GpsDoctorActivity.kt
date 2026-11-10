@@ -60,6 +60,7 @@ class GpsDoctorActivity : Activity() {
         // Fixes take minutes; the screen staying on keeps the GPS request alive.
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         GpsDoctor.askUser = { what -> runOnUiThread { askUser(what) } }
+        DebugLog.init(this)
         AutoDoctor.start(this)
         build()
         if (!Locator.hasPermission(this)) {
@@ -172,6 +173,14 @@ class GpsDoctorActivity : Activity() {
         manual.addView(space(8))
         manual.addView(bigButton("Restart head unit", Palette.CARD_HI, 14f) { confirmReboot() }, LinearLayout.LayoutParams(0, dp(56), 1f))
         left.addView(manual)
+        left.addView(space(8))
+        val more = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        more.addView(bigButton("📊 Fix report", Palette.CARD_HI, 14f) { startActivity(Intent(this, FixReportActivity::class.java)) }, LinearLayout.LayoutParams(0, dp(56), 1f))
+        more.addView(space(8))
+        more.addView(bigButton("🐞 Debug log", Palette.CARD_HI, 14f) {
+            startActivity(Intent(this, DebugActivity::class.java).putExtra(DebugActivity.EXTRA_TAG, "GPS"))
+        }, LinearLayout.LayoutParams(0, dp(56), 1f))
+        left.addView(more)
 
         left.addView(space(14))
         left.addView(label("Sensors", 18f, bold = true))

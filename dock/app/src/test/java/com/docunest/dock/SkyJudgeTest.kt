@@ -28,11 +28,12 @@ class SkyJudgeTest {
             driving: Boolean? = speed > 1f,
             talks: Boolean = true,
             settings: Boolean = true,
+            skyKnown: Boolean = true,
         ): List<SkyJudge.Call> {
             val out = mutableListOf<SkyJudge.Call>()
             repeat(seconds) {
                 if (fix) lat += speed / 111_195.0
-                val c = j.judge(SkyJudge.Reading(t, settings, talks, if (fix) SkyJudge.Fix(lat, lng, speed) else null, strong, driving))
+                val c = j.judge(SkyJudge.Reading(t, settings, talks, if (fix) SkyJudge.Fix(lat, lng, speed) else null, strong, driving, skyKnown = skyKnown))
                 out += c
                 t += 1000
             }
@@ -155,6 +156,18 @@ class SkyJudgeTest {
         val morning = s.run(60, strong = 8, fix = false, driving = false, talks = true)
         assertTrue("no instant fix on wake-up", morning.none { it.fixNow })
         assertEquals(75, (morning + s.run(30, strong = 8, fix = false, driving = false)).indexOfFirst { it.fixNow })
+    }
+
+    /** The owner's head unit: fixes only — no satellite status, no NMEA, ever (GPS doctor: "heard 0 … ±21 m"). */
+    @Test fun unitWithoutSatelliteReportsIsNotCalledSilentOrBlocked() {
+        val s = sim(41.4085, -8.5198) // Vila Nova de Famalicão
+        val ok = s.run(600, strong = 0, fix = true, speed = 14f, talks = false, skyKnown = false)
+        assertTrue(ok.none { it.fixNow })
+        assertEquals(Mode.OK, ok.last().mode)
+        // A real tunnel on such a unit: still waited out, not "chip silent" after 30 s.
+        val tunnel = s.run(4 * 60, strong = 0, fix = false, driving = true, talks = false, skyKnown = false)
+        assertTrue(tunnel.none { it.fixNow })
+        assertEquals(Mode.TUNNEL, tunnel.last().mode)
     }
 
     @Test fun workingGpsNeverCallsForAFix() {

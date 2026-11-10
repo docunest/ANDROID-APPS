@@ -103,7 +103,10 @@ object WifiDoctor {
     private val pingLoop = object : Runnable {
         override fun run() {
             val gw = gateway
-            if (connected && gw != null) link.add(ping(gw, waitSec = 1))
+            if (connected && gw != null) {
+                link.add(ping(gw, waitSec = 1))
+                DebugLog.change("WIFI", "link", link.level().name, "${link.text()} · via $rttMethod to $gw")
+            }
             pinger.postDelayed(this, 2_000L)
         }
     }
@@ -201,6 +204,7 @@ object WifiDoctor {
         }
         worker.post {
             hasRoot = Root.run("id")
+            DebugLog.log("WIFI", "root: ${if (hasRoot == true) "yes" else "NO — forced rejoin, Wi-Fi restart and Bluetooth kick via root won't work"}")
             // Scans more often than 4 per 2 min (Android's default throttle).
             if (hasRoot == true) Root.run(
                 "settings put global wifi_scan_throttle_enabled 0",
@@ -266,6 +270,8 @@ object WifiDoctor {
             }
         }
 
+        DebugLog.change("WIFI", "connection", if (!enabled) "OFF" else if (connected) "connected ${ssid ?: "?"}" else "DOWN",
+            "rssi $rssi · ours visible ${oursVisible.keys} · bt ${BtKick.phoneConnected()} ${BtKick.phone ?: ""}")
         when {
             connected && !wasConnected -> back()
             !connected && wasConnected -> lost()
@@ -293,6 +299,7 @@ object WifiDoctor {
                     noInternetSince = 0L
                 }
                 internet = ok
+                DebugLog.change("WIFI", "internet", if (ok) "works" else "NONE", "hotspot ping ${gatewayPingMs ?: "no answer"} ms · ${ssid}")
             }
         } else {
             gatewayPingMs = null
@@ -441,6 +448,8 @@ object WifiDoctor {
             ),
         )
         restarts = plan.joinTries
+        if (step.action != WifiPlan.Action.NONE) DebugLog.log("WIFI", "action ${step.action}: ${step.why}")
+        DebugLog.change("WIFI", "plan", step.why.substringBefore(" — ").substringBefore(" in "))
         lastAction = if (visible) "${best() ?: "hotspot"} visible — ${step.why}" else "Down ${GpsDoctor.duration(down)} — ${step.why}"
         when (step.action) {
             WifiPlan.Action.NONE -> Unit
@@ -522,14 +531,36 @@ object WifiDoctor {
 
     // --- Measurements -----------------------------------------------------------
 
-    private fun ping(host: String, waitSec: Int = 2): Int? = runCatching {
-        val iface = gatewayIface
-        val cmd = if (iface != null) listOf("ping6", "-c", "1", "-W", "$waitSec", "$host%$iface") else listOf("ping", "-c", "1", "-W", "$waitSec", host)
-        val p = ProcessBuilder(cmd).redirectErrorStream(true).start()
-        val out = p.inputStream.bufferedReader().readText()
-        if (p.waitFor() != 0) null
-        else Regex("time=([\\d.]+)").find(out)?.groupValues?.get(1)?.toFloatOrNull()?.toInt() ?: 0
-    }.getOrNull()
+    /** How round trips are measured: "ping", or "tcp" when this unit doesn't let apps ping. */
+    @Volatile var rttMethod = "ping"
+        private set
+
+    /**
+     * Round trip to the hotspot in ms, null = no answer. `ping` exits 1 for "no reply" but 2 (or says
+     * "not permitted") when apps may not ping at all — then every ping looked lost and the link "bad".
+     * Fallback: a TCP probe ([java.net.InetAddress.isReachable]); a refused port still answers.
+     */
+    private fun ping(host: String, waitSec: Int = 2): Int? {
+        if (rttMethod == "ping") {
+            val r = runCatching {
+                val iface = gatewayIface
+                val cmd = if (iface != null) listOf("ping6", "-c", "1", "-W", "$waitSec", "$host%$iface") else listOf("ping", "-c", "1", "-W", "$waitSec", host)
+                val p = ProcessBuilder(cmd).redirectErrorStream(true).start()
+                val out = p.inputStream.bufferedReader().readText()
+                p.waitFor() to out
+            }
+            val (code, out) = r.getOrNull() ?: (-1 to (r.exceptionOrNull()?.message ?: ""))
+            if (code == 0) return Regex("time=([\\d.]+)").find(out)?.groupValues?.get(1)?.toFloatOrNull()?.toInt() ?: 0
+            if (code == 1 && !out.contains("permi", ignoreCase = true)) return null // a real "no reply"
+            rttMethod = "tcp"
+            DebugLog.log("WIFI", "ping not usable here (exit $code: ${out.trim().take(120)}) — measuring with a TCP probe instead")
+        }
+        return runCatching {
+            val start = System.nanoTime()
+            val ok = java.net.InetAddress.getByName(host).isReachable(waitSec * 1000)
+            if (ok) ((System.nanoTime() - start) / 1_000_000).toInt() else null
+        }.getOrNull()
+    }
 
     /** Real internet through the Wi-Fi network itself (not mobile data): ~1 KB. */
     private fun probe(net: Network): Boolean = runCatching {

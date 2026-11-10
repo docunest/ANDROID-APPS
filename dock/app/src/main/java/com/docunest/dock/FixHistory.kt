@@ -31,6 +31,19 @@ object FixHistory {
     @Synchronized
     fun clear(context: Context) = sp(context).edit().remove("gpsFixAttempts").remove("gpsFixRuns").apply()
 
+    /**
+     * Once: runs before build ~2026-11-10 were mostly started by mistake — the dock didn't get GPS fixes
+     * while Waze was in front (no location foreground service), so the GPS looked lost when it wasn't.
+     */
+    @Synchronized
+    fun resetBrokenStatsOnce(context: Context) {
+        if (sp(context).getInt("gpsStatsEpoch", 0) >= 2) return
+        val n = attempts(context).size
+        clear(context)
+        sp(context).edit().putInt("gpsStatsEpoch", 2).apply()
+        if (n > 0) DebugLog.log("GPS", "statistics reset once: $n earlier tries were started by the background-location bug")
+    }
+
     @Synchronized
     fun deadZones(context: Context): List<SkyJudge.Spot> = lines(context, "gpsDeadZones").mapNotNull { l ->
         val p = l.split(',')

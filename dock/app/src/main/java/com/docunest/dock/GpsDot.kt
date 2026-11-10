@@ -57,7 +57,7 @@ object GpsDot {
         Level.GREAT, Level.GOOD, Level.UNKNOWN -> Ring.FINE
         Level.WEAK -> Ring.Arc(0xFFF97316.toInt())
         Level.NO_SKY -> Ring.Arc(0xFF9CA3AF.toInt(), dashed = true)
-        Level.GONE -> Ring.Arc(0xFFDC2626.toInt())
+        Level.GONE -> Ring.Arc(0xFFDC2626.toInt(), major = true)
         Level.EMULATED -> Ring.Arc(0xFFEC4899.toInt())
     }
 }

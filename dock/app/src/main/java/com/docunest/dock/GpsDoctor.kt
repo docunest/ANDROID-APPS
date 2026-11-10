@@ -172,6 +172,7 @@ object GpsDoctor {
             strongSats = strong
             topCn0 = cn0s.sortedDescending().take(4).takeIf { it.isNotEmpty() }?.average()?.toFloat() ?: 0f
             systems = bySystem.entries.joinToString(" · ") { "${it.key} ${it.value}" }
+            if (lastStatusAt == 0L) DebugLog.log("GPS", "satellite status reported: heard $heard, used $used, strong $strong")
             lastStatusAt = now()
             changed()
         }
@@ -182,6 +183,7 @@ object GpsDoctor {
     }
 
     private val nmeaListener = OnNmeaMessageListener { _, _ ->
+        if (nmeaCount == 0) DebugLog.log("GPS", "NMEA from the chip: first line")
         nmeaCount++
         lastNmeaAt = now()
     }
@@ -201,10 +203,12 @@ object GpsDoctor {
     private fun listen(context: Context) {
         if (watching || wanted.isEmpty() || !Locator.hasPermission(context)) return
         val lm = lm(context)
-        runCatching { lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener, Looper.getMainLooper()) }
+        val req = runCatching { lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener, Looper.getMainLooper()) }
             .onFailure { note("Can't ask the GPS provider: ${it.message}") }
-        runCatching { lm.registerGnssStatusCallback(statusCallback, main) }
-        runCatching { lm.addNmeaListener(nmeaListener, main) }
+        val st = runCatching { lm.registerGnssStatusCallback(statusCallback, main) }
+        val nm = runCatching { lm.addNmeaListener(nmeaListener, main) }
+        DebugLog.log("GPS", "listening for ${wanted.joinToString("+")}: fixes ${if (req.isSuccess) "ok" else "FAILED ${req.exceptionOrNull()?.message}"}, " +
+            "satellite status ${st.getOrNull() ?: st.exceptionOrNull()?.message}, NMEA ${nm.getOrNull() ?: nm.exceptionOrNull()?.message}")
         watching = true
         watchingSince = now()
         if (steps.isEmpty()) steps = runCatching { plan(context) }.getOrDefault(emptyList())
@@ -218,6 +222,7 @@ object GpsDoctor {
         runCatching { lm.unregisterGnssStatusCallback(statusCallback) }
         runCatching { lm.removeNmeaListener(nmeaListener) }
         watching = false
+        DebugLog.log("GPS", "stopped listening")
     }
 
     /** Drop and renew our GPS request — restarts the chip's search session. */
@@ -228,6 +233,15 @@ object GpsDoctor {
     fun hasFix(): Boolean {
         val f = fix ?: return false
         return now() - fixAt < FRESH_MS && (!f.hasAccuracy() || f.accuracy <= GOOD_ACCURACY_M)
+    }
+
+    /**
+     * Does this unit report satellites / NMEA at all (in the last minute)? Some head units deliver only
+     * fixes — then satellite counts are meaningless and the judges must not use them.
+     */
+    fun skyKnown(): Boolean {
+        val t = now()
+        return (lastStatusAt > 0 && t - lastStatusAt < 60_000) || (lastNmeaAt > 0 && t - lastNmeaAt < 60_000)
     }
 
     fun chipTalks(): Boolean {
@@ -315,6 +329,7 @@ object GpsDoctor {
         val runId = System.currentTimeMillis()
         val runStart = now()
         hasRoot = Root.run("id")
+        DebugLog.log("GPS", "fix run started (${if (byAuto) "auto" else "manual"}) · trouble ${symptomLabel(symptom)} · root ${hasRoot} · sky known ${skyKnown()}")
         note("${if (byAuto) "Auto doctor" else "Fix GPS"} · trouble: ${symptomLabel(symptom)} · root: ${if (hasRoot == true) "yes" else "no — root-only fixes are skipped"}")
         // Pressing Fix while the GPS works tests the buttons, not the fixes: don't count it.
         val counted = symptom != "ok"
@@ -381,6 +396,7 @@ object GpsDoctor {
             else -> "Nothing brought the GPS back (${duration(total)}). ${verdict(context)}" + advice()
         }
         note(summary)
+        DebugLog.log("GPS", "fix run ended: $result — $summary")
         if (counted) FixHistory.add(context, FixStats.Run(runId, byAuto, symptom, result, fixedBy?.id, (total / 1000).toInt(), order))
         steps.filter { it.state == State.PENDING }.forEach { it.state = State.SKIPPED; it.note = when {
             cancelled -> "stopped"

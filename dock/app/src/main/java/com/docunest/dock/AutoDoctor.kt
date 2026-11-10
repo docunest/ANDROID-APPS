@@ -119,14 +119,17 @@ object AutoDoctor {
                 strongSats = GpsDoctor.strongSats,
                 driving = Sensors.driving(),
                 fixing = GpsDoctor.running,
+                skyKnown = GpsDoctor.skyKnown(),
             ),
         )
         call = c
+        DebugLog.change("AUTO", "judge", c.mode.name, "${c.why} · fix ${if (fresh) "±${f!!.accuracy.toInt()} m" else "none"} · strong ${GpsDoctor.strongSats} · sky known ${GpsDoctor.skyKnown()} · driving ${Sensors.driving()}")
         j.selfRecoveredAt?.let {
             j.selfRecoveredAt = null
             FixHistory.addDeadZone(app, it)
         }
         if (on && c.fixNow && !GpsDoctor.running && now >= nextAllowedAt) {
+            DebugLog.log("AUTO", "starting a fix run: ${c.why}")
             notify("GPS lost — auto doctor fixing", c.why, ongoing = true)
             GpsDoctor.fix(app, byAuto = true)
         }

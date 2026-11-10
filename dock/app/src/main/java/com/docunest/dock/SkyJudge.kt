@@ -44,6 +44,12 @@ class SkyJudge(private val deadZones: () -> List<Spot> = { emptyList() }) {
         val driving: Boolean?,
         /** A fix run (manual or auto) is going on now. */
         val fixing: Boolean = false,
+        /**
+         * The unit reports satellites / NMEA at all. Some head units only deliver
+         * fixes (no GnssStatus, no NMEA): then "strong satellites" and "chip
+         * talks" mean nothing and only fixes, speed, movement and time count.
+         */
+        val skyKnown: Boolean = true,
     )
 
     enum class Mode { STARTING, OK, WAITING, TUNNEL, COVERED, DEAD_ZONE, BROKEN }
@@ -85,8 +91,8 @@ class SkyJudge(private val deadZones: () -> List<Spot> = { emptyList() }) {
         val dt = if (lastT < 0) 0L else (r.t - lastT).coerceIn(0, 5_000)
         lastT = r.t
 
-        // Sky with a little hysteresis: a 1–4 s dip doesn't reset "open".
-        if (r.strongSats >= OPEN_SATS) {
+        // Sky with a little hysteresis: a 1–4 s dip doesn't reset "open". Unknown sky is never "open".
+        if (r.skyKnown && r.strongSats >= OPEN_SATS) {
             blockedSince = -1
             if (openSince < 0) openSince = r.t
         } else {
@@ -126,7 +132,7 @@ class SkyJudge(private val deadZones: () -> List<Spot> = { emptyList() }) {
         }
         offSince = -1
 
-        if (!r.chipTalks) {
+        if (r.skyKnown && !r.chipTalks) {
             if (silentSince < 0) silentSince = r.t
             if (r.t - silentSince >= SILENT_MAX_MS) return Call(Mode.BROKEN, "The GPS chip has gone silent (driver)", true, "silent")
         } else silentSince = -1

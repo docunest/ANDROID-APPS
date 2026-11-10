@@ -131,7 +131,8 @@ object ParkedPosition {
         val now = SystemClock.elapsedRealtime()
         val f = GpsDoctor.fix // real fixes only (the doctor drops mock ones)
         val realFix = f != null && now - GpsDoctor.fixAt < 5_000 && GpsDoctor.hasFix()
-        val state = if (l.state == ParkedLogic.State.DONE) l.state else l.tick(now, realFix, GpsDoctor.strongSats, Sensors.driving())
+        val state = if (l.state == ParkedLogic.State.DONE) l.state else l.tick(now, realFix, GpsDoctor.strongSats, Sensors.driving(), GpsDoctor.skyKnown())
+        DebugLog.change("PARK", "state", state.name, l.why)
         when (state) {
             ParkedLogic.State.RESTORED -> {
                 if (!mocking) mockOn()
@@ -169,9 +170,11 @@ object ParkedPosition {
         } else if (failed != null) return mockFailed(failed)
         mocking = true
         problem = ""
+        DebugLog.log("PARK", "mock location ON: ${saved(app)?.let { "%.5f, %.5f".format(java.util.Locale.US, it.lat, it.lng) }}")
     }
 
     private fun mockFailed(e: Throwable) {
+        DebugLog.log("PARK", "mock location refused: ${e.javaClass.simpleName} ${e.message}")
         mockOff()
         problem = if (e is SecurityException) "Android doesn't allow Dock to set the position: with root it's automatic; " +
             "else Developer options → Select mock location app → Dock."

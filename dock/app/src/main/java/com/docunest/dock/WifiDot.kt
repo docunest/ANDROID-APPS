@@ -48,6 +48,7 @@ object WifiDot {
     fun arc(l: Level): Ring.Arc = when (l) {
         Level.ONLINE -> Ring.FINE
         Level.OFF -> Ring.Arc(l.color, dashed = true)
+        Level.LOST -> Ring.Arc(l.color, major = true)
         else -> Ring.Arc(l.color)
     }
 }

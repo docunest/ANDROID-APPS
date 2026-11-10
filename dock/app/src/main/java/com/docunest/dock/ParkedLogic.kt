@@ -40,12 +40,23 @@ class ParkedLogic(private val hasSaved: Boolean, private val bootAt: Long = 0L) 
     private var blockedSince = -1L
     private var shownSince = -1L
 
-    /** [realFix] = a fresh fix from the real chip (never our own mock). */
-    fun tick(t: Long, realFix: Boolean, strongSats: Int, driving: Boolean?): State {
+    /**
+     * [realFix] = a fresh fix from the real chip (never our own mock). [skyKnown] false = the unit reports no
+     * satellites at all: then "no sky" can't be seen — wait [LOOK_UNKNOWN_MS] (an open-sky cold start usually
+     * fixes by then) and check the real GPS every [PROBE_EVERY_UNKNOWN_MS] for [PROBE_UNKNOWN_MS].
+     */
+    fun tick(t: Long, realFix: Boolean, strongSats: Int, driving: Boolean?, skyKnown: Boolean = true): State {
         if (startedAt < 0) startedAt = t
         if (driving == true) { if (drivingSince < 0) drivingSince = t } else drivingSince = -1
         val drove = drivingSince >= 0 && t - drivingSince >= DRIVING_MS
-        val open = strongSats >= SkyJudge.OPEN_SATS
+        val open = skyKnown && strongSats >= SkyJudge.OPEN_SATS
+        val look = if (skyKnown) LOOK_MS else LOOK_UNKNOWN_MS
+        val probeEvery = when {
+            !skyKnown -> PROBE_EVERY_UNKNOWN_MS
+            driving == null -> PROBE_EVERY_NO_SENSOR_MS
+            else -> PROBE_EVERY_MS
+        }
+        val probeFor = if (skyKnown) PROBE_MS else PROBE_UNKNOWN_MS
         if (open) blockedSince = -1 else if (blockedSince < 0) blockedSince = t
 
         val sinceBoot = t - bootAt
@@ -56,23 +67,23 @@ class ParkedLogic(private val hasSaved: Boolean, private val bootAt: Long = 0L) 
                 driving == true -> done("Van moved — real GPS only for this drive")
                 sinceBoot > RESTORE_WINDOW_MS -> done("No GPS in the first ${RESTORE_WINDOW_MS / 60_000} min after boot — real GPS only")
                 !hasSaved -> why = "No saved position yet"
-                t - startedAt >= LOOK_MS && blockedSince >= 0 && t - blockedSince >= LOOK_MS ->
-                    enter(State.RESTORED, t, "No sky (garage?) — showing where the van was parked")
+                t - startedAt >= look && blockedSince >= 0 && t - blockedSince >= look ->
+                    enter(State.RESTORED, t, if (skyKnown) "No sky (garage?) — showing where the van was parked" else "No GPS fix after ${look / 1000} s — showing where the van was parked")
                 open -> why = "Open sky — the real GPS should fix soon"
                 else -> why = "Looking at the sky…"
             }
             State.RESTORED -> when {
                 drove -> done("Van is moving — handed back to the real GPS")
                 t - shownSince > MAX_SHOWN_MS -> done("Parked position shown ${MAX_SHOWN_MS / 60_000} min — handed back to the real GPS")
-                t - enteredAt >= (if (driving == null) PROBE_EVERY_NO_SENSOR_MS else PROBE_EVERY_MS) -> enter(State.PROBING, t, "Checking the real GPS for ${PROBE_MS / 1000} s…")
-                else -> why = "Showing the parked position — real GPS check in ${((if (driving == null) PROBE_EVERY_NO_SENSOR_MS else PROBE_EVERY_MS) - (t - enteredAt)) / 1000} s or when the van moves"
+                t - enteredAt >= probeEvery -> enter(State.PROBING, t, "Checking the real GPS for ${probeFor / 1000} s…")
+                else -> why = "Showing the parked position — real GPS check in ${(probeEvery - (t - enteredAt)) / 1000} s or when the van moves"
             }
             State.PROBING -> when {
                 realFix -> done("Real GPS fix")
                 open -> done("Sky is back — the real GPS takes over")
                 drove -> done("Van is moving — handed back to the real GPS")
                 t - shownSince > MAX_SHOWN_MS -> done("Parked position shown ${MAX_SHOWN_MS / 60_000} min — handed back to the real GPS")
-                t - enteredAt >= PROBE_MS -> enter(State.RESTORED, t, "Still no sky — showing the parked position again")
+                t - enteredAt >= probeFor -> enter(State.RESTORED, t, "Still no sky — showing the parked position again")
             }
             State.DONE -> Unit
         }
@@ -101,6 +112,9 @@ class ParkedLogic(private val hasSaved: Boolean, private val bootAt: Long = 0L) 
 
     companion object {
         const val LOOK_MS = 12_000L
+        const val LOOK_UNKNOWN_MS = 45_000L
+        const val PROBE_EVERY_UNKNOWN_MS = 2 * 60_000L
+        const val PROBE_UNKNOWN_MS = 45_000L
         const val DRIVING_MS = 8_000L
         const val PROBE_EVERY_MS = 4 * 60_000L
         const val PROBE_EVERY_NO_SENSOR_MS = 60_000L

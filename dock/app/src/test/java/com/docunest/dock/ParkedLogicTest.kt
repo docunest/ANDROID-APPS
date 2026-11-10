@@ -14,8 +14,8 @@ class ParkedLogicTest {
     private class Sim(hasSaved: Boolean = true, startAt: Long = 40_000L) {
         val l = ParkedLogic(hasSaved, bootAt = 0L)
         var t = startAt
-        fun run(seconds: Int, strong: Int, fix: Boolean = false, driving: Boolean? = false): List<State> =
-            List(seconds) { l.tick(t, fix, strong, driving).also { t += 1000 } }
+        fun run(seconds: Int, strong: Int, fix: Boolean = false, driving: Boolean? = false, skyKnown: Boolean = true): List<State> =
+            List(seconds) { l.tick(t, fix, strong, driving, skyKnown).also { t += 1000 } }
     }
 
     @Test fun garageStartShowsParkedPositionAfter12s() {
@@ -122,6 +122,16 @@ class ParkedLogicTest {
         val last = states.lastIndexOf(State.RESTORED)
         assertTrue("last shown at $last s", last in 20 * 60 - 60..20 * 60 + 13)
         assertEquals(State.DONE, states.last())
+    }
+
+    @Test fun unitWithoutSatelliteReportsWaits45sSoAnOpenSkyColdStartFixesFirst() {
+        val s = Sim()
+        val states = s.run(60, strong = 0, skyKnown = false)
+        assertEquals(State.WATCHING, states[44])
+        assertEquals(State.RESTORED, states[45])
+        val open = Sim()
+        open.run(35, strong = 0, skyKnown = false)
+        assertEquals(State.DONE, open.run(1, strong = 0, fix = true, skyKnown = false).last()) // real fix at 35 s: never mocked
     }
 
     @Test fun usingItNowWorksEvenAfterDone() { // the button; the screen refuses it while driving

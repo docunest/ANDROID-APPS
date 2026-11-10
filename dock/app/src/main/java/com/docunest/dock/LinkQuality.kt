@@ -7,17 +7,38 @@ package com.docunest.dock
  *
  *   great ≤ 50 ms and < 10 % lost · ok ≤ 150 ms and < 20 % · poor ≤ 400 ms
  *   and < 40 % · bad otherwise · unknown with fewer than 3 pings.
+ *
+ * Self-adjusting: the ms limits grow with this link's own normal round trip
+ * ([baseline], median of the last ~10 min of answers) — great ≤ 2.5×, ok ≤ 5×,
+ * poor ≤ 10× baseline, never below the fixed limits above. A link that is
+ * always 80 ms is normal for it, not "ok"; a jump from 8 to 120 ms is.
  */
-class LinkQuality(private val window: Int = WINDOW) {
+class LinkQuality(private val window: Int = WINDOW, private val longWindow: Int = LONG_WINDOW) {
     enum class Level(val label: String) { UNKNOWN("measuring"), GREAT("great"), OK("ok"), POOR("poor — may drop"), BAD("bad — about to drop") }
 
     private val samples = ArrayDeque<Int?>()
+    /** Answers over a longer time, for this link's normal round trip. Kept across drops (same hotspot, same normal). */
+    private val history = ArrayDeque<Int>()
 
     /** One ping: round trip in ms, or null = no answer. */
     @Synchronized
     fun add(ms: Int?) {
         samples.addLast(ms)
         while (samples.size > window) samples.removeFirst()
+        if (ms != null) {
+            history.addLast(ms)
+            while (history.size > longWindow) history.removeFirst()
+        }
+    }
+
+    /** Median answer of the last ~10 min (null until 20 answers). */
+    @Synchronized
+    fun baseline(): Int? = if (history.size < 20) null else history.sorted()[history.size / 2]
+
+    /** The ms limits in use now: great, ok, poor. */
+    fun limits(): Triple<Int, Int, Int> {
+        val b = baseline() ?: 0
+        return Triple(maxOf(50, (b * 2.5).toInt()), maxOf(150, b * 5), maxOf(400, b * 10))
     }
 
     @Synchronized
@@ -37,10 +58,11 @@ class LinkQuality(private val window: Int = WINDOW) {
         if (count() < 3) return Level.UNKNOWN
         val avg = avgMs() ?: return Level.BAD
         val loss = loss()
+        val (great, ok, poor) = limits()
         return when {
-            avg <= 50 && loss < 0.10f -> Level.GREAT
-            avg <= 150 && loss < 0.20f -> Level.OK
-            avg <= 400 && loss < 0.40f -> Level.POOR
+            avg <= great && loss < 0.10f -> Level.GREAT
+            avg <= ok && loss < 0.20f -> Level.OK
+            avg <= poor && loss < 0.40f -> Level.POOR
             else -> Level.BAD
         }
     }
@@ -49,11 +71,14 @@ class LinkQuality(private val window: Int = WINDOW) {
     fun text(): String {
         if (count() == 0) return "—"
         val avg = avgMs()?.let { "$it ms avg" } ?: "no answers"
-        return "$avg · ${(loss() * 100).toInt()} % lost · ${level().label}"
+        val (great, ok, _) = limits()
+        return "$avg · ${(loss() * 100).toInt()} % lost · ${level().label}" +
+            (baseline()?.let { " (normal here $it ms → great ≤ $great, ok ≤ $ok)" } ?: "")
     }
 
     companion object {
         const val WINDOW = 15
+        const val LONG_WINDOW = 300
         const val WEAK_RSSI = -75
 
         /**

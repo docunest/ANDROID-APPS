@@ -94,6 +94,10 @@ class WifiDoctorActivity : Activity() {
             runCatching { startActivity(Intent(panel)) }.onFailure { runCatching { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) } }
         }, LinearLayout.LayoutParams(0, dp(60), 1f))
         left.addView(buttons)
+        left.addView(space(8))
+        left.addView(bigButton("🐞 Debug log", Palette.CARD_HI, 14f) {
+            startActivity(Intent(this, DebugActivity::class.java).putExtra(DebugActivity.EXTRA_TAG, "WIFI"))
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
         left.addView(space(6))
         left.addView(toggle("Reconnect by itself (root: forces a rejoin, clears Android's no-internet block, restarts Wi-Fi if needed)", WifiDoctor.autoFix) { WifiDoctor.autoFix = it })
         left.addView(toggle("Bluetooth kick: no hotspot visible but the iPhone is on the car's Bluetooth → Bluetooth off/on, so the iPhone's automation switches its hotspot on (never during a call)", WifiDoctor.btKick) { WifiDoctor.btKick = it })

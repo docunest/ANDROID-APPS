@@ -79,6 +79,7 @@ class DockService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        DebugLog.init(this)
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
         prefs = Prefs(this)
         Sync.init(this)
@@ -103,6 +104,7 @@ class DockService : Service() {
             Updater.checkSoon(this, force = true)
             main.postDelayed(updateLoop, Updater.EVERY_MS)
             main.post(locationLoop)
+            FixHistory.resetBrokenStatsOnce(this)
             GpsWatch.start(this)
             ParkedPosition.start(this)
             AutoDoctor.start(this)
@@ -143,12 +145,25 @@ class DockService : Service() {
             .setContentIntent(open)
             .setOngoing(true)
             .build()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(NOTIFICATION_ID, n)
-        }
+        // Location type only once location is allowed (Android 14+ refuses it otherwise).
+        val loc = Locator.hasPermission(this)
+        val ok = runCatching {
+            when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> startForeground(
+                    NOTIFICATION_ID, n,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or (if (loc) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0),
+                )
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && loc -> startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+                else -> startForeground(NOTIFICATION_ID, n)
+            }
+        }.onFailure { startForeground(NOTIFICATION_ID, n) }.isSuccess
+        locationService = loc && ok
+        DebugLog.log("APP", "foreground service: " + (if (locationService) "location ✓ (GPS keeps coming while Waze is in front)" else "no location type — location not allowed yet") +
+            " · background location " + (if (checkSelfPermission(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED) "granted" else "NOT granted"))
     }
+
+    /** The service runs as a location service (fixes reach us while another app is in front). */
+    private var locationService = false
 
     private fun registerWakeups() {
         registerReceiver(wakeReceiver, IntentFilter().apply {
@@ -291,25 +306,61 @@ class DockService : Service() {
     private fun refreshRing() {
         val b = bubble ?: return
         GpsWatch.start(this) // idempotent: may not have started if location was granted after the dock
+        if (!locationService && Locator.hasPermission(this)) startInForeground() // granted since: become a location service
+        val t = android.os.SystemClock.elapsedRealtime()
         val g = gpsLevel()
         val w = wifiLevel()
-        b.gpsArc = if (prefs.gpsDot) GpsDot.arc(g) else Ring.FINE
-        b.wifiArc = if (prefs.wifiDot) WifiDot.arc(w) else Ring.FINE
+        b.gpsArc = gpsDebounce.update(t, if (prefs.gpsDot) GpsDot.arc(g) else Ring.FINE)
+        b.wifiArc = wifiDebounce.update(t, if (prefs.wifiDot) WifiDot.arc(w) else Ring.FINE)
         b.contentDescription = "Dock · GPS ${g.label} · Wi-Fi ${w.label}"
+        DebugLog.change("RING", "gps", if (b.gpsArc.fine) "white" else g.name, gpsInputs)
+        DebugLog.change("RING", "wifi", if (b.wifiArc.fine) "white" else w.name,
+            "connected ${WifiDoctor.connected} ${WifiDoctor.ssid ?: ""} · internet ${WifiDoctor.internet} · link ${WifiDoctor.link.text()} via ${WifiDoctor.rttMethod} · rssi ${WifiDoctor.rssi}")
+        // Raw levels (before the 8 s debounce) too: blips show here even when the ring stays white.
+        DebugLog.change("GPS", "level", g.name, gpsInputs)
+        DebugLog.change("WIFI", "level", w.name)
+        DebugLog.status["Ring now"] = "GPS ${g.name} (${g.label}) shown ${if (b.gpsArc.fine) "white" else "as warning"} · Wi-Fi ${w.name} (${w.label}) shown ${if (b.wifiArc.fine) "white" else "as warning"}"
+        DebugLog.status["Wi-Fi"] = "connected ${WifiDoctor.connected} ${WifiDoctor.ssid ?: ""} · rssi ${WifiDoctor.rssi} · internet ${WifiDoctor.internet} · link ${WifiDoctor.link.text()} via ${WifiDoctor.rttMethod}"
+        DebugLog.status["Service"] = "location service $locationService · background location " +
+            (checkSelfPermission(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED) +
+            " · root GPS ${GpsDoctor.hasRoot} / Wi-Fi ${WifiDoctor.hasRoot} · auto ${AutoDoctor.call?.mode} · parked ${ParkedPosition.logic?.state}"
+        if (t - lastUploadTry > 120_000) {
+            lastUploadTry = t
+            uploader.execute { runCatching { DebugLog.uploadNow(this) } }
+        }
+        if (t - lastSnapshot > 60_000) {
+            lastSnapshot = t
+            DebugLog.log("SNAP", "gps ${g.name} [$gpsInputs] · wifi ${w.name} · ${WifiDoctor.link.text()} · auto ${AutoDoctor.call?.mode} · parked ${ParkedPosition.logic?.state}")
+        }
     }
+
+    private val gpsDebounce = Ring.Debounce()
+    private val wifiDebounce = Ring.Debounce()
+    private var lastSnapshot = 0L
+    private var lastUploadTry = 0L
+    private val uploader = java.util.concurrent.Executors.newSingleThreadExecutor()
+    /** What the last GPS level was computed from — for the debug log. */
+    private var gpsInputs = ""
 
     /** Freshest real fix from the background listener, the GPS doctor's own listener, or Android's last known. */
     @android.annotation.SuppressLint("MissingPermission")
     private fun freshestFix(now: Long): Pair<Long, Float?>? {
         val cands = mutableListOf<Pair<Long, Float?>>()
-        if (GpsWatch.lastFixAt > 0) cands += GpsWatch.lastFixAt to GpsWatch.lastAccuracy
-        GpsDoctor.fix?.takeIf { GpsDoctor.fixAt > 0 }?.let { cands += GpsDoctor.fixAt to (if (it.hasAccuracy()) it.accuracy else null) }
+        val parts = mutableListOf<String>()
+        fun note(name: String, at: Long, acc: Float?) {
+            cands += at to acc
+            parts += "$name ${(now - at) / 1000}s/±${acc?.toInt() ?: "?"}"
+        }
+        if (GpsWatch.lastFixAt > 0) note("watch", GpsWatch.lastFixAt, GpsWatch.lastAccuracy) else parts += "watch —"
+        GpsDoctor.fix?.takeIf { GpsDoctor.fixAt > 0 }?.let { note("doctor", GpsDoctor.fixAt, if (it.hasAccuracy()) it.accuracy else null) } ?: run { parts += "doctor —" }
         if (Locator.hasPermission(this)) runCatching {
             val lm = getSystemService(LOCATION_SERVICE) as android.location.LocationManager
             lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)?.takeIf { !it.isMockFix() }?.let {
-                cands += (now - (android.os.SystemClock.elapsedRealtimeNanos() - it.elapsedRealtimeNanos) / 1_000_000) to (if (it.hasAccuracy()) it.accuracy else null)
-            }
+                note("system", now - (android.os.SystemClock.elapsedRealtimeNanos() - it.elapsedRealtimeNanos) / 1_000_000, if (it.hasAccuracy()) it.accuracy else null)
+            } ?: run { parts += "system —" }
         }
+        gpsInputs = parts.joinToString(" · ") + " · listening ${GpsDoctor.isWatching} · location service $locationService · sky known ${GpsDoctor.skyKnown()}"
+        DebugLog.status["GPS fix sources"] = gpsInputs
         return cands.maxByOrNull { it.first }
     }
 
