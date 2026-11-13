@@ -14,7 +14,9 @@ class LinkQualityTest {
         assertEquals(Level.GREAT, q(20, 30, 45, 25).level())
         assertEquals(Level.OK, q(80, 120, 60, 90).level())
         assertEquals(Level.POOR, q(300, 250, 380, 200).level())
-        assertEquals(Level.BAD, q(900, 700, 1200).level())
+        assertEquals(Level.POOR, q(411, 380, 420, 400).level()) // iPhone power save: slow but nothing lost
+        assertEquals(Level.BAD, q(900, 1700, 1200).level())
+        assertEquals(Level.BAD, q(30, null, null, 30, null).level()) // 60 % lost
         assertEquals(Level.BAD, q(null, null, null).level())
     }
 
@@ -37,6 +39,11 @@ class LinkQualityTest {
         repeat(40) { slow.add(80) }
         assertEquals(80, slow.baseline())
         assertEquals(Level.GREAT, slow.level())
+        // The live log: normal ~30 ms, then a slow spell — the reference must not drift up with it.
+        val live = LinkQuality()
+        repeat(200) { live.add(30) }
+        repeat(60) { live.add(130) }
+        assertEquals(30, live.baseline())
         // A fast hotspot (~8 ms) jumping to 120 ms: still within the fixed floors (ok), never "great"-inflated.
         val fast = LinkQuality()
         repeat(40) { fast.add(8) }

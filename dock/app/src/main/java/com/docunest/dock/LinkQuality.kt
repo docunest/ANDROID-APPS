@@ -31,9 +31,12 @@ class LinkQuality(private val window: Int = WINDOW, private val longWindow: Int 
         }
     }
 
-    /** Median answer of the last ~10 min (null until 20 answers). */
+    /**
+     * This link's normal round trip: the 30th percentile of the last ~10 min of answers (null until 20).
+     * Not the median: in a slow spell the median drifts up with it (seen live: 29 → 54 ms) and hides the spell.
+     */
     @Synchronized
-    fun baseline(): Int? = if (history.size < 20) null else history.sorted()[history.size / 2]
+    fun baseline(): Int? = if (history.size < 20) null else history.sorted()[history.size * 3 / 10]
 
     /** The ms limits in use now: great, ok, poor. */
     fun limits(): Triple<Int, Int, Int> {
@@ -58,11 +61,13 @@ class LinkQuality(private val window: Int = WINDOW, private val longWindow: Int 
         if (count() < 3) return Level.UNKNOWN
         val avg = avgMs() ?: return Level.BAD
         val loss = loss()
-        val (great, ok, poor) = limits()
+        val (great, ok, _) = limits()
+        // Slow answers alone are only "poor": an iPhone hotspot in power save answers in 300–400 ms with the
+        // internet working fine (seen live 2026-11-13). "Bad" needs real loss, or answers over 1 s.
         return when {
             avg <= great && loss < 0.10f -> Level.GREAT
             avg <= ok && loss < 0.20f -> Level.OK
-            avg <= poor && loss < 0.40f -> Level.POOR
+            loss < 0.40f && avg <= 1000 -> Level.POOR
             else -> Level.BAD
         }
     }
