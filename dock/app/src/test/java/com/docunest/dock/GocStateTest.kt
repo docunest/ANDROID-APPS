@@ -34,6 +34,20 @@ class GocStateTest {
         assertEquals(true, s.a2dp)
     }
 
+    @Test fun realLiveLineFormat() {
+        // Exactly as uploaded from the head unit on 2026-11-13.
+        val s = GocState()
+        s.feed(0, "1794583687.824 20738 20748 E goc     : send_ind: [IB84D328D8B613] serial")
+        s.feed(1, "1794583690.100 20738 20748 E goc     : send_ind: [SALukas’s iPhone] serial")
+        s.feed(2, "1794583695.391 20738 20748 E goc     : send_ind: [MU2] serial")
+        assertEquals("Lukas’s iPhone", s.name)
+        assertEquals("84D328D8B613", s.mac)
+        assertTrue(s.phoneConnected)
+        assertEquals(true, s.a2dp)
+        s.feed(3, "1794583700.000 20738 20748 E goc     : send_ind: [MX184D328D8B613Lukas’s iPhone] serial")
+        assertEquals("Lukas’s iPhone", s.name)
+    }
+
     @Test fun callStates() {
         val s = GocState()
         s.feed(0, "goc: send_ind: [MG3]")

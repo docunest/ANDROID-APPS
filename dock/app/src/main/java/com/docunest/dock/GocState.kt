@@ -44,8 +44,9 @@ class GocState {
         Regex("\\bIA([0-9A-Fa-f]{12})").find(line)?.let { hfp = 1; a2dp = false }
         if (line.contains("onHfpConnected")) hfp = maxOf(hfp, 3)
         if (line.contains("onHfpDisconnected")) hfp = 1
-        Regex("\\bSA(.+?)\\]?$").find(line.trim())?.let { name = it.groupValues[1].trim().takeIf { n -> n.isNotEmpty() } ?: name }
-        Regex("\\bMX[01]([0-9A-Fa-f]{12})(.*?)\\]?$").find(line.trim())?.let {
+        // The live log wraps replies as "send_ind: [SALukas’s iPhone] serial": take what's inside the brackets.
+        Regex("\\bSA([^\\]]+)").find(line)?.let { name = it.groupValues[1].trim().takeIf { n -> n.isNotEmpty() } ?: name }
+        Regex("\\bMX[01]([0-9A-Fa-f]{12})([^\\]]*)").find(line)?.let {
             if (mac == null) mac = it.groupValues[1].uppercase()
             if (name == null) name = it.groupValues[2].trim().takeIf { n -> n.isNotEmpty() }
         }
