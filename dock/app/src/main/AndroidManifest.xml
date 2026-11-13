@@ -19,6 +19,9 @@
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- KSW unit: follow the Goodocom Bluetooth module's log (granted through the unit's own adb). -->
+    <uses-permission android:name="android.permission.READ_LOGS"
+        tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <!-- The floating button, fan menu and new-link card are overlays. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />

@@ -79,6 +79,13 @@ adb tcpip 5555
 ```
 Then, the first time the dock connects, the head unit asks **"Allow USB debugging?"** — tick *Always allow from this computer* and tap Allow. After that it's silent, also after reboots. Anyone on the same Wi-Fi would also need that tap to get in.
 
+## KSW head unit specifics (verified over ADB, 2026-11-13)
+
+KSW-Q userdebug v4.2.9 (BMW NBT/EVO UI), Android 10, Snapdragon msm8953, SELinux permissive.
+
+- **Phone Bluetooth is an external Goodocom module, not Android's Bluetooth** (Android's stack is off). The dock follows the module's log (tags `goc` / `GocsdkCallbackImp`; READ_LOGS granted via the unit's adb, polled through root until the dock restarts) and drives it by writing `AT#<CMD>\r\n` to `/dev/goc_serial` — **never reads it** (the stock `com.wits.ksw.bt` app does; a second reader breaks it). Bluetooth kick = `AT#CD`, 3 s, `AT#CC<mac>` (reconnects HFP ~7 s, audio ~14 s) — the iPhone's automation fires on both. Calls: module call states + `Settings.System isCalling`. `GocState.kt` (tested with the live lines), `GocBt.kt`.
+- **Wi-Fi always prefers the iPhone hotspot** (`Lukas’s iPhone`, curly apostrophe; owner's rule, no toggle): on any other network (Starlink) the Wi-Fi doctor scans every 6 s and switches the moment the iPhone is visible (≥ −85 dBm); another iPhone hotspot also beats Starlink. Retries every 20 s, every 60 s after 3 tries. `WifiPrefer` in `GocState.kt`, tested.
+
 ## First install (once)
 
 1. GitHub → **Releases** → newest `dock-vN` → download `dock.apk` (or Actions → "Dock APK" → artifact).

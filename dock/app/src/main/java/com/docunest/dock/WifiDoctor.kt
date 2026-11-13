@@ -296,16 +296,20 @@ object WifiDoctor {
             }
         }
 
+        val lastSsid = lastConnectedSsid
+        if (connected) lastConnectedSsid = ssid
         DebugLog.change("WIFI", "connection", if (!enabled) "OFF" else if (connected) "connected ${ssid ?: "?"}" else "DOWN",
             "rssi $rssi · ours visible ${oursVisible.keys} · bt ${BtKick.phoneConnected()} ${BtKick.phone ?: ""}")
         when {
             connected && !wasConnected -> back()
+            connected && wasConnected && ssid != lastSsid && lastSsid != null -> DebugLog.log("WIFI", "switched network: $lastSsid → $ssid")
             !connected && wasConnected -> lost()
             !connected && downSince == 0L -> downSince = now() // started while down
         }
 
         BtKick.judge(oursSeenAt, connected)
         if (connected) {
+            preferIPhone(wm)
             synchronized(plan) { plan.next(WifiPlan.Input(now(), true, false, false, null, -1, false, enabled)) } // resets the plan
             val probeDue = internet != true || now() - lastProbeAt > PROBE_EVERY_MS
             gatewayPingMs = link.avgMs() // the 2 s pinger keeps this current
@@ -328,6 +332,44 @@ object WifiDoctor {
             notifyLost()
         }
         changed()
+    }
+
+    private var lastConnectedSsid: String? = null
+    private var lastPreferScan = 0L
+    private var lastPreferSwitch = 0L
+    private var preferTries = 0
+
+    /**
+     * Owner's rule, no exceptions, no toggle: on any network but the iPhone hotspot (Starlink…), scan every
+     * 6 s and switch to the iPhone the moment it's visible ([WifiPrefer]). Retries every 20 s, every 60 s
+     * after 3 tries that didn't stick. Uses the root join ([RootWifi] "enable": user-connect, others off).
+     */
+    private fun preferIPhone(wm: WifiManager) {
+        val current = ssid
+        if (WifiPrefer.rank(current) >= 3) {
+            preferTries = 0
+            return
+        }
+        if (now() - lastPreferScan > 6_000) {
+            lastPreferScan = now()
+            @Suppress("DEPRECATION") runCatching { wm.startScan() }
+        }
+        val visible = if (now() - oursSeenAt < VISIBLE_MS) oursVisible else emptyMap()
+        val to = WifiPrefer.switchTo(current, visible) ?: return
+        val gap = if (preferTries < 3) 20_000L else 60_000L
+        if (now() - lastPreferSwitch < gap || hasRoot != true) {
+            if (hasRoot != true) DebugLog.change("WIFI", "prefer", "$to visible but no root to switch from $current")
+            return
+        }
+        lastPreferSwitch = now()
+        preferTries++
+        DebugLog.log("WIFI", "prefer: on $current but $to is visible (${visible[to]} dBm) — switching (try $preferTries)")
+        lastAction = "Switching to $to (preferred over $current)"
+        actions.post {
+            val r = rootWifi("enable", to)
+            DebugLog.log("WIFI", "prefer: switch to $to → ${r ?: "root refused"}")
+            refreshNow()
+        }
     }
 
     /** Internet check result (worker thread). */
@@ -530,7 +572,8 @@ object WifiDoctor {
     @SuppressLint("MissingPermission")
     private fun readScan() {
         val wm = app.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        val results = runCatching { wm.scanResults }.getOrNull().orEmpty()
+        // Fresh results only (ScanResult.timestamp is µs since boot): cached ones from minutes ago don't count.
+        val results = runCatching { wm.scanResults }.getOrNull().orEmpty().filter { now() - it.timestamp / 1000 < 15_000 }
         // Any of ours (scan results only arrive with location on — Android 10).
         val mine = results.filter { it.SSID in ours }
             .groupBy { it.SSID }.mapValues { (_, l) -> l.maxOf { it.level } }

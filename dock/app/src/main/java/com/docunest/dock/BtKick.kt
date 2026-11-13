@@ -64,6 +64,7 @@ object BtKick {
         if (started) return
         started = true
         app = context.applicationContext
+        GocBt.start(app) // KSW unit: the phone is on the external Goodocom module, not Android's Bluetooth
         runCatching {
             app.registerReceiver(object : BroadcastReceiver() {
                 override fun onReceive(c: Context, i: Intent) {
@@ -101,6 +102,15 @@ object BtKick {
     @SuppressLint("MissingPermission")
     fun refresh() {
         if (!::app.isInitialized) return
+        if (GocBt.present()) {
+            // The module's own state (from its log) is the truth on this unit.
+            usable = true
+            val st = GocBt.state
+            phone = if (st.phoneConnected) (st.name ?: "phone") else null
+            since = if (st.phoneConnected) st.connectedAt else -1
+            DebugLog.change("BT", "phone", if (st.hfp == 0) "module: state not read yet (${GocBt.status})" else phone ?: "none (module idle)")
+            return
+        }
         val adapter = (app.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
         if (adapter == null) {
             usable = false; phone = null; since = -1
@@ -138,6 +148,11 @@ object BtKick {
     /** Everything Android's Bluetooth shows, plus vendor Bluetooth apps (a separate module) — for the debug log. */
     @SuppressLint("MissingPermission")
     fun report(): String {
+        if (GocBt.present()) {
+            val st = GocBt.state
+            return "Bluetooth module (Goodocom, ${GocBt.SERIAL}): ${GocBt.status} · phone ${if (st.phoneConnected) "connected" else "not connected"} " +
+                "${st.name ?: ""} ${st.mac ?: ""} · hfp ${st.hfp} · audio ${st.a2dp} · call ${st.inCall} · Android's own Bluetooth not used on this unit"
+        }
         val adapter = (app.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
             ?: return "Android Bluetooth: no adapter at all — the car's Bluetooth is a separate module. Vendor apps: ${vendorApps()}"
         val lines = mutableListOf("Android Bluetooth: ${if (runCatching { adapter.isEnabled }.getOrDefault(false)) "on" else "OFF"} · name ${runCatching { adapter.name }.getOrNull()}")
@@ -174,6 +189,7 @@ object BtKick {
 
     /** A call on the car's speakerphone: don't touch Bluetooth. */
     fun inCall(context: Context): Boolean {
+        if (GocBt.present() && GocBt.inCall(context)) return true
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         @Suppress("DEPRECATION")
         return am.mode == AudioManager.MODE_IN_CALL || am.mode == AudioManager.MODE_IN_COMMUNICATION ||
@@ -187,6 +203,7 @@ object BtKick {
     @SuppressLint("MissingPermission")
     private fun doKick(): String {
         pendingAt = SystemClock.elapsedRealtime()
+        if (GocBt.present()) return GocBt.kick()
         if (Root.run("svc bluetooth disable", "sleep 2", "svc bluetooth enable")) return "Bluetooth off/on (root)"
         val adapter = (app.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter ?: return "no Bluetooth"
         @Suppress("DEPRECATION")
