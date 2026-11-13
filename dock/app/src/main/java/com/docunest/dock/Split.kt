@@ -66,17 +66,69 @@ object Split {
             return
         }
         val method = Prefs(context).splitMethod
-        val ok = when (method) {
-            A11Y -> viaA11y(context, intent)
-            ROOT -> viaRoot(context, uri)
-            ADJACENT -> adjacent(context, intent)
-            else -> viaA11y(context, intent) || viaRoot(context, uri) || adjacent(context, intent)
+        // Each method is checked against the real window state afterwards: "it ran" isn't "it split".
+        val tries: List<Pair<String, () -> Boolean>> = when (method) {
+            A11Y -> listOf("a11y" to { viaA11y(context, intent) })
+            ROOT -> listOf("root-task" to { viaRootTask(context, intent) }, "root-am" to { viaRoot(context, uri) })
+            ADJACENT -> listOf("adjacent" to { splitNow(context) == true && adjacent(context, intent) })
+            else -> listOf(
+                "already split" to { splitNow(context) == true && adjacent(context, intent) },
+                "root-task" to { viaRootTask(context, intent) },
+                "root-am" to { viaRoot(context, uri) },
+                "a11y" to { viaA11y(context, intent) },
+            )
         }
-        if (!ok) {
-            // Never full screen over Waze.
-            toast(context, "Split screen didn't start (method: $method), so Google Maps wasn't opened. " +
-                "Put Waze in split screen by hand (recent apps → Waze icon → Split screen), then try again.")
+        for ((name, attempt) in tries) {
+            val did = runCatching { attempt() }.getOrElse { DebugLog.log("SPLIT", "$name threw ${it.javaClass.simpleName}: ${it.message}"); false }
+            if (!did) {
+                DebugLog.log("SPLIT", "$name: didn't run")
+                continue
+            }
+            Thread.sleep(1500)
+            val state = windowModes()
+            val ok = state?.let { SplitState.mapsBesideWaze(it) } ?: SplitService.instance?.inSplit()
+            DebugLog.log("SPLIT", "$name: ${if (ok == true) "✓ Maps beside Waze" else "✗ not split"} — ${state?.let { SplitState.describe(it) } ?: "no root to check (divider ${SplitService.instance?.inSplit()})"}")
+            if (ok == true) return
+            if (ok == null) return // can't check (no root, no accessibility): trust it
         }
+        // Never leave Google Maps full screen over Waze.
+        val state = windowModes()
+        if (state?.entries?.firstOrNull { it.key.startsWith(Apps.GMAPS) }?.value == "fullscreen") {
+            context.packageManager.getLaunchIntentForPackage(Apps.WAZE)?.let { w ->
+                main.post { runCatching { context.startActivity(w.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }
+            }
+        }
+        DebugLog.log("SPLIT", "all methods failed ($method) — Waze brought back")
+        toast(context, "Split screen didn't start (method: $method), so Google Maps wasn't left over Waze. " +
+            "Put Waze in split screen by hand (recent apps → Waze icon → Split screen), then try again.")
+    }
+
+    /** Waze / Maps windowing modes via root dumpsys (null without root). */
+    private fun windowModes(): Map<String, String>? =
+        Root.output("dumpsys activity activities | grep -E 'Stack #|TaskRecord'")?.let { SplitState.parse(it) }
+
+    /** Split screen is on with Waze in it (null = can't tell). */
+    private fun splitNow(context: Context): Boolean? =
+        windowModes()?.entries?.firstOrNull { it.key.startsWith(Apps.WAZE) }?.value?.startsWith("split-screen")
+            ?: SplitService.instance?.inSplit()
+
+    /**
+     * Root: put Waze's own task into the split primary half (what System UI does by hand — [RootSplit] via
+     * app_process through the unit's adb), then open Maps adjacent, i.e. in the other half.
+     */
+    private fun viaRootTask(context: Context, intent: Intent): Boolean {
+        val apk = context.applicationInfo.sourceDir
+        var r = Root.output("CLASSPATH=$apk app_process /system/bin ${RootSplit::class.java.name} primary ${Apps.WAZE}")?.trim()?.lines()?.lastOrNull()
+        if (r?.startsWith("missing") == true) {
+            // Waze isn't running: start it, then split it.
+            context.packageManager.getLaunchIntentForPackage(Apps.WAZE)?.let { w -> onMain { runCatching { context.startActivity(w.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } } }
+            Thread.sleep(2500)
+            r = Root.output("CLASSPATH=$apk app_process /system/bin ${RootSplit::class.java.name} primary ${Apps.WAZE}")?.trim()?.lines()?.lastOrNull()
+        }
+        DebugLog.log("SPLIT", "root-task: Waze → primary half: ${r ?: "root refused"}")
+        if (r?.startsWith("ok") != true) return false
+        Thread.sleep(800)
+        return adjacent(context, intent)
     }
 
     private fun viaA11y(context: Context, intent: Intent): Boolean {
@@ -90,7 +142,12 @@ object Split {
             var toggled = false
             onMain { toggled = svc.toggleSplit() }
             if (!toggled) return false
-            Thread.sleep(900) // let Waze settle into its half
+            Thread.sleep(1200) // let Waze settle into its half
+            // Some firmwares accept the toggle and do nothing: opening "adjacent" then means full screen.
+            if (!svc.inSplit()) {
+                DebugLog.log("SPLIT", "a11y: toggle pressed but no split divider appeared")
+                return false
+            }
         }
         return adjacent(context, intent)
     }

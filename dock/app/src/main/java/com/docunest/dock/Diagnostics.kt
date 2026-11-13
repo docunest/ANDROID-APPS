@@ -32,6 +32,8 @@ object Diagnostics {
         "can devices" to "ls /dev | grep -iE 'tty|can|mcu'",
         "speed broadcasts" to "dumpsys activity broadcasts | grep -iE 'speed|canbus|can_|vehicle|mcu' | sort | uniq -c | sort -rn | head -40",
         "sensors" to "dumpsys sensorservice | head -40",
+        "split screen" to "dumpsys activity activities | grep -E 'Stack #|TaskRecord' | head -20; getprop | grep -iE 'multiwindow|freeform|split'; " +
+            "settings get global force_resizable_activities; settings get global enable_freeform_support; dumpsys package com.waze | grep -iE 'resizeMode|resizeable' | head -3",
     )
 
     fun runAsync(context: Context) {
