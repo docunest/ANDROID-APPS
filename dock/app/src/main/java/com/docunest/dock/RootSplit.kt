@@ -9,7 +9,8 @@ import android.app.ActivityManager
  * System UI does when you split by hand. Then anything launched "adjacent"
  * lands in the other half.
  *
- *   primary <package>   prints "ok <taskId> <result>" or the problem
+ *   primary <package> [left|right]   prints "ok <taskId> <result>" or the problem
+ *   (left/top = SPLIT_SCREEN_CREATE_MODE_TOP_OR_LEFT 0, right/bottom = BOTTOM_OR_RIGHT 1)
  */
 object RootSplit {
     @JvmStatic
@@ -20,6 +21,7 @@ object RootSplit {
     private fun run(args: Array<String>): String {
         if (args.getOrNull(0) != "primary") return "error usage: primary <package>"
         val pkg = args.getOrNull(1) ?: return "error no package"
+        val createMode = if (args.getOrNull(2) == "right") 1 else 0
         val atm = Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null)!!
         val getTasks = atm.javaClass.methods.first { it.name == "getTasks" && it.parameterTypes.size == 1 }
         @Suppress("UNCHECKED_CAST")
@@ -30,8 +32,8 @@ object RootSplit {
         val m = atm.javaClass.methods.first { it.name == "setTaskWindowingModeSplitScreenPrimary" }
         // (taskId, createMode = TOP_OR_LEFT, toTop, animate, initialBounds, showRecents)
         val r = when (m.parameterTypes.size) {
-            6 -> m.invoke(atm, id, 0, true, false, null, false)
-            5 -> m.invoke(atm, id, 0, true, false, null)
+            6 -> m.invoke(atm, id, createMode, true, false, null, false)
+            5 -> m.invoke(atm, id, createMode, true, false, null)
             else -> return "error unexpected signature (${m.parameterTypes.size} params)"
         }
         return "ok $id $r"

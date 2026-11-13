@@ -106,6 +106,7 @@ class SettingsActivity : Activity() {
         slider("Places in press-and-slide", prefs.fanLinks, 0, 8, "") { prefs.fanLinks = it }
 
         section("Split screen (Google Maps beside Waze)")
+        switch("Waze on the right, Google Maps on the left", prefs.wazeOnRight) { prefs.wazeOnRight = it }
         col.addView(label(
             "Used by: slide menu → Google Maps, 🔎 Nearby, and Preview on a new place. " +
                 "Helper: ${if (SplitService.instance != null) "on ✓" else "off ✗"}. Method now: ${prefs.splitMethod}.",

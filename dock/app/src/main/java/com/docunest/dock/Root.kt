@@ -41,6 +41,10 @@ object Root {
         }.getOrDefault(false)
         else AdbShell.run(*commands)
 
+    /** [run] for slow commands (pm install): the adb route gets [timeoutMs] instead of 30 s. */
+    fun runLong(timeoutMs: Int, vararg commands: String): Boolean =
+        if (suUsable()) run(*commands) else AdbShell.output(*commands, timeoutMs = timeoutMs) != null
+
     /** Like [run], but returns what the commands printed (null if refused / failed). */
     fun output(vararg commands: String): String? =
         if (suUsable()) runCatching {

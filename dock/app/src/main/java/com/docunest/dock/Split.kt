@@ -118,14 +118,14 @@ object Split {
      */
     private fun viaRootTask(context: Context, intent: Intent): Boolean {
         val apk = context.applicationInfo.sourceDir
-        var r = Root.output("CLASSPATH=$apk app_process /system/bin ${RootSplit::class.java.name} primary ${Apps.WAZE}")?.trim()?.lines()?.lastOrNull()
+        var r = Root.output("CLASSPATH=$apk app_process /system/bin ${RootSplit::class.java.name} primary ${Apps.WAZE} ${if (Prefs(context).wazeOnRight) "right" else "left"}")?.trim()?.lines()?.lastOrNull()
         if (r?.startsWith("missing") == true) {
             // Waze isn't running: start it, then split it.
             context.packageManager.getLaunchIntentForPackage(Apps.WAZE)?.let { w -> onMain { runCatching { context.startActivity(w.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } } }
             Thread.sleep(2500)
-            r = Root.output("CLASSPATH=$apk app_process /system/bin ${RootSplit::class.java.name} primary ${Apps.WAZE}")?.trim()?.lines()?.lastOrNull()
+            r = Root.output("CLASSPATH=$apk app_process /system/bin ${RootSplit::class.java.name} primary ${Apps.WAZE} ${if (Prefs(context).wazeOnRight) "right" else "left"}")?.trim()?.lines()?.lastOrNull()
         }
-        DebugLog.log("SPLIT", "root-task: Waze → primary half: ${r ?: "root refused"}")
+        DebugLog.log("SPLIT", "root-task: Waze → ${if (Prefs(context).wazeOnRight) "right" else "left"} half: ${r ?: "root refused"}")
         if (r?.startsWith("ok") != true) return false
         Thread.sleep(800)
         return adjacent(context, intent)

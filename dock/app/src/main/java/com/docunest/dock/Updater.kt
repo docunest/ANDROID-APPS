@@ -33,7 +33,10 @@ object Updater {
 
     // Own thread: a download never blocks place syncing.
     private val thread = android.os.HandlerThread("dock-update").apply { start() }
-    private val worker = android.os.Handler(thread.looper)
+    private var worker = android.os.Handler(thread.looper)
+    /** When the running check started (0 = none) — a check stuck past [STUCK_MS] gets a fresh thread. */
+    @Volatile private var checkStartedAt = 0L
+    private const val STUCK_MS = 6 * 60_000L
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
 
     /** What the version badge shows. */
@@ -54,7 +57,51 @@ object Updater {
     /** Check in the background (badge tap, car start, every few minutes). */
     fun checkSoon(context: Context, force: Boolean = false) {
         val app = context.applicationContext
-        worker.post { check(app, force) }
+        val started = checkStartedAt
+        if (started > 0 && System.currentTimeMillis() - started > STUCK_MS) {
+            // The old check hangs (it shouldn't with timeouts — belt and braces): don't queue behind it.
+            DebugLog.log("UPD", "previous check stuck for ${(System.currentTimeMillis() - started) / 1000} s — new thread")
+            worker = android.os.Handler(android.os.HandlerThread("updater").apply { start() }.looper)
+            checkStartedAt = 0L
+        }
+        worker.post {
+            checkStartedAt = System.currentTimeMillis()
+            try { check(app, force) } finally { checkStartedAt = 0L }
+        }
+    }
+
+    /**
+     * Download with timeouts (a stalled hotspot used to hang the updater for good on "Downloading…"),
+     * to a temp file, checked against Content-Length, up to 3 tries.
+     */
+    private fun download(url: String, file: File) {
+        var last: Exception? = null
+        repeat(3) { attempt ->
+            val tmp = File(file.path + ".part")
+            try {
+                val c = URL(url).openConnection() as HttpURLConnection
+                c.connectTimeout = 15_000
+                c.readTimeout = 30_000
+                c.instanceFollowRedirects = true
+                try {
+                    if (c.responseCode != 200) throw java.io.IOException("HTTP ${c.responseCode}")
+                    val expected = c.contentLengthLong
+                    c.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                    if (expected > 0 && tmp.length() != expected) throw java.io.IOException("got ${tmp.length()} of $expected bytes")
+                } finally {
+                    c.disconnect()
+                }
+                if (!tmp.renameTo(file)) throw java.io.IOException("can't move the download")
+                DebugLog.log("UPD", "downloaded ${file.length()} bytes")
+                return
+            } catch (e: Exception) {
+                last = e
+                tmp.delete()
+                DebugLog.log("UPD", "download try ${attempt + 1} failed: ${e.javaClass.simpleName} ${e.message}")
+                Thread.sleep(3_000)
+            }
+        }
+        throw last ?: java.io.IOException("download failed")
     }
 
     fun latest(context: Context): Release? {
@@ -95,14 +142,15 @@ object Updater {
             return done("v${rel.build} failed to install — retrying later")
         }
         set(true, "Downloading v${rel.build}…")
+        DebugLog.log("UPD", "v${BuildConfig.VERSION_CODE} → v${rel.build}: downloading")
         val file = File(context.cacheDir, "dock-${rel.build}.apk")
-        runCatching {
-            URL(rel.apkUrl).openStream().use { input -> file.outputStream().use { input.copyTo(it) } }
-        }.onFailure { return done("Download failed: ${it.message}") }
+        runCatching { download(rel.apkUrl, file) }.onFailure { return done("Download failed: ${it.message}") }
         set(true, "Installing v${rel.build}…")
         // pm can't always read app-private files: stage in /data/local/tmp.
         val staged = "/data/local/tmp/dock-update.apk"
-        val ok = Root.run("cp '${file.absolutePath}' $staged", "chmod 644 $staged", "pm install -r -d $staged", "rm -f $staged")
+        DebugLog.log("UPD", "installing v${rel.build} via ${Root.via()}")
+        val ok = Root.runLong(120_000, "cp '${file.absolutePath}' $staged", "chmod 644 $staged", "pm install -r -d $staged", "rm -f $staged")
+        DebugLog.log("UPD", "install v${rel.build}: ${if (ok) "ok — restarting" else "FAILED"}")
         if (ok) {
             file.delete()
             return done("Updated to v${rel.build} — restarting")
@@ -119,6 +167,7 @@ object Updater {
     }
 
     private fun done(status: String): String {
+        if (!status.startsWith("Up to date")) DebugLog.log("UPD", status)
         set(false, status)
         return status
     }

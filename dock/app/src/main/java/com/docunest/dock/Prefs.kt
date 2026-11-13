@@ -71,6 +71,11 @@ class Prefs(context: Context) {
         get() = sp.getInt("bubbleY", 300)
         set(value) = sp.edit().putInt("bubbleY", value).apply()
 
+    /** Split screen: Waze on the right, Google Maps on the left (owner's choice 2026-11-13). */
+    var wazeOnRight: Boolean
+        get() = sp.getBoolean("wazeOnRight", true)
+        set(value) = sp.edit().putBoolean("wazeOnRight", value).apply()
+
     /** Satellites drawn around the van on the dock map (🛰 chip). */
     var skyOnMap: Boolean
         get() = sp.getBoolean("skyOnMap", true)
