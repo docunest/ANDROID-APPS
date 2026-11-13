@@ -297,9 +297,11 @@ class GpsDoctorActivity : Activity() {
             else -> "%.0f dB-Hz · weak".format(d.topCn0)
         }
         live.text = listOf(
-            "Location ${onOff(d.locationOn(this))} · GPS ${onOff(d.gpsEnabled(lm))} · Root ${when (d.hasRoot) { true -> "yes"; false -> "no"; null -> "?" }}",
+            "Location ${onOff(d.locationOn(this))} · GPS ${onOff(d.gpsEnabled(lm))} · Root ${Root.via()}",
             "Satellites: heard ${d.satsHeard}, strong ${d.strongSats}, used ${d.satsUsed}" + (d.systems.takeIf { it.isNotEmpty() }?.let { "  ($it)" } ?: ""),
             "Signal: $signal",
+            "Per system: " + d.perSystem.ifEmpty { "—" },
+            "Raw measurements: ${d.rawMeasurements}",
             "Chip data: " + if (d.nmeaCount > 0) "${d.nmeaCount} NMEA lines, last ${d.duration(now - d.lastNmeaAt)} ago" else "no NMEA lines yet",
             "Last GPS fix: " + if (f != null && d.fixAt > 0) "±${f.accuracy.toInt()} m, ${d.duration(now - d.fixAt)} ago" else "none",
             "Time to first fix: " + (d.ttffMs?.let { d.duration(it.toLong()) } ?: "—"),

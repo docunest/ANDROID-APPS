@@ -2,20 +2,53 @@ package com.docunest.dock
 
 import android.content.Context
 
-/** The head unit is rooted: grant our own permissions and install updates without prompts. */
+/**
+ * Root for the dock: `su` when the app may use it (Magisk etc.), else the head
+ * unit's own adbd ([AdbShell], root on this userdebug build). `su` is checked
+ * once (and every 10 min), so a unit without usable `su` doesn't pay for a
+ * refused `su` on every call.
+ */
 object Root {
-    fun run(vararg commands: String): Boolean = runCatching {
-        val p = ProcessBuilder("su", "-c", commands.joinToString("; ")).redirectErrorStream(true).start()
-        p.inputStream.bufferedReader().readText()
-        p.waitFor() == 0
-    }.getOrDefault(false)
+    @Volatile private var suOk: Boolean? = null
+    @Volatile private var suCheckedAt = 0L
 
-    /** Like [run], but returns what the commands printed (null if root refused). */
-    fun output(vararg commands: String): String? = runCatching {
-        val p = ProcessBuilder("su", "-c", commands.joinToString("; ")).redirectErrorStream(true).start()
-        val out = p.inputStream.bufferedReader().readText()
-        if (p.waitFor() == 0) out else null
-    }.getOrNull()
+    /** "su", "adb (root)", "adb (shell)" or "none" — for the doctors and the debug log. */
+    fun via(): String = when {
+        suOk == true -> "su" // cached: cheap enough for the UI thread
+        AdbShell.ready -> if (AdbShell.asRoot == true) "adb (root)" else "adb (shell)"
+        else -> "none (${AdbShell.status})"
+    }
+
+    private fun suUsable(): Boolean {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (suOk == null || now - suCheckedAt > 10 * 60_000L) {
+            suCheckedAt = now
+            suOk = runCatching {
+                val p = ProcessBuilder("su", "-c", "id").redirectErrorStream(true).start()
+                val out = p.inputStream.bufferedReader().readText()
+                p.waitFor() == 0 && out.contains("uid=0")
+            }.getOrDefault(false)
+            DebugLog.change("ROOT", "su", if (suOk == true) "usable" else "not usable for apps")
+        }
+        return suOk == true
+    }
+
+    fun run(vararg commands: String): Boolean =
+        if (suUsable()) runCatching {
+            val p = ProcessBuilder("su", "-c", commands.joinToString("; ")).redirectErrorStream(true).start()
+            p.inputStream.bufferedReader().readText()
+            p.waitFor() == 0
+        }.getOrDefault(false)
+        else AdbShell.run(*commands)
+
+    /** Like [run], but returns what the commands printed (null if refused / failed). */
+    fun output(vararg commands: String): String? =
+        if (suUsable()) runCatching {
+            val p = ProcessBuilder("su", "-c", commands.joinToString("; ")).redirectErrorStream(true).start()
+            val out = p.inputStream.bufferedReader().readText()
+            if (p.waitFor() == 0) out else null
+        }.getOrNull()
+        else AdbShell.output(*commands)
 
     /** Overlay, location, notifications, no battery kill. Idempotent. */
     fun grantAll(context: Context): Boolean {

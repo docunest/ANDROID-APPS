@@ -116,7 +116,13 @@ object WifiDoctor {
     @Volatile var hasRoot: Boolean? = null
 
     private val thread = HandlerThread("wifi-doctor").apply { start() }
+    /** Fast: reads the Wi-Fi state every 2 s / on every Android event. Never blocks on network or root. */
     private val worker = Handler(thread.looper)
+    /** Slow work (internet check, joins, Bluetooth kicks, root calls) — so the state above never lags behind it. */
+    private val actions = Handler(HandlerThread("wifi-actions").apply { start() }.looper)
+    @Volatile private var acting = false
+    @Volatile private var probing = false
+    private var lastRootCheck = 0L
     private val main = Handler(Looper.getMainLooper())
     private lateinit var app: Context
     private var started = false
@@ -169,8 +175,8 @@ object WifiDoctor {
         override fun run() {
             runCatching { check() }
             worker.removeCallbacks(this)
-            // Down: every 2 s (scan + decide) — aggressive by request.
-            worker.postDelayed(this, if (connected && internet != false) 15_000L else if (connected) 5_000L else 2_000L)
+            // Every 2 s: reading the state is cheap now that the slow work runs on [actions].
+            worker.postDelayed(this, 2_000L)
         }
     }
 
@@ -202,29 +208,45 @@ object WifiDoctor {
                 },
             )
         }
-        worker.post {
-            hasRoot = Root.run("id")
-            DebugLog.log("WIFI", "root: ${if (hasRoot == true) "yes" else "NO — forced rejoin, Wi-Fi restart and Bluetooth kick via root won't work"}")
-            // Scans more often than 4 per 2 min (Android's default throttle).
-            if (hasRoot == true) Root.run(
-                "settings put global wifi_scan_throttle_enabled 0",
-                // Android 10 drops Wi-Fi when the gateway misses ARP replies — iPhones in power save do. Not kept across reboots.
-                "cmd wifi set-ipreach-disconnect disabled",
-            )
-            loadOurs()
-        }
+        actions.post { rootSetup() }
         worker.post(tick)
         pinger.post(pingLoop)
     }
 
+    /**
+     * Root (su or the head unit's own adb — [Root]) and what needs it once per boot. Re-run every minute
+     * until it works: adb may only be ready (or allowed) a little after the dock starts.
+     */
+    private fun rootSetup() {
+        val was = hasRoot
+        hasRoot = Root.run("id")
+        if (hasRoot == was) return
+        DebugLog.log("WIFI", "root: ${if (hasRoot == true) "yes, via ${Root.via()}" else "NO (${Root.via()}) — forced rejoin, Wi-Fi restart and Bluetooth kick won't work"}")
+        if (hasRoot == true) {
+            Diagnostics.runAsync(app) // once root works: the full scan into the debug log
+            // Scans more often than 4 per 2 min (Android's default throttle).
+            Root.run(
+                "settings put global wifi_scan_throttle_enabled 0",
+                // Android 10 drops Wi-Fi when the gateway misses ARP replies — iPhones in power save do. Not kept across reboots.
+                "cmd wifi set-ipreach-disconnect disabled",
+            )
+        }
+        loadOurs()
+    }
+
+    /** Re-read the state now (a doctor / debug screen just opened). */
+    fun refreshNow() {
+        if (::app.isInitialized) worker.post { runCatching { check() } }
+    }
+
     /** "Reconnect now" on the doctor screen: skip the waiting. */
-    fun reconnectNow() = worker.post {
+    fun reconnectNow() = actions.post {
         runCatching { act(force = true) }
-        check()
+        refreshNow()
     }
 
     /** "Kick Bluetooth now" on the doctor screen (testing the iPhone automation). */
-    fun kickNow() = worker.post {
+    fun kickNow() = actions.post {
         lastAction = "Bluetooth kick: " + BtKick.kick()
         changed()
     }
@@ -237,6 +259,10 @@ object WifiDoctor {
 
     @SuppressLint("MissingPermission")
     private fun check() {
+        if (hasRoot != true && now() - lastRootCheck > 60_000) {
+            lastRootCheck = now()
+            actions.post { rootSetup() }
+        }
         val wm = app.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val wasConnected = connected
@@ -280,12 +306,34 @@ object WifiDoctor {
 
         BtKick.judge(oursSeenAt, connected)
         if (connected) {
-            plan.next(WifiPlan.Input(now(), true, false, false, null, -1, false, enabled)) // resets the plan
+            synchronized(plan) { plan.next(WifiPlan.Input(now(), true, false, false, null, -1, false, enabled)) } // resets the plan
             val probeDue = internet != true || now() - lastProbeAt > PROBE_EVERY_MS
-            if (keepAlive || probeDue) gatewayPingMs = gateway?.let { ping(it) }
-            if (probeDue && net != null) {
+            gatewayPingMs = link.avgMs() // the 2 s pinger keeps this current
+            if (probeDue && net != null && !probing) {
                 lastProbeAt = now()
-                val ok = probe(net)
+                probing = true
+                actions.post {
+                    val ok = runCatching { probe(net) }.getOrDefault(false)
+                    worker.post { probing = false; applyProbe(ok) }
+                }
+            }
+        } else {
+            gatewayPingMs = null
+            internet = null
+            @Suppress("DEPRECATION") runCatching { wm.startScan() }
+            if (autoFix && !acting) {
+                acting = true
+                actions.post { try { runCatching { act(force = false) } } finally { acting = false } }
+            }
+            notifyLost()
+        }
+        changed()
+    }
+
+    /** Internet check result (worker thread). */
+    private fun applyProbe(ok: Boolean) {
+        if (!connected) return
+        run {
                 if (internet != false && !ok) {
                     noInternetSince = now()
                 } else if (internet == false && ok && noInternetSince > 0) {
@@ -300,13 +348,6 @@ object WifiDoctor {
                 }
                 internet = ok
                 DebugLog.change("WIFI", "internet", if (ok) "works" else "NONE", "hotspot ping ${gatewayPingMs ?: "no answer"} ms · ${ssid}")
-            }
-        } else {
-            gatewayPingMs = null
-            internet = null
-            @Suppress("DEPRECATION") runCatching { wm.startScan() }
-            if (autoFix) act(force = false)
-            notifyLost()
         }
         changed()
     }
@@ -357,7 +398,7 @@ object WifiDoctor {
         // Give the scan a moment, then decide with the supplicant's reason (root) + whether the hotspot is still there.
         dropPending = true
         pendingAfter = null
-        worker.postDelayed({
+        actions.postDelayed({
             runCatching {
                 val reason = if (hasRoot == true) disconnectReason() else null
                 joinStatus = if (hasRoot == true) rootWifi("status", name)?.substringAfter(' ', "")?.takeIf { it.isNotBlank() } else null
@@ -441,12 +482,14 @@ object WifiDoctor {
                 BtKick.phoneConnected() == true && !BtKick.inCall(app) -> WifiPlan.Step(WifiPlan.Action.BT_KICK, "none of ours visible — Bluetooth kick (asked)")
                 else -> WifiPlan.Step(WifiPlan.Action.NONE, "none of your networks visible, no iPhone on Bluetooth — scanning")
             }
-        } else plan.next(
-            WifiPlan.Input(
-                now(), false, joining, visible,
-                if (btKick) BtKick.phoneConnected() else false, BtKick.since, BtKick.inCall(app), enabled,
-            ),
-        )
+        } else synchronized(plan) {
+            plan.next(
+                WifiPlan.Input(
+                    now(), false, joining, visible,
+                    if (btKick) BtKick.phoneConnected() else false, BtKick.since, BtKick.inCall(app), enabled,
+                ),
+            )
+        }
         restarts = plan.joinTries
         if (step.action != WifiPlan.Action.NONE) DebugLog.log("WIFI", "action ${step.action}: ${step.why}")
         DebugLog.change("WIFI", "plan", step.why.substringBefore(" — ").substringBefore(" in "))

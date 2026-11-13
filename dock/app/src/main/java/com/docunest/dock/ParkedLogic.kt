@@ -80,7 +80,7 @@ class ParkedLogic(private val hasSaved: Boolean, private val bootAt: Long = 0L) 
             }
             State.PROBING -> when {
                 realFix -> done("Real GPS fix")
-                open -> done("Sky is back — the real GPS takes over")
+                open || (skyKnown && strongSats >= 1) -> done("Satellites heard again — the real GPS takes over")
                 drove -> done("Van is moving — handed back to the real GPS")
                 t - shownSince > MAX_SHOWN_MS -> done("Parked position shown ${MAX_SHOWN_MS / 60_000} min — handed back to the real GPS")
                 t - enteredAt >= probeFor -> enter(State.RESTORED, t, "Still no sky — showing the parked position again")
@@ -113,11 +113,12 @@ class ParkedLogic(private val hasSaved: Boolean, private val bootAt: Long = 0L) 
     companion object {
         const val LOOK_MS = 12_000L
         const val LOOK_UNKNOWN_MS = 45_000L
-        const val PROBE_EVERY_UNKNOWN_MS = 2 * 60_000L
-        const val PROBE_UNKNOWN_MS = 45_000L
+        const val PROBE_EVERY_UNKNOWN_MS = 30_000L
+        const val PROBE_UNKNOWN_MS = 30_000L
         const val DRIVING_MS = 8_000L
-        const val PROBE_EVERY_MS = 4 * 60_000L
-        const val PROBE_EVERY_NO_SENSOR_MS = 60_000L
+        /** Parked position shown this long between real-GPS checks (was 4 min / 1 min: too slow to resume). */
+        const val PROBE_EVERY_MS = 60_000L
+        const val PROBE_EVERY_NO_SENSOR_MS = 30_000L
         const val PROBE_MS = 30_000L
         /** Head units start the dock 20–60 s after boot; later = a restart, not a cold start. */
         const val START_MAX_MS = 3 * 60_000L

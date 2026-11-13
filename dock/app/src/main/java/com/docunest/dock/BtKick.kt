@@ -44,13 +44,37 @@ object BtKick {
     private lateinit var app: Context
     private var started = false
 
+    /** Addresses with a link up, from ACL broadcasts. */
+    private val aclUp = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    /** Profile proxies (public BluetoothProfile API): hands-free client / audio sink = the car side of a phone. */
+    private val proxies = java.util.concurrent.ConcurrentHashMap<Int, android.bluetooth.BluetoothProfile>()
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private val loop = object : Runnable {
+        override fun run() {
+            runCatching { refresh() }
+            main.postDelayed(this, 10_000)
+        }
+    }
+
+    /** Profiles to look at: the car-side ones first (16 hands-free client, 11 audio sink), then phone-side ones. */
+    private val PROFILES = linkedMapOf(16 to "hands-free (car)", 11 to "audio sink (car)", 1 to "headset", 2 to "A2DP", 17 to "phonebook client", 18 to "messages client")
+
+    @SuppressLint("MissingPermission")
     fun start(context: Context) {
         if (started) return
         started = true
         app = context.applicationContext
         runCatching {
             app.registerReceiver(object : BroadcastReceiver() {
-                override fun onReceive(c: Context, i: Intent) = refresh()
+                override fun onReceive(c: Context, i: Intent) {
+                    @Suppress("DEPRECATION") val d = i.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                    when (i.action) {
+                        BluetoothDevice.ACTION_ACL_CONNECTED -> d?.address?.let { aclUp += it }
+                        BluetoothDevice.ACTION_ACL_DISCONNECTED -> d?.address?.let { aclUp -= it }
+                    }
+                    DebugLog.log("BT", "event ${i.action?.substringAfterLast('.')} ${d?.let { runCatching { it.name }.getOrNull() ?: it.address } ?: ""}")
+                    refresh()
+                }
             }, IntentFilter().apply {
                 addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
                 addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
@@ -59,31 +83,85 @@ object BtKick {
                 addAction("android.bluetooth.a2dp-sink.profile.action.CONNECTION_STATE_CHANGED")
             })
         }
-        refresh()
+        val adapter = (app.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+        if (adapter != null) for (id in PROFILES.keys) runCatching {
+            adapter.getProfileProxy(app, object : android.bluetooth.BluetoothProfile.ServiceListener {
+                override fun onServiceConnected(profile: Int, proxy: android.bluetooth.BluetoothProfile) { proxies[profile] = proxy; refresh() }
+                override fun onServiceDisconnected(profile: Int) { proxies.remove(profile) }
+            }, id)
+        }
+        main.post(loop)
+        main.postDelayed({ DebugLog.log("BT", report()) }, 5_000)
     }
 
     /** true / false, or null when Android's Bluetooth can't tell (no adapter, no permission, separate BT module). */
     fun phoneConnected(): Boolean? = if (!usable) null else phone != null
 
+    /** Who's connected, as Android sees it — any of: profile proxies, profile states, ACL events, the hidden isConnected(). */
     @SuppressLint("MissingPermission")
     fun refresh() {
+        if (!::app.isInitialized) return
         val adapter = (app.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
         if (adapter == null) {
-            usable = false; phone = null; since = -1; return
+            usable = false; phone = null; since = -1
+            DebugLog.change("BT", "phone", "no Bluetooth adapter in Android")
+            return
         }
         val found = runCatching {
             if (!adapter.isEnabled) return@runCatching null
-            adapter.bondedDevices.orEmpty().firstOrNull { d -> isConnected(d) && isPhone(d) }
+            val bonded = adapter.bondedDevices.orEmpty()
+            val viaProxy = PROFILES.keys.flatMap { id -> runCatching { proxies[id]?.connectedDevices.orEmpty() }.getOrDefault(emptyList()) }
+            val candidates = viaProxy + bonded.filter { it.address in aclUp || isConnected(it) }
+            candidates.firstOrNull { isPhone(it) } ?: candidates.firstOrNull()
+                ?: PROFILES.entries.firstOrNull { (id, _) -> runCatching { adapter.getProfileConnectionState(id) }.getOrDefault(0) == 2 }
+                    ?.let { (_, label) -> PhoneByProfile(label) }
         }
         usable = found.isSuccess
-        val name = found.getOrNull()?.let { runCatching { it.name }.getOrNull() ?: it.address }
+        val name = when (val f = found.getOrNull()) {
+            null -> null
+            is BluetoothDevice -> runCatching { f.name }.getOrNull() ?: f.address
+            is PhoneByProfile -> "a phone (${f.label} connected)"
+            else -> null
+        }
         if (name != null && phone == null) since = SystemClock.elapsedRealtime()
         if (name == null) since = -1
         phone = name
-        DebugLog.change("BT", "phone", if (!usable) "Android can't read Bluetooth" else name ?: "none")
+        DebugLog.change("BT", "phone", when {
+            !usable -> "Android can't read Bluetooth (${found.exceptionOrNull()?.javaClass?.simpleName})"
+            !adapter.isEnabled -> "Bluetooth off in Android"
+            else -> name ?: "none"
+        })
     }
 
-    /** Hidden but long-standing BluetoothDevice.isConnected() (ACL link up). */
+    private class PhoneByProfile(val label: String)
+
+    /** Everything Android's Bluetooth shows, plus vendor Bluetooth apps (a separate module) — for the debug log. */
+    @SuppressLint("MissingPermission")
+    fun report(): String {
+        val adapter = (app.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+            ?: return "Android Bluetooth: no adapter at all — the car's Bluetooth is a separate module. Vendor apps: ${vendorApps()}"
+        val lines = mutableListOf("Android Bluetooth: ${if (runCatching { adapter.isEnabled }.getOrDefault(false)) "on" else "OFF"} · name ${runCatching { adapter.name }.getOrNull()}")
+        runCatching { adapter.bondedDevices.orEmpty() }.onSuccess { b ->
+            lines += "paired: " + b.joinToString { d ->
+                "${runCatching { d.name }.getOrNull() ?: d.address} (class ${runCatching { d.bluetoothClass?.majorDeviceClass }.getOrNull()?.let { "0x%x".format(it) }}, link ${if (d.address in aclUp || isConnected(d)) "up" else "down"})"
+            }.ifEmpty { "none" }
+        }.onFailure { lines += "paired: can't read (${it.javaClass.simpleName}: ${it.message})" }
+        lines += "profiles: " + PROFILES.entries.joinToString { (id, label) ->
+            val st = runCatching { adapter.getProfileConnectionState(id) }.getOrNull()
+            "$label ${when (st) { 2 -> "CONNECTED"; 1 -> "connecting"; 0 -> "-"; else -> "?" }}" + (proxies[id]?.let { p -> runCatching { p.connectedDevices.size }.getOrNull()?.takeIf { it > 0 }?.let { " ($it dev)" } } ?: "")
+        }
+        lines += "vendor Bluetooth apps: ${vendorApps()}"
+        return lines.joinToString(" · ")
+    }
+
+    private fun vendorApps(): String = runCatching {
+        app.packageManager.getInstalledPackages(0).map { it.packageName }
+            .filter { Regex("bt|blue|goc|phone|dial|carlink|syu|fyt|mtc", RegexOption.IGNORE_CASE).containsMatchIn(it) }
+            .filter { !it.startsWith("com.android.") && !it.startsWith("com.google.") }
+            .joinToString().ifEmpty { "none" }
+    }.getOrDefault("?")
+
+    /** Hidden but long-standing BluetoothDevice.isConnected() (ACL link up); Android 10 may refuse it to apps. */
     private fun isConnected(d: BluetoothDevice): Boolean =
         runCatching { d.javaClass.getMethod("isConnected").invoke(d) as Boolean }.getOrDefault(false)
 

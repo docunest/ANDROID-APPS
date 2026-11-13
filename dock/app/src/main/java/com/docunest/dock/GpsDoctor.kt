@@ -83,6 +83,29 @@ object GpsDoctor {
     /** Average of the best four signals, dB-Hz (≥ 25 good, < 20 weak). */
     @Volatile var topCn0 = 0f
     @Volatile var systems = ""
+    /** "GPS 9 heard/6 used/4 strong · BeiDou 7 heard/0 used/2 strong". */
+    @Volatile var perSystem = ""
+    /** Raw GNSS measurements (per-satellite pseudoranges) from this unit: "supported", "not supported", … */
+    @Volatile var rawMeasurements = "not checked"
+    @Volatile private var rawLogged = false
+    private val measurements = object : android.location.GnssMeasurementsEvent.Callback() {
+        override fun onStatusChanged(status: Int) {
+            rawMeasurements = when (status) {
+                STATUS_READY -> "supported ✓ (a fix per system could be computed)"
+                STATUS_NOT_SUPPORTED -> "not supported by this unit"
+                STATUS_LOCATION_DISABLED -> "location off"
+                else -> "status $status"
+            }
+            DebugLog.change("GPS", "raw measurements", rawMeasurements)
+        }
+        override fun onGnssMeasurementsReceived(event: android.location.GnssMeasurementsEvent) {
+            if (rawLogged) return
+            rawLogged = true
+            val by = event.measurements.groupBy { systemName(it.constellationType) }.mapValues { it.value.size }
+            rawMeasurements = "received ✓ (${by.entries.joinToString { "${it.key} ${it.value}" }})"
+            DebugLog.log("GPS", "raw measurements arrive: ${event.measurements.size} satellites — $by · clock ${event.clock.hasFullBiasNanos()}")
+        }
+    }
     @Volatile var nmeaCount = 0
     @Volatile var lastNmeaAt = 0L
     @Volatile var lastStatusAt = 0L
@@ -154,6 +177,8 @@ object GpsDoctor {
             var used = 0
             val cn0s = ArrayList<Float>()
             val bySystem = LinkedHashMap<String, Int>()
+            // Per system: heard / used in the fix / strong (≥ 25 dB-Hz) — "is BeiDou only heard, or used?"
+            val per = LinkedHashMap<String, IntArray>()
             for (i in 0 until status.satelliteCount) {
                 val cn0 = status.getCn0DbHz(i)
                 if (cn0 <= 0f) continue
@@ -162,6 +187,10 @@ object GpsDoctor {
                 if (status.usedInFix(i)) used++
                 val name = systemName(status.getConstellationType(i))
                 bySystem[name] = (bySystem[name] ?: 0) + 1
+                val p = per.getOrPut(name) { IntArray(3) }
+                p[0]++
+                if (status.usedInFix(i)) p[1]++
+                if (cn0 >= 25f) p[2]++
             }
             satsHeard = heard
             satsUsed = used
@@ -172,6 +201,8 @@ object GpsDoctor {
             strongSats = strong
             topCn0 = cn0s.sortedDescending().take(4).takeIf { it.isNotEmpty() }?.average()?.toFloat() ?: 0f
             systems = bySystem.entries.joinToString(" · ") { "${it.key} ${it.value}" }
+            perSystem = per.entries.joinToString(" · ") { (k, v) -> "$k ${v[0]} heard/${v[1]} used/${v[2]} strong" }
+            DebugLog.change("GPS", "systems used", per.entries.filter { it.value[1] > 0 }.joinToString { it.key }.ifEmpty { "none" }, perSystem)
             if (lastStatusAt == 0L) DebugLog.log("GPS", "satellite status reported: heard $heard, used $used, strong $strong")
             lastStatusAt = now()
             changed()
@@ -207,6 +238,7 @@ object GpsDoctor {
             .onFailure { note("Can't ask the GPS provider: ${it.message}") }
         val st = runCatching { lm.registerGnssStatusCallback(statusCallback, main) }
         val nm = runCatching { lm.addNmeaListener(nmeaListener, main) }
+        runCatching { lm.registerGnssMeasurementsCallback(measurements, main) }.onFailure { rawMeasurements = "can't ask: ${it.javaClass.simpleName}" }
         DebugLog.log("GPS", "listening for ${wanted.joinToString("+")}: fixes ${if (req.isSuccess) "ok" else "FAILED ${req.exceptionOrNull()?.message}"}, " +
             "satellite status ${st.getOrNull() ?: st.exceptionOrNull()?.message}, NMEA ${nm.getOrNull() ?: nm.exceptionOrNull()?.message}")
         watching = true
@@ -221,6 +253,7 @@ object GpsDoctor {
         runCatching { lm.removeUpdates(locationListener) }
         runCatching { lm.unregisterGnssStatusCallback(statusCallback) }
         runCatching { lm.removeNmeaListener(nmeaListener) }
+        runCatching { lm.unregisterGnssMeasurementsCallback(measurements) }
         watching = false
         DebugLog.log("GPS", "stopped listening")
     }

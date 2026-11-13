@@ -47,7 +47,7 @@ class DebugActivity : Activity() {
         root.addView(head)
 
         val tags = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        for (t in listOf(null, "GPS", "AUTO", "PARK", "WIFI", "BT", "RING", "SNAP", "APP")) {
+        for (t in listOf(null, "GPS", "AUTO", "PARK", "WIFI", "BT", "ROOT", "DIAG", "RING", "SNAP", "APP")) {
             tags.addView(bigButton(t ?: "ALL", Palette.CARD_HI, 13f) { tag = t; render() },
                 LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)).apply { marginEnd = dp(6) })
         }
@@ -70,6 +70,11 @@ class DebugActivity : Activity() {
         })
         upload = label("", 12f, Palette.MUTED).apply { setPadding(dp(10), 0, dp(10), 0) }
         up.addView(upload, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        up.addView(bigButton("Run diagnostics", Palette.CARD_HI, 13f) {
+            Diagnostics.runAsync(this)
+            tag = "DIAG"
+            render()
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)).apply { marginEnd = dp(6) })
         up.addView(bigButton("Send now", Palette.CARD_HI, 13f) {
             Thread { DebugLog.uploadNow(this); runOnUiThread { render() } }.start()
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)))
@@ -85,6 +90,7 @@ class DebugActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        WifiDoctor.refreshNow()
         main.post(ticker)
     }
 
@@ -96,7 +102,7 @@ class DebugActivity : Activity() {
     private fun render() {
         now.text = (listOf("Build ${BuildConfig.VERSION_CODE} · showing ${tag ?: "all"}") +
             DebugLog.status.entries.sortedBy { it.key }.map { "${it.key}: ${it.value}" }).joinToString("\n")
-        upload.text = DebugLog.uploadStatus
+        upload.text = DebugLog.uploadStatus + " · diagnostics: " + (if (Diagnostics.running) "running…" else Diagnostics.lastRun)
         logText.text = DebugLog.lines(tag, 400).joinToString("\n") { it.text() }.ifEmpty { "Nothing logged yet." }
     }
 

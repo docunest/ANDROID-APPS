@@ -44,28 +44,28 @@ class ParkedLogicTest {
         val s = Sim()
         s.run(60, strong = 0)
         s.run(3, strong = 0, driving = true)
-        assertEquals(State.RESTORED, s.run(30, strong = 0).last())
+        assertTrue("3 s of shaking isn't driving away", s.run(30, strong = 0).none { it == State.DONE })
     }
 
-    @Test fun realGpsIsCheckedEvery4MinFor30s() {
+    @Test fun realGpsIsCheckedEveryMinuteFor30s() {
         val s = Sim()
         val states = s.run(12, strong = 0) + s.run(5 * 60, strong = 0)
         val firstProbe = states.indexOf(State.PROBING)
-        assertEquals(12 + 240, firstProbe)
+        assertEquals(12 + 60, firstProbe)
         assertEquals(State.RESTORED, states[firstProbe + 30]) // still no sky: back to the parked position
     }
 
     @Test fun probeThatSeesTheSkyHandsBack() {
         val s = Sim()
-        s.run(12 + 240, strong = 0)
-        val probe = s.run(3, strong = 0) + s.run(2, strong = 6)
+        s.run(12 + 60, strong = 0)
+        val probe = s.run(3, strong = 0) + s.run(2, strong = 1) // one strong satellite is enough
         assertEquals(State.PROBING, probe[2])
         assertEquals(State.DONE, probe[3])
     }
 
     @Test fun probeWithARealFixHandsBack() {
         val s = Sim()
-        s.run(12 + 241, strong = 0)
+        s.run(12 + 61, strong = 0)
         assertEquals(State.DONE, s.run(1, strong = 2, fix = true).last())
     }
 
@@ -113,7 +113,7 @@ class ParkedLogicTest {
     @Test fun withoutAccelerometerTheRealGpsIsCheckedEveryMinute() {
         val s = Sim()
         val states = s.run(12, strong = 0, driving = null) + s.run(3 * 60, strong = 0, driving = null)
-        assertEquals(12 + 60, states.indexOf(State.PROBING))
+        assertEquals(12 + 30, states.indexOf(State.PROBING))
     }
 
     @Test fun shownAtMost20Minutes() {

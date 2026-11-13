@@ -130,7 +130,8 @@ object ParkedPosition {
         val l = logic ?: return
         val now = SystemClock.elapsedRealtime()
         val f = GpsDoctor.fix // real fixes only (the doctor drops mock ones)
-        val realFix = f != null && now - GpsDoctor.fixAt < 5_000 && GpsDoctor.hasFix()
+        // Any real fix ends the parked position, however rough (owner: "resume asap, even a weak one").
+        val realFix = f != null && now - GpsDoctor.fixAt < 5_000
         val state = if (l.state == ParkedLogic.State.DONE) l.state else l.tick(now, realFix, GpsDoctor.strongSats, Sensors.driving(), GpsDoctor.skyKnown())
         DebugLog.change("PARK", "state", state.name, l.why)
         when (state) {
@@ -162,11 +163,17 @@ object ParkedPosition {
 
     private fun lm() = app.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
+    @Volatile private var grantTried = false
+
     private fun mockOn() {
         val lm = lm()
         val failed = runCatching { providers().forEach { add(lm, it) } }.exceptionOrNull()
-        if (failed is SecurityException && Root.run("appops set ${app.packageName} android:mock_location allow")) {
-            runCatching { providers().forEach { add(lm, it) } }.onFailure { return mockFailed(it) }
+        if (failed is SecurityException && !grantTried) {
+            // Grant ourselves the mock-location app-op (root / adb) off the main thread; the next tick retries.
+            grantTried = true
+            mockOff()
+            Thread { Root.run("appops set ${app.packageName} android:mock_location allow") }.start()
+            return
         } else if (failed != null) return mockFailed(failed)
         mocking = true
         problem = ""

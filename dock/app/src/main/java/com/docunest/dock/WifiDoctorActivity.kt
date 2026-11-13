@@ -49,6 +49,7 @@ class WifiDoctorActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        WifiDoctor.refreshNow()
         WifiDoctor.addListener(listener)
         main.post(ticker)
     }
@@ -165,7 +166,7 @@ class WifiDoctorActivity : Activity() {
             null -> "Android can't see the car's Bluetooth (off, or a separate Bluetooth module) — kick not possible"
         }
         live.text = listOf(
-            "Wi-Fi ${if (w.enabled) "on ✓" else "off ✗"} · Root ${when (w.hasRoot) { true -> "yes"; false -> "no"; null -> "?" }}",
+            "Wi-Fi ${if (w.enabled) "on ✓" else "off ✗"} · Root ${Root.via()}",
             "Network: ${if (w.connected) (w.ssid ?: "connected") else "not connected"}" + (w.target?.let { "   (keeping: $it)" } ?: ""),
             "Signal: $signal",
             "Link quality (ping to hotspot, last ~30 s): " + if (w.connected) w.link.text() else "—",

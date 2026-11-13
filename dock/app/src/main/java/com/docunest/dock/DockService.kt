@@ -80,6 +80,10 @@ class DockService : Service() {
     override fun onCreate() {
         super.onCreate()
         DebugLog.init(this)
+        AdbShell.init(this)
+        AdbShell.warmUp()
+        // No root yet? Still scan what an app may read, a minute after start.
+        android.os.Handler(mainLooper).postDelayed({ if (Diagnostics.lastRun == "never") Diagnostics.runAsync(this) }, 60_000)
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
         prefs = Prefs(this)
         Sync.init(this)
@@ -323,7 +327,8 @@ class DockService : Service() {
         DebugLog.status["Wi-Fi"] = "connected ${WifiDoctor.connected} ${WifiDoctor.ssid ?: ""} · rssi ${WifiDoctor.rssi} · internet ${WifiDoctor.internet} · link ${WifiDoctor.link.text()} via ${WifiDoctor.rttMethod}"
         DebugLog.status["Service"] = "location service $locationService · background location " +
             (checkSelfPermission(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED) +
-            " · root GPS ${GpsDoctor.hasRoot} / Wi-Fi ${WifiDoctor.hasRoot} · auto ${AutoDoctor.call?.mode} · parked ${ParkedPosition.logic?.state}"
+            " · auto ${AutoDoctor.call?.mode} · parked ${ParkedPosition.logic?.state}"
+        DebugLog.status["Root"] = "via ${Root.via()} · adb: ${AdbShell.status}"
         if (t - lastUploadTry > 120_000) {
             lastUploadTry = t
             uploader.execute { runCatching { DebugLog.uploadNow(this) } }
