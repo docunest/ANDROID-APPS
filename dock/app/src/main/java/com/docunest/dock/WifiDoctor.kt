@@ -22,6 +22,7 @@ import android.os.SystemClock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
+import java.util.concurrent.Future
 import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -56,7 +57,6 @@ import java.util.Locale
 object WifiDoctor {
     private const val KEEP = 60
     private const val WEAK_RSSI = -80
-    private const val PROBE_EVERY_MS = 60_000L
     private const val NOTIFY_ID = 7
     /** "Ours" seen this recently counts as visible. */
     private const val VISIBLE_MS = 6_000L
@@ -104,12 +104,102 @@ object WifiDoctor {
         override fun run() {
             val gw = gateway
             if (connected && gw != null) {
-                link.add(ping(gw, waitSec = 1))
+                val ms = ping(gw, waitSec = 1)
+                if (ms != null) lastGatewayAnswerAt = now()
+                link.add(ms)
                 DebugLog.change("WIFI", "link", link.level().name, "${link.text()} · via $rttMethod to $gw")
             }
             pinger.postDelayed(this, 2_000L)
         }
     }
+    // --- Parallel checks: the iPhone link and the real internet, every 30 s and on demand ---------------
+    /** Last result of the three checks and what they mean ([NetVerdict]). */
+    @Volatile var checks: NetVerdict.Checks? = null
+    @Volatile var verdict = NetVerdict.Verdict(NetVerdict.Level.UNKNOWN, "Not checked yet")
+    @Volatile var checkedAt = 0L
+    @Volatile var lastGatewayAnswerAt = 0L
+    private val checkPool = java.util.concurrent.Executors.newFixedThreadPool(3)
+    private val checker = Handler(HandlerThread("wifi-checks").apply { start() }.looper)
+    private const val CHECK_EVERY_MS = 30_000L
+    private val checkLoop = object : Runnable {
+        override fun run() {
+            runCatching { runChecks() }
+            checker.removeCallbacks(this)
+            checker.postDelayed(this, CHECK_EVERY_MS)
+        }
+    }
+
+    /** Check now (doctor opened, "Check now", just connected). */
+    fun checkNow() {
+        if (!::app.isInitialized) return
+        checker.removeCallbacks(checkLoop)
+        checker.post(checkLoop)
+    }
+
+    /** iPhone ping, fresh DNS lookup and a real web request — all three at the same time, ~5 s at most. */
+    private fun runChecks() {
+        val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val net = wifiNetwork(cm)
+        if (!connected || net == null) return
+        val gw = gateway
+        val dnsServer = cm.getLinkProperties(net)?.dnsServers?.firstOrNull { it is java.net.Inet4Address } ?: cm.getLinkProperties(net)?.dnsServers?.firstOrNull()
+        val fHot = checkPool.submit<Int?> { gw?.let { ping(it, waitSec = 2) } }
+        val fDns = checkPool.submit<Int?> { dnsServer?.let { dnsCheck(net, it) } }
+        val fHttp = checkPool.submit<Pair<Int?, Int?>> { httpCheck(net) }
+        fun <T> Future<T>.within(): T? = runCatching { get(8, java.util.concurrent.TimeUnit.SECONDS) }.getOrNull()
+        val hotMs = fHot.within()
+        val dnsMs = fDns.within()
+        val (httpCode, httpMs) = fHttp.within() ?: (null to null)
+        if (hotMs != null) lastGatewayAnswerAt = now()
+        // The 2 s pinger counts too: one lost ping isn't "the iPhone isn't answering".
+        val hotOk = if (gw == null) null else hotMs != null || now() - lastGatewayAnswerAt < 6_000
+        val c = NetVerdict.Checks(hotMs, hotOk, dnsMs, if (dnsServer == null) null else dnsMs != null, httpMs, httpCode)
+        val v = NetVerdict.classify(c)
+        checks = c
+        verdict = v
+        checkedAt = now()
+        DebugLog.change("WIFI", "verdict", v.level.name,
+            "${v.text} · iPhone ${hotMs ?: "—"} ms · DNS ${dnsMs ?: "—"} ms · web ${httpCode ?: "—"} in ${httpMs ?: "—"} ms")
+        worker.post { applyProbe(v.internet != false) }
+    }
+
+    /** A random, never-cached name straight to the hotspot's DNS server over Wi-Fi: answered only through the iPhone's data. */
+    private fun dnsCheck(net: Network, server: java.net.InetAddress): Int? = runCatching {
+        val id = (Math.random() * 65535).toInt()
+        val name = "dock" + java.lang.Long.toString((Math.random() * 1e12).toLong(), 36) + ".connectivitycheck.gstatic.com"
+        val q = NetVerdict.dnsQuery(id, name)
+        java.net.DatagramSocket().use { s ->
+            net.bindSocket(s)
+            s.soTimeout = 4_000
+            val start = System.nanoTime()
+            s.send(java.net.DatagramPacket(q, q.size, server, 53))
+            val buf = ByteArray(512)
+            val reply = java.net.DatagramPacket(buf, buf.size)
+            while (true) {
+                s.receive(reply)
+                if (NetVerdict.dnsAnswered(id, buf, reply.length)) return@runCatching ((System.nanoTime() - start) / 1_000_000).toInt()
+                if (reply.length >= 2 && ((buf[0].toInt() and 0xff shl 8) or (buf[1].toInt() and 0xff)) == id) return@runCatching null // SERVFAIL etc.
+            }
+            @Suppress("UNREACHABLE_CODE") null
+        }
+    }.getOrNull()
+
+    /** generate_204 over Wi-Fi: (HTTP code, ms). Generous timeouts — a 1–3 s reply on a slow link still counts. */
+    private fun httpCheck(net: Network): Pair<Int?, Int?> = runCatching {
+        val start = System.nanoTime()
+        val c = net.openConnection(URL("https://www.google.com/generate_204")) as HttpURLConnection
+        c.connectTimeout = 6_000
+        c.readTimeout = 6_000
+        c.instanceFollowRedirects = false
+        c.useCaches = false
+        try {
+            val code = c.responseCode
+            code to ((System.nanoTime() - start) / 1_000_000).toInt()
+        } finally {
+            c.disconnect()
+        }
+    }.getOrDefault(null to null)
+
     /** Android's auto-join state for the hotspot (root), e.g. "PERMANENTLY_DISABLED NO_INTERNET_PERMANENT". */
     @Volatile var joinStatus: String? = null
     @Volatile var lastAction = ""
@@ -121,13 +211,11 @@ object WifiDoctor {
     /** Slow work (internet check, joins, Bluetooth kicks, root calls) — so the state above never lags behind it. */
     private val actions = Handler(HandlerThread("wifi-actions").apply { start() }.looper)
     @Volatile private var acting = false
-    @Volatile private var probing = false
     private var lastRootCheck = 0L
     private val main = Handler(Looper.getMainLooper())
     private lateinit var app: Context
     private var started = false
     private var lastRestartAt = 0L
-    private var lastProbeAt = 0L
     private var lastRssis = ArrayDeque<Int>()
     private var notified = false
     /** A drop is waiting for its reason; a quick comeback is noted here until it's written. */
@@ -211,6 +299,7 @@ object WifiDoctor {
         actions.post { rootSetup() }
         worker.post(tick)
         pinger.post(pingLoop)
+        checker.postDelayed(checkLoop, 5_000)
     }
 
     /**
@@ -234,9 +323,42 @@ object WifiDoctor {
         loadOurs()
     }
 
-    /** Re-read the state now (a doctor / debug screen just opened). */
+    /** Re-read the state now (a doctor / debug screen just opened) and run the internet checks. */
     fun refreshNow() {
         if (::app.isInitialized) worker.post { runCatching { check() } }
+        checkNow()
+    }
+
+    private var lastStallFix = 0L
+
+    /**
+     * Wi-Fi still says "connected" but the iPhone hasn't answered for 20 s: force a reconnect to it
+     * (root join; if it still doesn't answer, Wi-Fi off/on and join). Once a minute at most.
+     */
+    private fun recoverStall() {
+        val gw = gateway ?: return
+        val silent = now() - maxOf(lastGatewayAnswerAt, upSince)
+        // 12 s quiet: get a fresh verdict from the parallel checks before deciding anything.
+        if (silent >= 12_000 && now() - checkedAt > 10_000) checkNow()
+        if (silent < 20_000 || now() - lastStallFix < 60_000 || hasRoot != true) return
+        // Pings can be lost while the internet works: only a fresh check that also fails counts as a stall.
+        if (now() - checkedAt > 15_000 || verdict.internet != false) return
+        lastStallFix = now()
+        val name = ssid ?: return
+        DebugLog.log("WIFI", "stall: $name connected but $gw silent for ${silent / 1000} s — forcing a reconnect")
+        lastAction = "iPhone not answering for ${silent / 1000} s — reconnecting"
+        record("Hotspot stalled", "Wi-Fi stayed connected but the iPhone didn't answer for ${silent / 1000} s — Dock forced a reconnect.", Fault.IPHONE, silent)
+        actions.post {
+            val r = rootWifi("enable", name)
+            DebugLog.log("WIFI", "stall: rejoin $name → ${r ?: "root refused"}")
+            Thread.sleep(10_000)
+            if (now() - lastGatewayAnswerAt > 25_000) {
+                DebugLog.log("WIFI", "stall: still silent — Wi-Fi off/on, then join $name")
+                Root.run("svc wifi disable", "sleep 2", "svc wifi enable", "sleep 5")
+                rootWifi("enable", name)
+            }
+            refreshNow()
+        }
     }
 
     /** "Reconnect now" on the doctor screen: skip the waiting. */
@@ -311,16 +433,9 @@ object WifiDoctor {
         if (connected) {
             preferIPhone(wm)
             synchronized(plan) { plan.next(WifiPlan.Input(now(), true, false, false, null, -1, false, enabled)) } // resets the plan
-            val probeDue = internet != true || now() - lastProbeAt > PROBE_EVERY_MS
             gatewayPingMs = link.avgMs() // the 2 s pinger keeps this current
-            if (probeDue && net != null && !probing) {
-                lastProbeAt = now()
-                probing = true
-                actions.post {
-                    val ok = runCatching { probe(net) }.getOrDefault(false)
-                    worker.post { probing = false; applyProbe(ok) }
-                }
-            }
+            // Internet: the parallel checks run every 30 s on their own thread ([runChecks]).
+            recoverStall()
         } else {
             gatewayPingMs = null
             internet = null
@@ -395,6 +510,8 @@ object WifiDoctor {
     }
 
     private fun back() {
+        lastGatewayAnswerAt = now() // fresh link: give the pinger its 20 s
+        checkNow()
         val down = if (downSince > 0) now() - downSince else 0L
         if (down > 0) {
             val how = if (restarts > 0) "after Dock forced a rejoin ($restarts×)" else "by itself"
@@ -407,7 +524,6 @@ object WifiDoctor {
         link.clear()
         lastAction = ""
         internet = null
-        lastProbeAt = 0L
         if (notified) {
             (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIFY_ID)
             notified = false
@@ -647,17 +763,6 @@ object WifiDoctor {
             if (ok) ((System.nanoTime() - start) / 1_000_000).toInt() else null
         }.getOrNull()
     }
-
-    /** Real internet through the Wi-Fi network itself (not mobile data): ~1 KB. */
-    private fun probe(net: Network): Boolean = runCatching {
-        val c = net.openConnection(URL("https://www.google.com/generate_204")) as HttpURLConnection
-        c.connectTimeout = 6000
-        c.readTimeout = 6000
-        c.instanceFollowRedirects = false
-        val code = c.responseCode
-        c.disconnect()
-        code == 204
-    }.getOrDefault(false)
 
     // --- History ----------------------------------------------------------------
 

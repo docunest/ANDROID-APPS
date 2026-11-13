@@ -90,6 +90,8 @@ class WifiDoctorActivity : Activity() {
         buttons.addView(space(8))
         buttons.addView(bigButton("Kick Bluetooth", Palette.CARD_HI, 15f) { WifiDoctor.kickNow() }, LinearLayout.LayoutParams(0, dp(60), 1f))
         buttons.addView(space(8))
+        buttons.addView(bigButton("Check now", Palette.CARD_HI, 15f) { WifiDoctor.checkNow() }, LinearLayout.LayoutParams(0, dp(60), 1f))
+        buttons.addView(space(8))
         buttons.addView(bigButton("Wi-Fi settings", Palette.CARD_HI, 15f) {
             val panel = if (Build.VERSION.SDK_INT >= 29) Settings.Panel.ACTION_WIFI else Settings.ACTION_WIFI_SETTINGS
             runCatching { startActivity(Intent(panel)) }.onFailure { runCatching { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) } }
@@ -170,6 +172,12 @@ class WifiDoctorActivity : Activity() {
             "Network: ${if (w.connected) (w.ssid ?: "connected") else "not connected"}" + (w.target?.let { "   (keeping: $it)" } ?: ""),
             "Signal: $signal",
             "Link quality (ping to hotspot, last ~30 s): " + if (w.connected) w.link.text() else "—",
+            "Checks (in parallel, every 30 s): " + (w.checks?.let { c ->
+                "iPhone ${c.hotspotMs?.let { "$it ms ✓" } ?: if (c.hotspotOk == true) "✓ (pinger)" else "✗"} · " +
+                    "DNS ${c.dnsMs?.let { "$it ms ✓" } ?: if (c.dnsOk == null) "—" else "✗"} · " +
+                    "web ${c.httpCode?.let { code -> "$code in ${c.httpMs} ms ${if (code == 204) "✓" else "✗"}" } ?: "✗"} · " +
+                    "${GpsDoctor.duration(now - w.checkedAt)} ago"
+            } ?: "not yet") + "\n→ ${w.verdict.text}",
             "Before the last drop: " + (w.beforeLastDrop ?: "—"),
             "Hotspot answers: " + when {
                 !w.connected -> "—"

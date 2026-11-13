@@ -324,7 +324,8 @@ class DockService : Service() {
         DebugLog.change("GPS", "level", g.name, gpsInputs)
         DebugLog.change("WIFI", "level", w.name)
         DebugLog.status["Ring now"] = "GPS ${g.name} (${g.label}) shown ${if (b.gpsArc.fine) "white" else "as warning"} · Wi-Fi ${w.name} (${w.label}) shown ${if (b.wifiArc.fine) "white" else "as warning"}"
-        DebugLog.status["Wi-Fi"] = "connected ${WifiDoctor.connected} ${WifiDoctor.ssid ?: ""} · rssi ${WifiDoctor.rssi} · internet ${WifiDoctor.internet} · link ${WifiDoctor.link.text()} via ${WifiDoctor.rttMethod}"
+        DebugLog.status["Wi-Fi"] = "connected ${WifiDoctor.connected} ${WifiDoctor.ssid ?: ""} · rssi ${WifiDoctor.rssi} · internet ${WifiDoctor.internet} · link ${WifiDoctor.link.text()} via ${WifiDoctor.rttMethod}" +
+            " · checks: ${WifiDoctor.verdict.text}"
         DebugLog.status["Service"] = "location service $locationService · background location " +
             (checkSelfPermission(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED) +
             " · auto ${AutoDoctor.call?.mode} · parked ${ParkedPosition.logic?.state}"
@@ -391,7 +392,11 @@ class DockService : Service() {
             internet = w.internet,
             oursVisible = android.os.SystemClock.elapsedRealtime() - w.oursSeenAt < 6_000,
             kickPending = BtKick.pendingAt > 0,
-            link = w.link.level(),
+            // Pings to the iPhone get lost while the internet works (seen live): with a working web check
+            // in the last 90 s, a "bad" ping meter is only "poor".
+            link = w.link.level().let { l ->
+                if (l == LinkQuality.Level.BAD && w.verdict.internet == true && android.os.SystemClock.elapsedRealtime() - w.checkedAt < 90_000) LinkQuality.Level.POOR else l
+            },
         )
     }
 
