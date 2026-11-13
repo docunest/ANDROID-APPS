@@ -40,6 +40,10 @@ class GpsDoctorActivity : Activity() {
     private lateinit var autoButton: TextView
     private lateinit var autoText: TextView
     private lateinit var parkedText: TextView
+    private lateinit var sky: SkyPlotView
+    private lateinit var satTable: TextView
+    private lateinit var satUsed: TextView
+    private lateinit var satWhy: TextView
     private lateinit var parkedButton: TextView
     private lateinit var statsText: TextView
     private lateinit var runsText: TextView
@@ -137,6 +141,25 @@ class GpsDoctorActivity : Activity() {
             setLineSpacing(dp(3).toFloat(), 1f)
         }
         left.addView(live)
+        left.addView(space(10))
+        left.addView(label("Satellites", 18f, bold = true))
+        val skyRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        sky = SkyPlotView(this)
+        skyRow.addView(sky, LinearLayout.LayoutParams(dp(240), dp(240)))
+        val skyText = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, 0, 0) }
+        satTable = label("", 12f).apply { typeface = android.graphics.Typeface.MONOSPACE; setTextIsSelectable(true) }
+        skyText.addView(satTable)
+        skyText.addView(label(
+            "● filled = used in the fix · ◌ dashed = heard, not used · brighter = stronger · centre = straight up, rim = horizon",
+            11f, Palette.MUTED,
+        ).apply { setPadding(0, dp(6), 0, 0) })
+        skyText.addView(legend())
+        skyRow.addView(skyText, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        left.addView(skyRow)
+        satUsed = label("", 14f).apply { setPadding(0, dp(6), 0, 0); setTextIsSelectable(true) }
+        left.addView(satUsed)
+        satWhy = label("", 14f, Palette.AMBER).apply { setPadding(0, dp(4), 0, 0); setLineSpacing(dp(2).toFloat(), 1f) }
+        left.addView(satWhy)
         left.addView(space(10))
         fixButton = bigButton("Fix GPS", Palette.BLUE, 20f) {
             if (GpsDoctor.running) GpsDoctor.cancel() else GpsDoctor.fix(this)
@@ -300,7 +323,6 @@ class GpsDoctorActivity : Activity() {
             "Location ${onOff(d.locationOn(this))} · GPS ${onOff(d.gpsEnabled(lm))} · Root ${Root.via()}",
             "Satellites: heard ${d.satsHeard}, strong ${d.strongSats}, used ${d.satsUsed}" + (d.systems.takeIf { it.isNotEmpty() }?.let { "  ($it)" } ?: ""),
             "Signal: $signal",
-            "Per system: " + d.perSystem.ifEmpty { "—" },
             "Raw measurements: ${d.rawMeasurements}",
             "Chip data: " + if (d.nmeaCount > 0) "${d.nmeaCount} NMEA lines, last ${d.duration(now - d.lastNmeaAt)} ago" else "no NMEA lines yet",
             "Last GPS fix: " + if (f != null && d.fixAt > 0) "±${f.accuracy.toInt()} m, ${d.duration(now - d.fixAt)} ago" else "none",
@@ -329,6 +351,7 @@ class GpsDoctorActivity : Activity() {
         summary.visibility = if (d.summary.isEmpty()) View.GONE else View.VISIBLE
         renderSteps(d.steps, now)
         logText.text = d.logLines().takeLast(40).joinToString("\n").ifEmpty { "Tap Fix GPS to start." }
+        renderSky()
         renderSensors()
         // Statistics read ~1500 stored lines: every 5 s is plenty (and at once after a run).
         if (ticks++ % 5 == 0 || (wasRunning && !d.running)) renderStats()
@@ -338,6 +361,26 @@ class GpsDoctorActivity : Activity() {
             "reported speed that disagrees with the distance covered, and position leaps. " +
             "${GpsWatch.fixesSeen} fixes checked since the dock started.\n\n" +
             glitches.take(15).joinToString("\n").ifEmpty { "None so far." }
+    }
+
+    private fun renderSky() {
+        val d = GpsDoctor
+        val sats = d.sats
+        sky.sats = sats
+        satTable.text = Sky.table(sats)
+        satUsed.text = "Used in the fix: " + Sky.usedList(sats)
+        val why = Sky.explain(sats, d.hasFix(), d.orbitFlagsSeen)
+        satWhy.text = why.joinToString("\n") { "• $it" }
+        satWhy.setTextColor(if (d.hasFix()) Palette.MUTED else Palette.AMBER)
+    }
+
+    /** Colour key for the systems in the sky plot / map. */
+    private fun legend() = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        setPadding(0, dp(4), 0, 0)
+        for (s in listOf("GPS", "Galileo", "GLONASS", "BeiDou")) {
+            addView(label("● $s  ", 12f, Sky.color(s), bold = true))
+        }
     }
 
     private fun renderSensors() {

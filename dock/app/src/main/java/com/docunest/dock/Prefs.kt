@@ -71,6 +71,11 @@ class Prefs(context: Context) {
         get() = sp.getInt("bubbleY", 300)
         set(value) = sp.edit().putInt("bubbleY", value).apply()
 
+    /** Satellites drawn around the van on the dock map (🛰 chip). */
+    var skyOnMap: Boolean
+        get() = sp.getBoolean("skyOnMap", true)
+        set(value) = sp.edit().putBoolean("skyOnMap", value).apply()
+
     /** GPS-state dot on the floating button. */
     var gpsDot: Boolean
         get() = sp.getBoolean("gpsDot", true)

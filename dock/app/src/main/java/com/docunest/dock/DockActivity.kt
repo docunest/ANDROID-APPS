@@ -51,11 +51,13 @@ class DockActivity : Activity() {
     private val gpsTicker = object : Runnable {
         override fun run() {
             renderGps()
-            gpsHandler.postDelayed(this, 5000)
+            if (skyOverlay?.isEnabled == true && ::map.isInitialized) map.invalidate() // satellites move / change
+            gpsHandler.postDelayed(this, 2000)
         }
     }
     private val gpsHandler = Handler(Looper.getMainLooper())
     private var myLocation: MyLocationNewOverlay? = null
+    private var skyOverlay: SkyMapOverlay? = null
     private var dropped: Marker? = null
     private var centeredOnce = false
     private var showMore = false
@@ -206,6 +208,16 @@ class DockActivity : Activity() {
         chips.addView(gpsChip)
         chips.addView(space(8))
         chips.addView(wifiChip)
+        chips.addView(space(8))
+        chips.addView(chip("🛰", GpsDoctorActivity::class.java).apply {
+            alpha = if (prefs.skyOnMap) 1f else 0.5f
+            setOnClickListener { v ->
+                prefs.skyOnMap = !prefs.skyOnMap
+                skyOverlay?.isEnabled = prefs.skyOnMap
+                v.alpha = if (prefs.skyOnMap) 1f else 0.5f
+                map.invalidate()
+            }
+        })
         mapFrame.addView(chips, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply {
             setMargins(dp(8), dp(8), dp(8), dp(8))
         })
@@ -223,6 +235,10 @@ class DockActivity : Activity() {
         myLocation = runCatching {
             MyLocationNewOverlay(GpsMyLocationProvider(this), map).also { map.overlays.add(it) }
         }.getOrNull()
+        // The satellites around the van, north-up like the map (🛰 chip toggles it).
+        skyOverlay = SkyMapOverlay {
+            (GpsDoctor.fix ?: lastLocation)?.let { GeoPoint(it.latitude, it.longitude) }
+        }.also { it.isEnabled = prefs.skyOnMap; map.overlays.add(it) }
 
         if (landscape) {
             root.addView(placesCol, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))

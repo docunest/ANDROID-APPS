@@ -85,6 +85,11 @@ object GpsDoctor {
     @Volatile var systems = ""
     /** "GPS 9 heard/6 used/4 strong · BeiDou 7 heard/0 used/2 strong". */
     @Volatile var perSystem = ""
+    /** Every satellite the chip reports now (for the table, the sky plot and the map). */
+    @Volatile var sats: List<Sky.Sat> = emptyList()
+    /** This unit reports orbit data for satellites it uses (so "no orbit data" can be believed). */
+    @Volatile var orbitFlagsSeen = false
+    private var appCtx: Context? = null
     /** Raw GNSS measurements (per-satellite pseudoranges) from this unit: "supported", "not supported", … */
     @Volatile var rawMeasurements = "not checked"
     @Volatile private var rawLogged = false
@@ -179,9 +184,14 @@ object GpsDoctor {
             val bySystem = LinkedHashMap<String, Int>()
             // Per system: heard / used in the fix / strong (≥ 25 dB-Hz) — "is BeiDou only heard, or used?"
             val per = LinkedHashMap<String, IntArray>()
+            val list = ArrayList<Sky.Sat>()
             for (i in 0 until status.satelliteCount) {
                 val cn0 = status.getCn0DbHz(i)
                 if (cn0 <= 0f) continue
+                list += Sky.Sat(
+                    systemName(status.getConstellationType(i)), status.getSvid(i), cn0, status.usedInFix(i),
+                    status.hasEphemerisData(i), status.getAzimuthDegrees(i), status.getElevationDegrees(i),
+                )
                 heard++
                 cn0s += cn0
                 if (status.usedInFix(i)) used++
@@ -194,6 +204,14 @@ object GpsDoctor {
             }
             satsHeard = heard
             satsUsed = used
+            sats = list
+            // The sky in one line for the uploaded log: what's used, and the first "why" (redrawn only on change).
+            val fresh = fix != null && now() - fixAt < FRESH_MS
+            DebugLog.change("GPS", "sky", Sky.explain(list, fresh, orbitFlagsSeen).first().substringBefore(" ("), "used: ${Sky.usedList(list)}")
+            if (!orbitFlagsSeen && list.any { it.used && it.eph }) {
+                orbitFlagsSeen = true
+                appCtx?.getSharedPreferences("dock", Context.MODE_PRIVATE)?.edit()?.putBoolean("gpsOrbitFlags", true)?.apply()
+            }
             val strong = cn0s.count { it >= 25f }
             val t = now()
             if (strong >= 4) lastOpenSkyAt = t
@@ -221,6 +239,10 @@ object GpsDoctor {
 
     /** Start listening (main thread). Keeps the GPS chip working while the doctor screen is open or auto is on. */
     fun watch(context: Context, who: String = "screen") {
+        if (appCtx == null) {
+            appCtx = context.applicationContext
+            orbitFlagsSeen = context.getSharedPreferences("dock", Context.MODE_PRIVATE).getBoolean("gpsOrbitFlags", false)
+        }
         wanted += who
         listen(context.applicationContext)
     }
