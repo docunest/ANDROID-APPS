@@ -207,7 +207,11 @@ object GpsDoctor {
             sats = list
             // The sky in one line for the uploaded log: what's used, and the first "why" (redrawn only on change).
             val fresh = fix != null && now() - fixAt < FRESH_MS
-            DebugLog.change("GPS", "sky", Sky.explain(list, fresh, orbitFlagsSeen).first().substringBefore(" ("), "used: ${Sky.usedList(list)}")
+            // Keyed on the reason with the numbers taken out: "Fix from 12 → 13 satellites" isn't news, "no fix: no orbit data" is.
+            val why = Sky.explain(list, fresh, orbitFlagsSeen)
+            if (DebugLog.change("GPS", "sky", why.joinToString(" | ") { it.replace(Regex("\\d+"), "#").substringBefore(" (") }.take(200), "")) {
+                DebugLog.log("GPS", "sky now: ${why.joinToString(" ")} · used: ${Sky.usedList(list)}")
+            }
             if (!orbitFlagsSeen && list.any { it.used && it.eph }) {
                 orbitFlagsSeen = true
                 appCtx?.getSharedPreferences("dock", Context.MODE_PRIVATE)?.edit()?.putBoolean("gpsOrbitFlags", true)?.apply()
