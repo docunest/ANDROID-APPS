@@ -308,6 +308,7 @@ class DockService : Service() {
     /** Keyboard bounds while one is showing (from the accessibility helper), else null. */
     private var keyboard: BubblePlace.Area? = null
     private var lastRaise = 0L
+    private var raiseStreak = 0
 
     /** Below the status bar, above the navigation bar, inside the sides — where it can always be touched. */
     private fun safeArea(): BubblePlace.Area {
@@ -380,7 +381,10 @@ class DockService : Service() {
     private fun raiseBubble(by: String) {
         val b = bubble ?: return
         val now = android.os.SystemClock.elapsedRealtime()
-        if (now - lastRaise < 3_000 || fan != null || b.pressedLook) return
+        // At most every 5 s, and not more than 6 times in a row without a pause (never a loop).
+        if (now - lastRaise < 5_000 || fan != null || b.pressedLook) return
+        if (now - lastRaise < 20_000) raiseStreak++ else raiseStreak = 0
+        if (raiseStreak > 6) return
         lastRaise = now
         runCatching {
             wm.removeView(b)

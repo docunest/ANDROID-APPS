@@ -21,41 +21,43 @@ class SplitService : AccessibilityService() {
 
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
     private val report = Runnable { onWindows?.let { l -> runCatching { l(watch()) } } }
+    private var lastReport = 0L
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val type = event?.eventType ?: return
         if (type != AccessibilityEvent.TYPE_WINDOWS_CHANGED && type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         if (onWindows == null) return
-        // Waze changes windows constantly: one look per half second at most.
+        // Waze changes windows constantly: one look per second at most (coalesced).
         main.removeCallbacks(report)
-        main.postDelayed(report, 500)
+        val wait = (1_000L - (android.os.SystemClock.elapsedRealtime() - lastReport)).coerceIn(150L, 1_000L)
+        main.postDelayed({ lastReport = android.os.SystemClock.elapsedRealtime(); report.run() }, wait)
     }
 
     /**
-     * Keyboard bounds (null = none showing), and the package of a window above our button, if any.
-     * Our button's window is found by its position ([bubble]), not by reading every window's content:
-     * that read created a node per window per change — never released on Android 10, it leaked memory
-     * until the dock was killed (seen 2026-11-14). Only windows overlapping the button are read, and released.
+     * Keyboard bounds (null = none showing), and whether a window sits above our button.
+     *
+     * Only window *bounds, types and layers* — answered by Android itself. Never a window's content
+     * (`window.root`): Android forwards that to the owning app's main thread, and doing it on every window
+     * change flooded System UI until "System UI isn't responding" (2026-11-14), besides leaking memory.
      */
     fun watch(): Watch {
         val all = runCatching { windows }.getOrDefault(emptyList())
+        val r = android.graphics.Rect()
         val kb = all.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }?.let { w ->
             android.graphics.Rect().also { w.getBoundsInScreen(it) }.takeIf { !it.isEmpty }
         }
-        val me = bubble
         var covered: String? = null
+        val me = bubble
         if (me != null) {
-            val r = android.graphics.Rect()
             val mine = all.firstOrNull { w -> w.getBoundsInScreen(r); r == me }
             if (mine != null) for (w in all) {
-                if (w === mine || w.layer <= mine.layer || w.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD) continue
+                if (w === mine || w.layer <= mine.layer) continue
+                if (w.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD || w.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY ||
+                    w.type == AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER) continue
                 w.getBoundsInScreen(r)
-                if (!android.graphics.Rect.intersects(r, me)) continue
-                val node = runCatching { w.root }.getOrNull() ?: continue
-                val p = node.packageName?.toString()
-                @Suppress("DEPRECATION") runCatching { node.recycle() }
-                if (p == null || p == packageName || p == "com.android.systemui") continue
-                covered = p
+                // Full-screen windows above us are system bars / shades (the button stays clear of the status bar): skip.
+                if (!android.graphics.Rect.intersects(r, me) || (r.width() >= me.width() * 8 && r.height() >= me.height() * 8)) continue
+                covered = "window type ${w.type} layer ${w.layer}"
                 break
             }
         }

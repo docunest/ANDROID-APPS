@@ -72,6 +72,7 @@ docunest/MapPal `lib/dock/`).
 ## Crashes (2026-11-14)
 
 Builds 43–44 restarted the dock every ~30–60 min: the floating button's "stay on top" check read every window's content on every window change (Waze changes windows constantly) and never released those objects (Android 10 requires it) — memory leaked until Android killed the dock. Now the button's window is found by its position, only windows overlapping it are read (and released), the window list is released, and checks are coalesced to twice a second. Picture caches are capped at 8 MB each.
+- **"System UI isn't responding"** (same day, same cause): reading a window's content is answered by the app that owns it, on its main thread — on every window change that flooded System UI. The check now uses only window bounds, types and layers (answered by Android itself), at most once a second; re-raising the button at most every 5 s and never in a loop.
 - Any dock crash is saved with its stack trace and uploaded at the next start (tag **CRASH**); at each start Android's own crash log (new entries), the last boot reason and kill / ANR / low-memory events are read through root into the log.
 
 ## Dock keyboard (2026-11-14)
