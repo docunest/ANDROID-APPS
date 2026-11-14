@@ -65,6 +65,7 @@ object BtKick {
         started = true
         app = context.applicationContext
         GocBt.start(app) // KSW unit: the phone is on the external Goodocom module, not Android's Bluetooth
+        BtStackGuard.start() // …and Android's own stack must stay off there (it crash-loops and takes Android down)
         runCatching {
             app.registerReceiver(object : BroadcastReceiver() {
                 override fun onReceive(c: Context, i: Intent) {
