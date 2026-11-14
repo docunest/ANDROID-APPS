@@ -40,19 +40,39 @@ class IDriveLabActivity : Activity() {
         Step("hold-down", "PUSH DOWN and HOLD it 3 seconds,\nthen let go"),
         Step("press", "PRESS the knob in (click) —\n3 times, slowly"),
         Step("press-hold", "PRESS the knob in and HOLD 3 seconds,\nthen let go"),
-        Step("btn-back", "Press BACK (below the knob) once"),
-        Step("btn-option", "Press OPTION once"),
-        Step("btn-menu", "Press MENU once\n(may leave this screen — come back: Settings → 🧪 iDrive test)"),
-        Step("btn-media", "Press MEDIA once\n(may leave this screen)"),
-        Step("btn-radio", "Press RADIO once\n(may leave this screen)"),
-        Step("btn-tel", "Press TEL once\n(may leave this screen)"),
-        Step("btn-nav", "Press NAV once\n(may leave this screen)"),
-        Step("wheel-mode", "Steering wheel: press MODE once"),
-        Step("wheel-plus", "Steering wheel: press + once"),
-        Step("wheel-minus", "Steering wheel: press − once"),
-        Step("wheel-blank", "Steering wheel: press the unlabelled button\n(left of −, under MODE) once"),
-        Step("wheel-phone", "Steering wheel: press 📞 phone once"),
-        Step("wheel-voice", "Steering wheel: press 🗣 voice once"),
+        Step("press-double", "DOUBLE-CLICK the knob (press in twice, quickly)"),
+        Step("btn-back", "Press BACK (below the knob) once — short"),
+        Step("btn-back-long", "Press and HOLD BACK 3 seconds"),
+        Step("btn-option", "Press OPTION once — short"),
+        Step("btn-option-long", "Press and HOLD OPTION 3 seconds"),
+        Step("combo-back-wheel", "COMBO: hold BACK and turn the wheel\n3 clicks right, then let go"),
+        Step("combo-option-push", "COMBO: hold OPTION and push the knob\nRIGHT once, then let go"),
+        Step("combo-back-option", "COMBO: press BACK and OPTION together"),
+        Step("combo-press-wheel", "COMBO: press the knob in, keep it pressed\nand turn 3 clicks right"),
+        Step("btn-menu", "Press MENU once — short\n(may leave this screen — come back: Settings → 🧪 iDrive test)"),
+        Step("btn-menu-long", "Press and HOLD MENU 3 seconds\n(may leave this screen)"),
+        Step("btn-media", "Press MEDIA once — short\n(may leave this screen)"),
+        Step("btn-media-long", "Press and HOLD MEDIA 3 seconds\n(may leave this screen)"),
+        Step("btn-radio", "Press RADIO once — short\n(may leave this screen)"),
+        Step("btn-radio-long", "Press and HOLD RADIO 3 seconds\n(may leave this screen)"),
+        Step("btn-tel", "Press TEL once — short\n(may leave this screen)"),
+        Step("btn-tel-long", "Press and HOLD TEL 3 seconds\n(may leave this screen)"),
+        Step("btn-nav", "Press NAV once — short\n(may leave this screen)"),
+        Step("btn-nav-long", "Press and HOLD NAV 3 seconds\n(may leave this screen)"),
+        Step("wheel-mode", "Steering wheel: press MODE once — short"),
+        Step("wheel-mode-long", "Steering wheel: HOLD MODE 3 seconds"),
+        Step("wheel-plus", "Steering wheel: press + once — short"),
+        Step("wheel-plus-long", "Steering wheel: HOLD + 3 seconds"),
+        Step("wheel-minus", "Steering wheel: press − once — short"),
+        Step("wheel-minus-long", "Steering wheel: HOLD − 3 seconds"),
+        Step("wheel-blank", "Steering wheel: press the unlabelled button\n(left of −, under MODE) once — short"),
+        Step("wheel-blank-long", "Steering wheel: HOLD the unlabelled button 3 seconds"),
+        Step("wheel-phone", "Steering wheel: press 📞 phone once — short"),
+        Step("wheel-phone-long", "Steering wheel: HOLD 📞 phone 3 seconds"),
+        Step("wheel-voice", "Steering wheel: press 🗣 voice once — short"),
+        Step("wheel-voice-long", "Steering wheel: HOLD 🗣 voice 3 seconds"),
+        Step("combo-plus-minus", "COMBO: press + and − together"),
+        Step("combo-mode-wheel", "COMBO: hold MODE and turn the iDrive wheel\n3 clicks right"),
     )
 
     private val main = Handler(Looper.getMainLooper())
@@ -66,6 +86,10 @@ class IDriveLabActivity : Activity() {
     private var stepStartWall = 0L
     @Volatile private var geOffset = 0L
     private val got = mutableListOf<String>()
+    /** One line per complete press: "DPAD_RIGHT 120 ms" / "BACK 3010 ms (long, 14 repeats)". */
+    private val presses = mutableListOf<String>()
+    private val downAt = HashMap<Int, Long>()
+    private val repeats = HashMap<Int, Int>()
     private var left = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -128,6 +152,9 @@ class IDriveLabActivity : Activity() {
 
     private fun begin() {
         got.clear()
+        presses.clear()
+        downAt.clear()
+        repeats.clear()
         left = false
         stepStartUptime = SystemClock.uptimeMillis()
         stepStartWall = System.currentTimeMillis()
@@ -146,7 +173,8 @@ class IDriveLabActivity : Activity() {
         val offset = geOffset
         val mine = got.toList()
         val leftApp = left
-        worker.execute { record(step, start, offset, mine, leftApp) }
+        val presses = this.presses.toList()
+        worker.execute { record(step, start, offset, mine, leftApp, presses) }
         if (to > steps.lastIndex) {
             DebugLog.log("IDRIVE", "all ${steps.size} steps done")
             prefs().edit().putInt("idriveLabStep", 0).apply()
@@ -157,9 +185,10 @@ class IDriveLabActivity : Activity() {
         begin()
     }
 
-    private fun record(step: Step, startWall: Long, offset: Long, mine: List<String>, leftApp: Boolean) {
+    private fun record(step: Step, startWall: Long, offset: Long, mine: List<String>, leftApp: Boolean, presses: List<String>) {
         DebugLog.log("IDRIVE", "── ${step.id} · this screen got ${mine.size} event(s)${if (leftApp) " · LEFT THE APP" else ""}")
         mine.forEach { DebugLog.log("IDRIVE", "  app  $it") }
+        if (presses.isNotEmpty()) DebugLog.log("IDRIVE", "  presses: " + presses.joinToString(" · "))
         val geLines = Root.output(
             "tail -c +${offset + 1} $GE | grep -v -E 'ABS_MT|BTN_TOUCH|SYN_REPORT|ABS_X |ABS_Y |ABS_PRESSURE|BTN_TOOL' | head -150; true",
         )?.lines()?.filter { it.isNotBlank() }.orEmpty()
@@ -188,6 +217,25 @@ class IDriveLabActivity : Activity() {
         note("${KeyEvent.keyCodeToString(e.keyCode)} $action · repeat ${e.repeatCount} · scan ${e.scanCode} · held ${e.eventTime - e.downTime} ms" +
             " · late ${SystemClock.uptimeMillis() - e.eventTime} ms · dev ${e.device?.name ?: e.deviceId} · src 0x${Integer.toHexString(e.source)}" +
             (if (e.flags != 0) " · flags 0x${Integer.toHexString(e.flags)}" else "") + (if (e.metaState != 0) " · meta ${e.metaState}" else ""))
+        val name = KeyEvent.keyCodeToString(e.keyCode).removePrefix("KEYCODE_")
+        when (e.action) {
+            KeyEvent.ACTION_DOWN -> if (e.repeatCount == 0) {
+                downAt[e.keyCode] = e.eventTime
+                val others = downAt.keys.filter { it != e.keyCode }
+                if (others.isNotEmpty()) note("↳ COMBO: $name while holding ${others.joinToString { KeyEvent.keyCodeToString(it).removePrefix("KEYCODE_") }}")
+            } else repeats[e.keyCode] = e.repeatCount
+            KeyEvent.ACTION_UP -> {
+                val held = e.eventTime - (downAt.remove(e.keyCode) ?: e.downTime)
+                val rep = repeats.remove(e.keyCode) ?: 0
+                val kind = when {
+                    e.isCanceled -> "canceled"
+                    held >= 500 || rep > 0 || e.flags and KeyEvent.FLAG_LONG_PRESS != 0 -> "long"
+                    else -> "short"
+                }
+                presses += "$name $held ms ($kind${if (rep > 0) ", $rep repeats" else ""})"
+                note("↳ $name: $kind press, held $held ms${if (rep > 0) ", $rep repeats" else ""}")
+            }
+        }
         return true
     }
 
