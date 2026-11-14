@@ -125,6 +125,20 @@
                 android:resource="@xml/split_service" />
         </service>
 
+        <!-- The Dock keyboard: a side panel that never covers Waze's results; iDrive controllable. -->
+        <service
+            android:name=".DockKeyboard"
+            android:label="Dock keyboard"
+            android:permission="android.permission.BIND_INPUT_METHOD"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/dock_ime" />
+        </service>
+
         <receiver
             android:name=".UpdateReceiver"
             android:exported="false" />

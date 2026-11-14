@@ -76,6 +76,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("wazeOnRight", true)
         set(value) = sp.edit().putBoolean("wazeOnRight", value).apply()
 
+    /** The keyboard in use before switching to the Dock keyboard (to switch back). */
+    var previousKeyboard: String
+        get() = sp.getString("previousKeyboard", "") ?: ""
+        set(value) = sp.edit().putString("previousKeyboard", value).apply()
+
     /** Satellites drawn around the van on the dock map (🛰 chip). */
     var skyOnMap: Boolean
         get() = sp.getBoolean("skyOnMap", true)

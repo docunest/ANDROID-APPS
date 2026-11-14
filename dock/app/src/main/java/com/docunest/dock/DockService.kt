@@ -341,11 +341,24 @@ class DockService : Service() {
         }
     }
 
+    /** The Dock keyboard is the current keyboard. */
+    private fun ourKeyboard() = runCatching {
+        Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD) == DockKeyboard.id(this)
+    }.getOrDefault(false)
+
     /** Keyboard and other apps' overlays, from the accessibility helper's window list. */
     private fun watchWindows() {
+        DockKeyboard.onPanel = {
+            main.post {
+                val kb = DockKeyboard.panelOnScreen?.let { BubblePlace.Area(it.left, it.top, it.right, it.bottom) }
+                if (kb != keyboard) { keyboard = kb; placeBubble() }
+            }
+        }
         SplitService.onWindows = { w ->
             main.post {
-                val kb = w.keyboard?.let { BubblePlace.Area(it.left, it.top, it.right, it.bottom) }
+                // Our own keyboard's window spans the screen (transparent): avoid only its panel.
+                val kb = (DockKeyboard.panelOnScreen ?: w.keyboard.takeIf { DockKeyboard.panelOnScreen == null && !ourKeyboard() })
+                    ?.let { BubblePlace.Area(it.left, it.top, it.right, it.bottom) }
                 if (kb != keyboard) {
                     keyboard = kb
                     DebugLog.log("APP", if (kb == null) "keyboard closed — button back" else "keyboard open (top ${kb.top}) — button moved out of its way")

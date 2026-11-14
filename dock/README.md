@@ -69,6 +69,15 @@ docunest/MapPal `lib/dock/`).
   - Needs background location (granted with root automatically) to see Wi-Fi names while Waze is in front.
 - Links sent while the car was off arrive within seconds of switching on: the app starts on boot and keeps a long-poll open to MapPal (server answers the moment something arrives, ~1 s), re-asking at once on wake / network.
 
+## Dock keyboard (2026-11-14)
+
+The stock keyboard covers the whole lower half — in Waze that's the search results list. The **Dock keyboard** (`DockKeyboard.kt`) is a compact panel (~42 % wide) in the bottom corner **opposite the text cursor** (Waze's search on the left → keyboard on the right). Its window spans the screen but is transparent and tells Android not to resize or move the app; only the panel takes touches, so Waze keeps working everywhere else.
+- **⇄** flips the side (remembered per app); **▾** shrinks it to a small ⌨ button — sticky per app, so tapping Waze's search again doesn't throw the full panel back up; tap ⌨ to bring it back.
+- Digits always on top (coordinates, house numbers); **?#á** page: punctuation, °, Iberian accents (á é í ó ú ã õ ç ñ …); Enter does the app's own action (Waze: Search).
+- **iDrive**: push up/down/left/right = move to the neighbouring key, turn = next / previous key, press = type the highlighted key (bright yellow, thick white border). Handles D-pad, Enter/Centre, Tab, page/navigate keys and rotary scrolling; every hardware key it receives is logged (tag KEY) so another controller mapping can be added. `KeyGrid.kt` (tested).
+- ⚙ → Dock keyboard → **Use Dock keyboard** (root: `ime enable` + `ime set`); **Previous keyboard** switches back.
+- The floating dock button avoids the panel (not the whole transparent window).
+
 ## Root without Magisk: the unit's own ADB (2026-11-13)
 
 This head unit is a **userdebug** build: its `su` refuses apps, but its adbd may run as root. The dock speaks the ADB protocol itself (`AdbClient.kt`, tested against a fake adbd and `adb keygen` keys) to **127.0.0.1:5555** and asks adbd to restart as root; everything that needs root (`Root.kt`: forced Wi-Fi rejoin, Wi-Fi restart, Bluetooth off/on, grants, GPS fixes, silent updates) uses `su` when it works, else this (`AdbShell.kt`). The doctors show "Root via adb (root)".

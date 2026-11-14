@@ -129,6 +129,43 @@ class SettingsActivity : Activity() {
         }.toTypedArray())
         switch("\"🔎 Nearby\" in press-and-slide", prefs.fanNearby) { prefs.fanNearby = it }
 
+        section("Dock keyboard")
+        col.addView(label("A compact keyboard on the side opposite the text field, so Waze's search results stay visible. " +
+            "⇄ flips the side, ▾ shrinks it to a small button. iDrive: push = move between keys, turn = next / previous, press = type the yellow key.", 13f, Palette.MUTED))
+        val kbStatus = label("", 13f, Palette.MUTED)
+        fun showKb() {
+            val cur = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+            kbStatus.text = if (cur == DockKeyboard.id(this)) "Dock keyboard is in use ✓" else "In use now: ${cur ?: "?"}"
+        }
+        showKb()
+        col.addView(kbStatus)
+        row(
+            bigButton("Use Dock keyboard", Palette.BLUE, 15f) {
+                val id = DockKeyboard.id(this)
+                val before = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+                if (before != null && before != id) prefs.previousKeyboard = before
+                Thread {
+                    val ok = Root.run("ime enable $id", "ime set $id")
+                    runOnUiThread {
+                        showKb()
+                        if (!ok) {
+                            Toast.makeText(this, "No root: switch it on in Android's keyboard settings", Toast.LENGTH_LONG).show()
+                            runCatching { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
+                        }
+                    }
+                }.start()
+            },
+            bigButton("Previous keyboard", Palette.CARD_HI, 15f) {
+                val prev = prefs.previousKeyboard
+                if (prev.isBlank()) {
+                    runCatching { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
+                } else Thread {
+                    Root.run("ime set $prev")
+                    runOnUiThread { showKb() }
+                }.start()
+            },
+        )
+
         section("Floating button")
         row(bigButton("Reset button position", Palette.BLUE, 15f) {
             DockService.start(this, DockService.ACTION_RESET_POSITION)
