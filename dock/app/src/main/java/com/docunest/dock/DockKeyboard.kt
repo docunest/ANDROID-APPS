@@ -364,6 +364,8 @@ class DockKeyboard : InputMethodService() {
             private set
         @Volatile var onPanel: (() -> Unit)? = null
 
-        fun id(context: Context) = "${context.packageName}/${DockKeyboard::class.java.name}"
+        /** Android's own name for it ("com.docunest.dock/.DockKeyboard", the short form): `ime set` and
+         *  Settings.Secure.DEFAULT_INPUT_METHOD use exactly this; the long form is "unknown input method". */
+        fun id(context: Context) = android.content.ComponentName(context, DockKeyboard::class.java).flattenToShortString()
     }
 }

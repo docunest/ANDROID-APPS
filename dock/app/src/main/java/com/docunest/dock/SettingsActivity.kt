@@ -144,15 +144,36 @@ class SettingsActivity : Activity() {
                 val id = DockKeyboard.id(this)
                 val before = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
                 if (before != null && before != id) prefs.previousKeyboard = before
+                kbStatus.text = "Switching to the Dock keyboard…"
                 Thread {
-                    val ok = Root.run("ime enable $id", "ime set $id")
+                    // `ime` reports success even when it refuses, so read back what Android now uses.
+                    val said = Root.output("ime enable $id 2>&1", "ime set $id 2>&1", "settings get secure default_input_method")
+                    var now = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+                    DebugLog.log("KEY", "use Dock keyboard ($id): ${said?.trim()?.replace("\n", " | ") ?: "root refused"} → in use: $now")
+                    if (said != null && now != id) {
+                        // Fallback: write the settings ime would have written.
+                        val enabled = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_INPUT_METHODS).orEmpty()
+                        val list = if (enabled.split(':').any { it.substringBefore(';') == id }) enabled
+                            else listOf(enabled, id).filter { it.isNotBlank() }.joinToString(":")
+                        Root.run("settings put secure enabled_input_methods '$list'", "settings put secure default_input_method $id")
+                        now = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+                        DebugLog.log("KEY", "settings fallback → in use: $now")
+                    }
                     runOnUiThread {
                         showKb()
-                        if (!ok) {
-                            Toast.makeText(this, "No root: switch it on in Android's keyboard settings", Toast.LENGTH_LONG).show()
-                            runCatching { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
+                        when {
+                            said == null -> {
+                                Toast.makeText(this, "No root: switch it on in Android's keyboard settings", Toast.LENGTH_LONG).show()
+                                runCatching { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
+                            }
+                            now == id -> Toast.makeText(this, "Dock keyboard on ✓ — tap a text field", Toast.LENGTH_LONG).show()
+                            else -> {
+                                Toast.makeText(this, "Android refused: ${said.trim().lines().firstOrNull { it.isNotBlank() } ?: "?"}", Toast.LENGTH_LONG).show()
+                                runCatching { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
+                            }
                         }
                     }
+                    Thread { DebugLog.uploadNow(applicationContext) }.start()
                 }.start()
             },
             bigButton("Previous keyboard", Palette.CARD_HI, 15f) {
@@ -160,7 +181,8 @@ class SettingsActivity : Activity() {
                 if (prev.isBlank()) {
                     runCatching { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
                 } else Thread {
-                    Root.run("ime set $prev")
+                    val said = Root.output("ime set $prev 2>&1")
+                    DebugLog.log("KEY", "previous keyboard ($prev): ${said?.trim() ?: "root refused"}")
                     runOnUiThread { showKb() }
                 }.start()
             },
