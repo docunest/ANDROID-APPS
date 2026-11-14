@@ -74,13 +74,18 @@ object DebugLog {
         while (mem.size > MEM) mem.removeFirst()
         if (seq % 50 == 0L) sp()?.edit()?.putLong("debugSeq", seq)?.apply()
         val ctx = app ?: return
-        runCatching {
-            val dir = File(ctx.filesDir, "debug").apply { mkdirs() }
-            val f = File(dir, "log.txt")
-            if (f.length() > FILE_MAX) f.renameTo(File(dir, "log.old.txt"))
-            f.appendText(line.text() + "\n")
+        // The file write off the caller's thread: log lines come from the main thread too (keyboard keys).
+        disk.execute {
+            runCatching {
+                val dir = File(ctx.filesDir, "debug").apply { mkdirs() }
+                val f = File(dir, "log.txt")
+                if (f.length() > FILE_MAX) f.renameTo(File(dir, "log.old.txt"))
+                f.appendText(line.text() + "\n")
+            }
         }
     }
+
+    private val disk = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     /** Log only when [value] differs from the last one logged under [key]. Returns true if it changed. */
     @Synchronized

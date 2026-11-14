@@ -14,6 +14,30 @@ import android.view.accessibility.AccessibilityWindowInfo
 class SplitService : AccessibilityService() {
     override fun onServiceConnected() {
         instance = this
+        filterKeys(DockKeyboard.active != null)
+    }
+
+    private var filtering = false
+
+    /**
+     * iDrive keys straight to the Dock keyboard, before Waze sees them: normally Android hands keys
+     * to the app in front, and Waze's main thread (busy drawing the map) passed them on late.
+     * Only while the keyboard panel is up, so keys anywhere else are never touched.
+     */
+    fun filterKeys(on: Boolean) {
+        if (on == filtering) return
+        runCatching {
+            val info = serviceInfo ?: return
+            info.flags = if (on) info.flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
+                else info.flags and android.accessibilityservice.AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS.inv()
+            serviceInfo = info
+            filtering = on
+        }.onFailure { DebugLog.change("KEY", "early keys", "failed: ${it.javaClass.simpleName}") }
+    }
+
+    override fun onKeyEvent(event: android.view.KeyEvent): Boolean {
+        val kb = DockKeyboard.active ?: return false
+        return runCatching { kb.hardKey(event, "early") }.getOrDefault(false)
     }
 
     /** What the floating button needs to know about the other windows. */

@@ -11,6 +11,7 @@ import android.graphics.Typeface
 import android.inputmethodservice.InputMethodService
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.InputDevice
@@ -102,6 +103,13 @@ class DockKeyboard : InputMethodService() {
         super.onFinishInputView(finishingInput)
         panelOnScreen = null
         onPanel?.invoke()
+        active = null
+        SplitService.instance?.filterKeys(false)
+    }
+
+    override fun onDestroy() {
+        if (active === this) { active = null; SplitService.instance?.filterKeys(false) }
+        super.onDestroy()
     }
 
     /** Only the panel (or the small button) takes touches; the app isn't resized or moved. */
@@ -136,6 +144,7 @@ class DockKeyboard : InputMethodService() {
         pill.visibility = if (minimized) View.VISIBLE else View.GONE
         root.requestLayout()
         root.post {
+            updateEarlyKeys()
             val v = if (minimized) pill else keys
             val at = IntArray(2).also { v.getLocationOnScreen(it) }
             panelOnScreen = Rect(at[0], at[1], at[0] + v.width, at[1] + v.height)
@@ -180,15 +189,27 @@ class DockKeyboard : InputMethodService() {
 
     // --- iDrive / hardware keys -------------------------------------------------------------------
 
-    private fun logKey(what: String, e: KeyEvent) {
-        DebugLog.log("KEY", "$what ${KeyEvent.keyCodeToString(e.keyCode)} (${e.keyCode}) scan ${e.scanCode} source 0x${Integer.toHexString(e.source)} " +
-            "device ${e.device?.name ?: e.deviceId} meta ${e.metaState} repeat ${e.repeatCount}")
-    }
+    private val KEYS = setOf(
+        KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
+        KeyEvent.KEYCODE_TAB, KeyEvent.KEYCODE_NAVIGATE_NEXT, KeyEvent.KEYCODE_NAVIGATE_PREVIOUS, KeyEvent.KEYCODE_PAGE_DOWN,
+        KeyEvent.KEYCODE_PAGE_UP, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER,
+        KeyEvent.KEYCODE_BUTTON_A,
+    )
 
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        logKey("down", event)
-        if (!isInputViewShown || minimized) return super.onKeyDown(keyCode, event)
-        when (keyCode) {
+    /**
+     * An iDrive / hardware key for the panel. [via] "app" = Android handed it to the app in front
+     * (Waze), whose busy main thread passed it on — slow; "early" = [SplitService] caught it before
+     * any app saw it. Returns true when the panel used it.
+     */
+    fun hardKey(event: KeyEvent, via: String): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            val lag = SystemClock.uptimeMillis() - event.eventTime
+            DebugLog.log("KEY", "down ${KeyEvent.keyCodeToString(event.keyCode)} via $via · ${lag} ms after the press" +
+                " · source 0x${Integer.toHexString(event.source)} repeat ${event.repeatCount}")
+        }
+        if (!isInputViewShown || minimized || event.keyCode !in KEYS) return false
+        if (event.action != KeyEvent.ACTION_DOWN) return true // the matching "up": swallowed too
+        when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_UP -> keys.move(KeyGrid.Dir.UP)
             KeyEvent.KEYCODE_DPAD_DOWN -> keys.move(KeyGrid.Dir.DOWN)
             KeyEvent.KEYCODE_DPAD_LEFT -> keys.move(KeyGrid.Dir.LEFT)
@@ -196,23 +217,22 @@ class DockKeyboard : InputMethodService() {
             KeyEvent.KEYCODE_TAB -> keys.step(!event.isShiftPressed)
             KeyEvent.KEYCODE_NAVIGATE_NEXT, KeyEvent.KEYCODE_PAGE_DOWN -> keys.step(true)
             KeyEvent.KEYCODE_NAVIGATE_PREVIOUS, KeyEvent.KEYCODE_PAGE_UP -> keys.step(false)
-            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER, KeyEvent.KEYCODE_BUTTON_A -> {
-                if (event.repeatCount == 0) keys.focused()?.let { onKey(it) } ?: keys.showFocus()
-            }
-            else -> return super.onKeyDown(keyCode, event)
+            else -> if (event.repeatCount == 0) keys.focused()?.let { onKey(it) } ?: keys.showFocus()
         }
         return true
     }
 
-    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
-        if (!isInputViewShown || minimized) return super.onKeyUp(keyCode, event)
-        return when (keyCode) {
-            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
-            KeyEvent.KEYCODE_TAB, KeyEvent.KEYCODE_NAVIGATE_NEXT, KeyEvent.KEYCODE_NAVIGATE_PREVIOUS, KeyEvent.KEYCODE_PAGE_DOWN,
-            KeyEvent.KEYCODE_PAGE_UP, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER,
-            KeyEvent.KEYCODE_BUTTON_A -> true
-            else -> super.onKeyUp(keyCode, event)
-        }
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
+        hardKey(event, "app") || super.onKeyDown(keyCode, event)
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean =
+        hardKey(event, "app") || super.onKeyUp(keyCode, event)
+
+    /** Panel up and usable → iDrive keys are caught early (before Waze); otherwise left alone. */
+    private fun updateEarlyKeys() {
+        val on = ::keys.isInitialized && isInputViewShown && !minimized
+        active = if (on) this else null
+        SplitService.instance?.filterKeys(on)
     }
 
     /** Turning a rotary controller (if the unit reports it as scrolling): one step per detent. */
@@ -369,6 +389,9 @@ class DockKeyboard : InputMethodService() {
         @Volatile var panelOnScreen: Rect? = null
             private set
         @Volatile var onPanel: (() -> Unit)? = null
+        /** The keyboard while its panel is up (not ▾), for [SplitService.onKeyEvent]. Main thread. */
+        @Volatile var active: DockKeyboard? = null
+            private set
 
         /** Android's own name for it ("com.docunest.dock/.DockKeyboard", the short form): `ime set` and
          *  Settings.Secure.DEFAULT_INPUT_METHOD use exactly this; the long form is "unknown input method". */
