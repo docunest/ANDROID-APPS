@@ -90,6 +90,7 @@ class DockKeyboard : InputMethodService() {
         runCatching { currentInputConnection?.requestCursorUpdates(InputConnection.CURSOR_UPDATE_IMMEDIATE) }
         layoutPanel()
         MainWatch.start()
+        KeyProbe.maybeStart(applicationContext)
         DebugLog.log("KEY", "keyboard up in $pkg (side $side${if (sideChosenByHand) ", chosen by hand" else ""})")
     }
 
@@ -192,12 +193,13 @@ class DockKeyboard : InputMethodService() {
         KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
         KeyEvent.KEYCODE_TAB, KeyEvent.KEYCODE_NAVIGATE_NEXT, KeyEvent.KEYCODE_NAVIGATE_PREVIOUS, KeyEvent.KEYCODE_PAGE_DOWN,
         KeyEvent.KEYCODE_PAGE_UP, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER,
-        KeyEvent.KEYCODE_BUTTON_A, TURN_BACK, TURN_ON,
+        KeyEvent.KEYCODE_BUTTON_A, PUSH_UP, PUSH_DOWN,
     )
 
     /**
      * An iDrive key for the panel (the car's software injects them as a "Virtual" keyboard; they
-     * reach us ~4 ms after the press). Returns true when the panel used it.
+     * reach us ~4 ms after it sends them — left/right only once the push is released, wheel clicks
+     * at most one per ~150 ms). Returns true when the panel used it.
      */
     private fun hardKey(event: KeyEvent): Boolean {
         if (!::keys.isInitialized) return false
@@ -217,8 +219,8 @@ class DockKeyboard : InputMethodService() {
             KeyEvent.KEYCODE_TAB -> keys.step(!event.isShiftPressed)
             KeyEvent.KEYCODE_NAVIGATE_NEXT, KeyEvent.KEYCODE_PAGE_DOWN -> keys.step(true)
             KeyEvent.KEYCODE_NAVIGATE_PREVIOUS, KeyEvent.KEYCODE_PAGE_UP -> keys.step(false)
-            TURN_ON -> keys.step(true)
-            TURN_BACK -> keys.step(false)
+            PUSH_UP -> keys.move(KeyGrid.Dir.UP)
+            PUSH_DOWN -> keys.move(KeyGrid.Dir.DOWN)
             else -> if (event.repeatCount == 0) keys.focused()?.let { onKey(it) } ?: keys.showFocus()
         }
         return true
@@ -399,9 +401,10 @@ class DockKeyboard : InputMethodService() {
 
         /** Android's own name for it ("com.docunest.dock/.DockKeyboard", the short form): `ime set` and
          *  Settings.Secure.DEFAULT_INPUT_METHOD use exactly this; the long form is "unknown input method". */
-        /** The car's iDrive knob turns, as the KSW software injects them (unit's log: 691, 692 ~4 a second). */
-        const val TURN_BACK = 691
-        const val TURN_ON = 692
+        /** iDrive push up / down as the car's (KSW) software injects them: 691 seen for push up (owner
+         *  pushing up/down while the wheel sent DPAD up/down); 692 assumed for down — KEYRAW will tell. */
+        const val PUSH_UP = 691
+        const val PUSH_DOWN = 692
 
         fun id(context: Context) = android.content.ComponentName(context, DockKeyboard::class.java).flattenToShortString()
     }

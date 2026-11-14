@@ -408,30 +408,45 @@ class DockService : Service() {
     }
 
     // Status ring on the button (GPS left, Wi-Fi right), once a second — redrawn only when it changes.
+    // Measured on its own thread: asking Android's location service can block for many seconds when
+    // the GPS loses signal (22.7 s seen at 95 km/h), and on the main thread that froze the button and
+    // the Dock keyboard (both drawn there).
+    private val ringThread = android.os.HandlerThread("ring").apply { start() }
+    private val ringHandler = Handler(ringThread.looper)
+    private val ringBusy = java.util.concurrent.atomic.AtomicBoolean(false)
     private val gpsDotLoop = object : Runnable {
         override fun run() {
-            runCatching { refreshRing() }
+            runCatching {
+                GpsWatch.start(this@DockService) // idempotent: may not have started if location was granted after the dock
+                if (!locationService && Locator.hasPermission(this@DockService)) startInForeground() // granted since: become a location service
+            }
+            if (ringBusy.compareAndSet(false, true)) ringHandler.post {
+                try { runCatching { refreshRing() } } finally { ringBusy.set(false) }
+            }
             main.postDelayed(this, 1000)
         }
     }
 
+    /** On the ring thread; only the drawing goes back to the main thread. */
     private fun refreshRing() {
         val b = bubble ?: return
-        GpsWatch.start(this) // idempotent: may not have started if location was granted after the dock
-        if (!locationService && Locator.hasPermission(this)) startInForeground() // granted since: become a location service
         val t = android.os.SystemClock.elapsedRealtime()
         val g = gpsLevel()
         val w = wifiLevel()
-        b.gpsArc = gpsDebounce.update(t, if (prefs.gpsDot) GpsDot.arc(g) else Ring.FINE)
-        b.wifiArc = wifiDebounce.update(t, if (prefs.wifiDot) WifiDot.arc(w) else Ring.FINE)
-        b.contentDescription = "Dock · GPS ${g.label} · Wi-Fi ${w.label}"
-        DebugLog.change("RING", "gps", if (b.gpsArc.fine) "white" else g.name, gpsInputs)
-        DebugLog.change("RING", "wifi", if (b.wifiArc.fine) "white" else w.name,
+        val gArc = gpsDebounce.update(t, if (prefs.gpsDot) GpsDot.arc(g) else Ring.FINE)
+        val wArc = wifiDebounce.update(t, if (prefs.wifiDot) WifiDot.arc(w) else Ring.FINE)
+        main.post {
+            b.gpsArc = gArc
+            b.wifiArc = wArc
+            b.contentDescription = "Dock · GPS ${g.label} · Wi-Fi ${w.label}"
+        }
+        DebugLog.change("RING", "gps", if (gArc.fine) "white" else g.name, gpsInputs)
+        DebugLog.change("RING", "wifi", if (wArc.fine) "white" else w.name,
             "connected ${WifiDoctor.connected} ${WifiDoctor.ssid ?: ""} · internet ${WifiDoctor.internet} · link ${WifiDoctor.link.text()} via ${WifiDoctor.rttMethod} · rssi ${WifiDoctor.rssi}")
         // Raw levels (before the 8 s debounce) too: blips show here even when the ring stays white.
         DebugLog.change("GPS", "level", g.name, gpsInputs)
         DebugLog.change("WIFI", "level", w.name)
-        DebugLog.status["Ring now"] = "GPS ${g.name} (${g.label}) shown ${if (b.gpsArc.fine) "white" else "as warning"} · Wi-Fi ${w.name} (${w.label}) shown ${if (b.wifiArc.fine) "white" else "as warning"}"
+        DebugLog.status["Ring now"] = "GPS ${g.name} (${g.label}) shown ${if (gArc.fine) "white" else "as warning"} · Wi-Fi ${w.name} (${w.label}) shown ${if (wArc.fine) "white" else "as warning"}"
         DebugLog.status["Wi-Fi"] = "connected ${WifiDoctor.connected} ${WifiDoctor.ssid ?: ""} · rssi ${WifiDoctor.rssi} · internet ${WifiDoctor.internet} · link ${WifiDoctor.link.text()} via ${WifiDoctor.rttMethod}" +
             " · checks: ${WifiDoctor.verdict.text}"
         DebugLog.status["Service"] = "location service $locationService · background location " +
@@ -750,6 +765,7 @@ class DockService : Service() {
         Sync.onNewLinks = null
         Store.removeListener(storeListener)
         main.removeCallbacksAndMessages(null)
+        ringThread.quitSafely()
         runCatching { unregisterReceiver(wakeReceiver) }
         netCallback?.let { cb -> runCatching { (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(cb) } }
         hideFan()
