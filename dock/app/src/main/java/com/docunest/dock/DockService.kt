@@ -133,6 +133,11 @@ class DockService : Service() {
             addBubble()
         } else if (intent?.action == ACTION_RELAYOUT) {
             relayoutBubble()
+        } else if (intent?.action == ACTION_RESET_POSITION) {
+            prefs.bubbleX = -1
+            prefs.bubbleY = -1
+            relayoutBubble()
+            DebugLog.log("APP", "button position reset")
         }
         Sync.pollSoon()
         return START_STICKY
@@ -206,8 +211,11 @@ class DockService : Service() {
         }
         bubbleParams = overlayParams(size, size).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = prefs.bubbleX
-            y = prefs.bubbleY
+            // Never outside the screen (that's how it ended up under the status bar, untouchable).
+            flags = flags and WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS.inv()
+            val (sx, sy) = savedPos(size)
+            x = sx
+            y = sy
         }
 
         val slop = ViewConfiguration.get(this).scaledTouchSlop * 1.5f
@@ -246,8 +254,9 @@ class DockService : Service() {
                             v.removeCallbacks(openFan)
                         }
                         if (dragging) {
-                            bubbleParams.x = startX + dx.toInt()
-                            bubbleParams.y = startY + dy.toInt()
+                            val (cx, cy) = BubblePlace.clamp(startX + dx.toInt(), startY + dy.toInt(), bubbleParams.width, safeArea())
+                            bubbleParams.x = cx
+                            bubbleParams.y = cy
                             wm.updateViewLayout(v, bubbleParams)
                         }
                     }
@@ -264,6 +273,7 @@ class DockService : Service() {
                             chosen?.invoke()
                         }
                         dragging -> {
+                            // Saved already clamped: it can't be left anywhere untouchable.
                             prefs.bubbleX = bubbleParams.x
                             prefs.bubbleY = bubbleParams.y
                         }
@@ -275,6 +285,8 @@ class DockService : Service() {
         }
         wm.addView(view, bubbleParams)
         bubble = view
+        placeBubble()
+        watchWindows()
         refreshBadge()
         main.removeCallbacks(gpsDotLoop)
         main.post(gpsDotLoop)
@@ -286,7 +298,83 @@ class DockService : Service() {
         bubbleParams.width = size
         bubbleParams.height = size
         b.fade = idleAlpha()
-        runCatching { wm.updateViewLayout(b, bubbleParams) }
+        placeBubble()
+    }
+
+    // --- Where the button may be ---------------------------------------------------------------
+
+    /** Keyboard bounds while one is showing (from the accessibility helper), else null. */
+    private var keyboard: BubblePlace.Area? = null
+    private var lastRaise = 0L
+
+    /** Below the status bar, above the navigation bar, inside the sides — where it can always be touched. */
+    private fun safeArea(): BubblePlace.Area {
+        val m = DisplayMetrics().also { @Suppress("DEPRECATION") wm.defaultDisplay.getRealMetrics(it) }
+        fun dimen(name: String) = resources.getIdentifier(name, "dimen", "android").takeIf { it > 0 }?.let { resources.getDimensionPixelSize(it) } ?: 0
+        val top = maxOf(dimen("status_bar_height"), dp(32)) + dp(8)
+        val bottom = m.heightPixels - dimen("navigation_bar_height").coerceAtMost(m.heightPixels / 4) - dp(4)
+        return BubblePlace.Area(dp(4), top, m.widthPixels - dp(4), bottom)
+    }
+
+    /** The saved position, made safe (a position saved under the status bar is pulled back). Reset = left, mid-height. */
+    private fun savedPos(size: Int): Pair<Int, Int> {
+        val a = safeArea()
+        if (prefs.bubbleX < 0 || prefs.bubbleY < 0) return BubblePlace.default(size, a)
+        return BubblePlace.clamp(prefs.bubbleX, prefs.bubbleY, size, a)
+    }
+
+    /** Put the button where it belongs now: its saved place, out of the keyboard's way (or hidden). */
+    private fun placeBubble() {
+        val b = bubble ?: return
+        val size = bubbleParams.width
+        val (x, y) = savedPos(size)
+        val pos = BubblePlace.avoidKeyboard(x, y, size, keyboard, safeArea(), dp(8))
+        if (pos == null) {
+            b.visibility = View.GONE // keyboard up and no room above it: out of the way until it closes
+            return
+        }
+        b.visibility = View.VISIBLE
+        if (bubbleParams.x != pos.first || bubbleParams.y != pos.second) {
+            bubbleParams.x = pos.first
+            bubbleParams.y = pos.second
+            runCatching { wm.updateViewLayout(b, bubbleParams) }
+        }
+    }
+
+    /** Keyboard and other apps' overlays, from the accessibility helper's window list. */
+    private fun watchWindows() {
+        SplitService.onWindows = { w ->
+            main.post {
+                val kb = w.keyboard?.let { BubblePlace.Area(it.left, it.top, it.right, it.bottom) }
+                if (kb != keyboard) {
+                    keyboard = kb
+                    DebugLog.log("APP", if (kb == null) "keyboard closed — button back" else "keyboard open (top ${kb.top}) — button moved out of its way")
+                    placeBubble()
+                }
+                w.coveredBy?.let { raiseBubble(it) }
+            }
+        }
+        // The helper is how we see the keyboard: switch it on (root / the unit's adb) if it isn't.
+        main.postDelayed({
+            if (SplitService.instance == null) Thread { Root.enableSplitService(this) }.start()
+        }, 10_000)
+    }
+
+    /** Another app's overlay landed on top of the button: add the button again — the newest overlay is on top. */
+    private fun raiseBubble(by: String) {
+        val b = bubble ?: return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastRaise < 3_000 || fan != null || b.pressedLook) return
+        lastRaise = now
+        runCatching {
+            wm.removeView(b)
+            wm.addView(b, bubbleParams)
+        }.onSuccess { DebugLog.log("APP", "button was covered by $by — raised to the top") }
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        main.post { placeBubble() } // rotation / screen size: stay on screen
     }
 
     private fun togglePanel() {
@@ -658,6 +746,7 @@ class DockService : Service() {
         private const val NOTIFICATION_ID = 1
         const val ACTION_STOP = "com.docunest.dock.STOP"
         const val ACTION_RELAYOUT = "com.docunest.dock.RELAYOUT"
+        const val ACTION_RESET_POSITION = "com.docunest.dock.RESET_POSITION"
         private var rootTried = false
 
         fun start(context: Context, action: String? = null) {

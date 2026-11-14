@@ -12,6 +12,9 @@ docunest/MapPal `lib/dock/`).
 | **Drag** | Move the button anywhere (position is remembered). |
 
 - The button is small (50 dp) and 45 % transparent when idle, fully visible while touched. Both are adjustable in ⚙.
+- **It can't get lost** (2026-11-14, after it was dragged under the status bar): it always stays fully inside the safe area — below the status bar, above the navigation bar, inside the sides — while dragging, when saved, on rotation and at start (a bad saved position is pulled back). **⚙ → Floating button → Reset button position** puts it at the left edge, half-way down. (`BubblePlace.kt`, tested.)
+- **Never in the keyboard's way**: the button never takes keyboard focus; when a keyboard opens over it, it moves just above it (or hides if there's no room) and comes back when the keyboard closes. Seen through the accessibility helper's window list (keyboard bounds only, no content).
+- **On top of other apps' overlays**: Android puts app overlays below the status bar and keyboard (that's the highest an app may go); among overlays, if another app's lands on the button, the dock re-adds it on top (at most every 3 s, never while touched).
 - **Status marks** (on the button's outline; ⚙ → GPS to turn either off): nothing extra while all is fine. When something is off a short arc grows from the bottom of the outline — **GPS to the left, Wi-Fi to the right** — about 1/10 of the circle for a warning, 1/6 when it's gone. A problem shows only after lasting 8 s and clears after 3 s fine (`Ring.kt`, tested), so blips stay off the screen.
   - GPS: orange = barely (worse than ±50 m, or no fix for 15–60 s) · grey dashed = no sky (tunnel / car park) · red = gone (60 s+) · pink = parked position shown. The fix age is the freshest of three sources (`GpsDot.kt`).
   - Wi-Fi: yellow = link getting poor · orange = no internet / link bad · blue = joining · purple = Bluetooth kicked · red = lost · grey dashed = Wi-Fi off (`WifiDot.kt`).

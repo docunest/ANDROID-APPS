@@ -130,6 +130,11 @@ class SettingsActivity : Activity() {
         switch("\"🔎 Nearby\" in press-and-slide", prefs.fanNearby) { prefs.fanNearby = it }
 
         section("Floating button")
+        row(bigButton("Reset button position", Palette.BLUE, 15f) {
+            DockService.start(this, DockService.ACTION_RESET_POSITION)
+            Toast.makeText(this, "Button moved to the left edge, half-way down", Toast.LENGTH_SHORT).show()
+        })
+        col.addView(label("It always stays fully on screen (below the status bar) and moves out of the keyboard's way.", 13f, Palette.MUTED))
         slider("Size", prefs.bubbleSizeDp, 32, 96, " dp") { prefs.bubbleSizeDp = it; DockService.start(this, DockService.ACTION_RELAYOUT) }
         slider("Opacity when idle", prefs.bubbleAlpha, 15, 100, " %") { prefs.bubbleAlpha = it; DockService.start(this, DockService.ACTION_RELAYOUT) }
 
