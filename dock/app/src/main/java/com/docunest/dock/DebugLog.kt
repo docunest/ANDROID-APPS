@@ -45,6 +45,20 @@ object DebugLog {
         app = context.applicationContext
         seq = sp()?.getLong("debugSeq", 0L) ?: 0L
         log("APP", "start · build ${BuildConfig.VERSION_CODE} · Android ${Build.VERSION.RELEASE} (${Build.VERSION.SDK_INT}) · ${Build.MANUFACTURER} ${Build.MODEL}")
+        // The previous run's crash (saved by the handler below as the process died) → into this run's uploaded log.
+        sp()?.getString("lastCrash", null)?.let { c ->
+            c.lines().take(60).forEach { log("CRASH", it) }
+            sp()?.edit()?.remove("lastCrash")?.apply()
+        }
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            runCatching {
+                val trace = "dock crashed in thread ${t.name} (build ${BuildConfig.VERSION_CODE}):\n" + android.util.Log.getStackTraceString(e)
+                sp()?.edit()?.putString("lastCrash", trace.take(8000))?.commit() // commit: the process is about to die
+                log("CRASH", trace.lines().first())
+            }
+            previous?.uncaughtException(t, e)
+        }
     }
 
     private fun sp() = app?.getSharedPreferences("dock", Context.MODE_PRIVATE)

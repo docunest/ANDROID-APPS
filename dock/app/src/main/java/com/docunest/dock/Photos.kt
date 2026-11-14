@@ -24,7 +24,10 @@ object Photos {
     const val MISS_MS = 7L * 24 * 60 * 60_000
     private const val MAX_PX = 360
 
-    private val memory = LruCache<String, Bitmap>(40)
+    /** Up to 8 MB of decoded pictures in memory (by size, not count); the files keep the rest. */
+    private val memory = object : LruCache<String, Bitmap>(8 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: Bitmap) = value.byteCount
+    }
     private val pending = mutableSetOf<String>()
     private val failedAt = HashMap<String, Long>()
     private val worker = Executors.newSingleThreadExecutor()

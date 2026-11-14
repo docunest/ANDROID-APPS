@@ -13,6 +13,7 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.drawable.Icon
 import android.net.ConnectivityManager
 import android.net.Network
@@ -258,6 +259,7 @@ class DockService : Service() {
                             bubbleParams.x = cx
                             bubbleParams.y = cy
                             wm.updateViewLayout(v, bubbleParams)
+                            SplitService.bubble = Rect(cx, cy, cx + bubbleParams.width, cy + bubbleParams.height)
                         }
                     }
                 }
@@ -339,6 +341,7 @@ class DockService : Service() {
             bubbleParams.y = pos.second
             runCatching { wm.updateViewLayout(b, bubbleParams) }
         }
+        SplitService.bubble = Rect(pos.first, pos.second, pos.first + size, pos.second + size)
     }
 
     /** The Dock keyboard is the current keyboard. */

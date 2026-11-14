@@ -69,6 +69,11 @@ docunest/MapPal `lib/dock/`).
   - Needs background location (granted with root automatically) to see Wi-Fi names while Waze is in front.
 - Links sent while the car was off arrive within seconds of switching on: the app starts on boot and keeps a long-poll open to MapPal (server answers the moment something arrives, ~1 s), re-asking at once on wake / network.
 
+## Crashes (2026-11-14)
+
+Builds 43–44 restarted the dock every ~30–60 min: the floating button's "stay on top" check read every window's content on every window change (Waze changes windows constantly) and never released those objects (Android 10 requires it) — memory leaked until Android killed the dock. Now the button's window is found by its position, only windows overlapping it are read (and released), the window list is released, and checks are coalesced to twice a second. Picture caches are capped at 8 MB each.
+- Any dock crash is saved with its stack trace and uploaded at the next start (tag **CRASH**); at each start Android's own crash log (new entries), the last boot reason and kill / ANR / low-memory events are read through root into the log.
+
 ## Dock keyboard (2026-11-14)
 
 The stock keyboard covers the whole lower half — in Waze that's the search results list. The **Dock keyboard** (`DockKeyboard.kt`) is a compact panel (~42 % wide) in the bottom corner **opposite the text cursor** (Waze's search on the left → keyboard on the right). Its window spans the screen but is transparent and tells Android not to resize or move the app; only the panel takes touches, so Waze keeps working everywhere else.

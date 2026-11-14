@@ -49,8 +49,34 @@ object Diagnostics {
         }.start()
     }
 
+    /**
+     * Android's own crash log (any app, incl. ours) — new entries since the last look — and why the unit last
+     * rebooted, into the uploaded log (tag CRASH). Needs root (the unit's adb).
+     */
+    private fun crashes(context: Context) {
+        val sp = context.getSharedPreferences("dock", Context.MODE_PRIVATE)
+        val boot = Root.output("getprop sys.boot.reason; getprop ro.boot.bootreason; getprop persist.sys.boot.reason; cat /proc/uptime")
+            ?.lines()?.filter { it.isNotBlank() }?.joinToString(" · ")
+        DebugLog.log("CRASH", "last boot reason: ${boot ?: "unknown (no root)"}")
+        val seen = sp.getString("crashSeen", "") ?: ""
+        val buf = Root.output("logcat -b crash -d -v epoch -t 400") ?: return
+        val lines = buf.lines().filter { it.isNotBlank() }
+        val fresh = lines.dropWhile { seen.isNotEmpty() && it != seen }.let { if (it.size == lines.size) it else it.drop(1) }
+        if (fresh.isEmpty()) {
+            DebugLog.log("CRASH", "Android crash log: nothing new")
+        } else {
+            DebugLog.log("CRASH", "Android crash log: ${fresh.size} new lines")
+            fresh.takeLast(150).forEach { DebugLog.log("CRASH", "  " + it.take(300)) }
+        }
+        lines.lastOrNull()?.let { sp.edit().putString("crashSeen", it).apply() }
+        // Kills / ANRs / low memory (system events) mentioning the dock or the unit.
+        Root.output("logcat -b events -d -v epoch -t 4000 | grep -iE 'am_crash|am_anr|am_proc_died.*docunest|am_kill.*docunest|am_low_memory|watchdog' | tail -n 25")
+            ?.lines()?.filter { it.isNotBlank() }?.forEach { DebugLog.log("CRASH", "  event: " + it.take(250)) }
+    }
+
     private fun run(context: Context) {
         val via = Root.via()
+        runCatching { crashes(context) }
         DebugLog.log("DIAG", "── diagnostics start (root via $via) ──")
         var lines = 0
         for ((name, cmd) in SECTIONS) {

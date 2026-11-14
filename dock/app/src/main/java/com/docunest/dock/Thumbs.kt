@@ -32,7 +32,10 @@ object Thumbs {
     const val ZOOM = 13
     private const val SIZE = 256
 
-    private val memory = LruCache<String, Bitmap>(40)
+    /** Up to 8 MB of decoded pictures in memory (by size, not count); the files keep the rest. */
+    private val memory = object : LruCache<String, Bitmap>(8 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: Bitmap) = value.byteCount
+    }
     private val pending = mutableSetOf<String>()
     private val failedAt = HashMap<String, Long>()
     private val worker = Executors.newSingleThreadExecutor()

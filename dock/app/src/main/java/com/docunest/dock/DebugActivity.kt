@@ -47,7 +47,7 @@ class DebugActivity : Activity() {
         root.addView(head)
 
         val tags = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        for (t in listOf(null, "GPS", "AUTO", "PARK", "WIFI", "BT", "ROOT", "DIAG", "RING", "SNAP", "APP")) {
+        for (t in listOf(null, "CRASH", "GPS", "AUTO", "PARK", "WIFI", "BT", "ROOT", "DIAG", "SPLIT", "KEY", "RING", "SNAP", "APP")) {
             tags.addView(bigButton(t ?: "ALL", Palette.CARD_HI, 13f) { tag = t; render() },
                 LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)).apply { marginEnd = dp(6) })
         }
