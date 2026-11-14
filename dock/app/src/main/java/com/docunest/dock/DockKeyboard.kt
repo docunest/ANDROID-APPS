@@ -53,6 +53,10 @@ class DockKeyboard : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         DebugLog.init(this)
+        // Draw on the GPU: the keyboard window otherwise may paint in software on this slow chip.
+        runCatching {
+            window?.window?.setFlags(WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED, WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED)
+        }
     }
 
     override fun onEvaluateFullscreenMode() = false // no full-screen "extract" mode in landscape
@@ -85,6 +89,7 @@ class DockKeyboard : InputMethodService() {
         // Where the text cursor is → keyboard on the other side.
         runCatching { currentInputConnection?.requestCursorUpdates(InputConnection.CURSOR_UPDATE_IMMEDIATE) }
         layoutPanel()
+        MainWatch.start()
         DebugLog.log("KEY", "keyboard up in $pkg (side $side${if (sideChosenByHand) ", chosen by hand" else ""})")
     }
 
@@ -103,13 +108,7 @@ class DockKeyboard : InputMethodService() {
         super.onFinishInputView(finishingInput)
         panelOnScreen = null
         onPanel?.invoke()
-        active = null
-        SplitService.instance?.filterKeys(false)
-    }
-
-    override fun onDestroy() {
-        if (active === this) { active = null; SplitService.instance?.filterKeys(false) }
-        super.onDestroy()
+        MainWatch.stop()
     }
 
     /** Only the panel (or the small button) takes touches; the app isn't resized or moved. */
@@ -138,13 +137,13 @@ class DockKeyboard : InputMethodService() {
         val pw = (w * 0.46f).toInt().coerceAtLeast(dp(420))
         val ph = (m.heightPixels * 0.60f).toInt().coerceAtLeast(dp(275))
         val g = Gravity.BOTTOM or if (side == Side.RIGHT) Gravity.END else Gravity.START
+        root.want = ph + dp(6)
         keys.layoutParams = FrameLayout.LayoutParams(pw, ph, g).apply { setMargins(dp(6), 0, dp(6), dp(6)) }
         pill.layoutParams = FrameLayout.LayoutParams(dp(56), dp(56), g).apply { setMargins(dp(10), 0, dp(10), dp(10)) }
         keys.visibility = if (minimized) View.GONE else View.VISIBLE
         pill.visibility = if (minimized) View.VISIBLE else View.GONE
         root.requestLayout()
         root.post {
-            updateEarlyKeys()
             val v = if (minimized) pill else keys
             val at = IntArray(2).also { v.getLocationOnScreen(it) }
             panelOnScreen = Rect(at[0], at[1], at[0] + v.width, at[1] + v.height)
@@ -193,22 +192,23 @@ class DockKeyboard : InputMethodService() {
         KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
         KeyEvent.KEYCODE_TAB, KeyEvent.KEYCODE_NAVIGATE_NEXT, KeyEvent.KEYCODE_NAVIGATE_PREVIOUS, KeyEvent.KEYCODE_PAGE_DOWN,
         KeyEvent.KEYCODE_PAGE_UP, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER,
-        KeyEvent.KEYCODE_BUTTON_A,
+        KeyEvent.KEYCODE_BUTTON_A, TURN_BACK, TURN_ON,
     )
 
     /**
-     * An iDrive / hardware key for the panel. [via] "app" = Android handed it to the app in front
-     * (Waze), whose busy main thread passed it on — slow; "early" = [SplitService] caught it before
-     * any app saw it. Returns true when the panel used it.
+     * An iDrive key for the panel (the car's software injects them as a "Virtual" keyboard; they
+     * reach us ~4 ms after the press). Returns true when the panel used it.
      */
-    fun hardKey(event: KeyEvent, via: String): Boolean {
+    private fun hardKey(event: KeyEvent): Boolean {
+        if (!::keys.isInitialized) return false
         if (event.action == KeyEvent.ACTION_DOWN) {
             val lag = SystemClock.uptimeMillis() - event.eventTime
-            DebugLog.log("KEY", "down ${KeyEvent.keyCodeToString(event.keyCode)} via $via · ${lag} ms after the press" +
+            DebugLog.log("KEY", "down ${KeyEvent.keyCodeToString(event.keyCode)} · ${lag} ms after the press" +
                 " · source 0x${Integer.toHexString(event.source)} repeat ${event.repeatCount}")
         }
         if (!isInputViewShown || minimized || event.keyCode !in KEYS) return false
         if (event.action != KeyEvent.ACTION_DOWN) return true // the matching "up": swallowed too
+        keys.pressAt = event.eventTime
         when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_UP -> keys.move(KeyGrid.Dir.UP)
             KeyEvent.KEYCODE_DPAD_DOWN -> keys.move(KeyGrid.Dir.DOWN)
@@ -217,23 +217,18 @@ class DockKeyboard : InputMethodService() {
             KeyEvent.KEYCODE_TAB -> keys.step(!event.isShiftPressed)
             KeyEvent.KEYCODE_NAVIGATE_NEXT, KeyEvent.KEYCODE_PAGE_DOWN -> keys.step(true)
             KeyEvent.KEYCODE_NAVIGATE_PREVIOUS, KeyEvent.KEYCODE_PAGE_UP -> keys.step(false)
+            TURN_ON -> keys.step(true)
+            TURN_BACK -> keys.step(false)
             else -> if (event.repeatCount == 0) keys.focused()?.let { onKey(it) } ?: keys.showFocus()
         }
         return true
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
-        hardKey(event, "app") || super.onKeyDown(keyCode, event)
+        hardKey(event) || super.onKeyDown(keyCode, event)
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean =
-        hardKey(event, "app") || super.onKeyUp(keyCode, event)
-
-    /** Panel up and usable → iDrive keys are caught early (before Waze); otherwise left alone. */
-    private fun updateEarlyKeys() {
-        val on = ::keys.isInitialized && isInputViewShown && !minimized
-        active = if (on) this else null
-        SplitService.instance?.filterKeys(on)
-    }
+        hardKey(event) || super.onKeyUp(keyCode, event)
 
     /** Turning a rotary controller (if the unit reports it as scrolling): one step per detent. */
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
@@ -245,16 +240,18 @@ class DockKeyboard : InputMethodService() {
         return true
     }
 
-    /** The IME's root: as tall as the screen (transparent) so the panel can sit anywhere along the bottom. */
+    /** The IME's root: as tall as the panel (transparent around it), never more than Android gives. */
     private class FullHeight(context: Context) : FrameLayout(context) {
+        var want = 0
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
             val m = DisplayMetrics()
             @Suppress("DEPRECATION") (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay.getRealMetrics(m)
             // Never taller than the space Android gives the keyboard window (the screen minus the
             // status bar): asking for the full screen height pushed the bottom row off screen.
             val given = MeasureSpec.getSize(heightMeasureSpec)
-            val h = if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.UNSPECIFIED || given <= 0) m.heightPixels
+            val most = if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.UNSPECIFIED || given <= 0) m.heightPixels
                 else minOf(given, m.heightPixels)
+            val h = if (want > 0) minOf(want, most) else most
             super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY))
         }
     }
@@ -325,7 +322,11 @@ class DockKeyboard : InputMethodService() {
             else -> k.label
         }
 
+        /** When the last iDrive key was pressed (uptime ms), to log how long until it was drawn. */
+        var pressAt = 0L
+
         override fun onDraw(c: Canvas) {
+            val t0 = SystemClock.uptimeMillis()
             val d = resources.displayMetrics.density
             c.drawRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), 14 * d, 14 * d, bg)
             for ((r, row) in page.withIndex()) for ((i, k) in row.withIndex()) {
@@ -349,6 +350,12 @@ class DockKeyboard : InputMethodService() {
                 text.color = if (isFocus) Color.BLACK else Color.WHITE
                 text.textSize = minOf(box.height() * 0.5f, if (label(k).length > 2) box.width() * 0.32f else box.width() * 0.6f)
                 c.drawText(label(k), box.centerX(), box.centerY() + text.textSize * 0.36f, text)
+            }
+            if (pressAt > 0) {
+                val now = SystemClock.uptimeMillis()
+                DebugLog.log("KEY", "drawn ${now - pressAt} ms after the press (drawing took ${now - t0} ms, " +
+                    if (c.isHardwareAccelerated) "GPU)" else "software)")
+                pressAt = 0
             }
         }
 
@@ -389,12 +396,13 @@ class DockKeyboard : InputMethodService() {
         @Volatile var panelOnScreen: Rect? = null
             private set
         @Volatile var onPanel: (() -> Unit)? = null
-        /** The keyboard while its panel is up (not ▾), for [SplitService.onKeyEvent]. Main thread. */
-        @Volatile var active: DockKeyboard? = null
-            private set
 
         /** Android's own name for it ("com.docunest.dock/.DockKeyboard", the short form): `ime set` and
          *  Settings.Secure.DEFAULT_INPUT_METHOD use exactly this; the long form is "unknown input method". */
+        /** The car's iDrive knob turns, as the KSW software injects them (unit's log: 691, 692 ~4 a second). */
+        const val TURN_BACK = 691
+        const val TURN_ON = 692
+
         fun id(context: Context) = android.content.ComponentName(context, DockKeyboard::class.java).flattenToShortString()
     }
 }
