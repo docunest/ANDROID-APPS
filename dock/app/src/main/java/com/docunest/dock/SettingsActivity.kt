@@ -130,6 +130,9 @@ class SettingsActivity : Activity() {
         switch("\"🔎 Nearby\" in press-and-slide", prefs.fanNearby) { prefs.fanNearby = it }
 
         section("Dock keyboard")
+        row(bigButton("🧪 iDrive test (records every control)", Palette.CARD_HI, 15f) {
+            startActivity(Intent(this, IDriveLabActivity::class.java))
+        })
         col.addView(label("A compact keyboard on the side opposite the text field, so Waze's search results stay visible. " +
             "⇄ flips the side, ▾ shrinks it to a small button. iDrive: push = move between keys, turn = next / previous, press = type the yellow key.", 13f, Palette.MUTED))
         val kbStatus = label("", 13f, Palette.MUTED)

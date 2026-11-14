@@ -105,6 +105,14 @@
             android:label="GPS fix report"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
 
+        <!-- 🧪 Temporary: iDrive test (records every control, blocks their actions). -->
+        <activity
+            android:name=".IDriveLabActivity"
+            android:exported="false"
+            android:label="iDrive test"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation" />
+
         <activity
             android:name=".NavTestActivity"
             android:exported="false"
