@@ -25,6 +25,10 @@ import android.widget.TextView
  * may still leave the app — that is recorded too. Remove once the keyboard is tuned.
  */
 class IDriveLabActivity : Activity() {
+    companion object {
+        private const val PIN_MAX_MS = 20 * 60_000L
+    }
+
     private data class Step(val id: String, val text: String)
 
     private val steps = listOf(
@@ -122,6 +126,8 @@ class IDriveLabActivity : Activity() {
                 LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginEnd = dp(6); topMargin = dp(8) })
         }
         leftCol.addView(jump)
+        leftCol.addView(bigButton("⚠ It kicked me out / did something else", Palette.AMBER, 16f) { reportKick() },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)).apply { topMargin = dp(10) })
         leftCol.addView(label("Tap the screen to move on — the iDrive is being recorded, not used. Each step is saved and sent when you tap Done.", 13f, Palette.MUTED).apply { setPadding(0, dp(10), 0, 0) })
         body.addView(leftCol, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.1f).apply { marginEnd = dp(14) })
 
@@ -142,17 +148,13 @@ class IDriveLabActivity : Activity() {
         McuKeys.start(this)
         McuKeys.rawListeners += rawListener
         begin()
+        pin(true)
     }
 
     private fun prefs() = getSharedPreferences("dock", Context.MODE_PRIVATE)
 
     /** Controller messages and the KSW service's injected keys, as they happen ([McuKeys]). */
     private val rawListener: (String) -> Unit = { line -> note("⚙ $line") }
-
-    override fun onDestroy() {
-        McuKeys.rawListeners -= rawListener
-        super.onDestroy()
-    }
 
     private fun begin() {
         got.clear()
@@ -256,10 +258,48 @@ class IDriveLabActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (left) note("back on this screen")
+        if (left) {
+            note("back on this screen")
+            raw.text = "\n↩ You left this screen during this step — that's recorded. Tap ⚠ to add anything."
+            pin(true) // re-pin if something got past it
+        }
+    }
+
+    /**
+     * Pin this screen (Android's lock-task "screen pinning", started as the system through root, so no
+     * "Pin app?" question): Home, recents and other apps' screens can't take over while the test runs —
+     * the KSW service turns MENU / MEDIA / TEL… into Home or its own menu. ✕ End unpins. Safety: unpinned
+     * by itself after [PIN_MAX_MS] even if the test is never ended.
+     */
+    private fun pin(on: Boolean) {
+        val task = taskId
+        worker.execute {
+            val ok = Root.run(if (on) "am task lock $task" else "am task lock stop")
+            DebugLog.log("IDRIVE", (if (on) "pinned (task $task)" else "unpinned") + if (ok) "" else " — FAILED (no root?)")
+            if (on) main.post { if (!isFinishing) raw.text = if (ok) "\n📌 Pinned: buttons shouldn't be able to leave this screen. ✕ End unpins." else "\n(couldn't pin — buttons may leave this screen)" }
+        }
+        main.removeCallbacks(unpinLater)
+        if (on) main.postDelayed(unpinLater, PIN_MAX_MS)
+    }
+
+    private val unpinLater = Runnable { pin(false) }
+
+    /** The owner's own flag on this step: "it kicked me out" / "it did something else". */
+    private fun reportKick() {
+        note("⚠ OWNER: kicked out / something else happened")
+        DebugLog.log("IDRIVE", "OWNER REPORT at step ${steps[index].id}: kicked out / did something else · last: ${got.takeLast(6).joinToString(" | ")}")
+        worker.execute { runCatching { DebugLog.uploadNow(applicationContext) } }
+        android.widget.Toast.makeText(this, "Reported for \"${steps[index].id}\" ✓", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    override fun onDestroy() {
+        main.removeCallbacks(unpinLater)
+        McuKeys.rawListeners -= rawListener
+        super.onDestroy()
     }
 
     private fun finishLab() {
+        pin(false)
         worker.execute {
             DebugLog.log("IDRIVE", "test closed")
             runCatching { DebugLog.uploadNow(applicationContext) }
