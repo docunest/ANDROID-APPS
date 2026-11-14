@@ -53,9 +53,38 @@ class DockKeyboard : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         DebugLog.init(this)
+        McuKeys.start(this)
+        McuKeys.listeners += mcuListener
         // Draw on the GPU: the keyboard window otherwise may paint in software on this slow chip.
         runCatching {
             window?.window?.setFlags(WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED, WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED)
+        }
+    }
+
+    override fun onDestroy() {
+        McuKeys.listeners -= mcuListener
+        super.onDestroy()
+    }
+
+    private val mcuListener: (McuKeys.Ev) -> Unit = { ev -> onController(ev) }
+
+    /**
+     * The iDrive straight from the controller ([McuKeys]): every wheel click, no 150 ms wait.
+     * The KSW service's own copy of the same key arrives later and is dropped in [hardKey].
+     */
+    private fun onController(ev: McuKeys.Ev) {
+        if (!::keys.isInitialized || !isInputViewShown || minimized || !ev.pressed) return
+        val done = when (ev.code) {
+            0x01, 0x07 -> { keys.move(KeyGrid.Dir.UP); true }    // push up / wheel left
+            0x02, 0x06 -> { keys.move(KeyGrid.Dir.DOWN); true }  // push down / wheel right
+            0x03 -> { keys.move(KeyGrid.Dir.LEFT); true }
+            0x04 -> { keys.move(KeyGrid.Dir.RIGHT); true }
+            0x05 -> { keys.focused()?.let { onKey(it) } ?: keys.showFocus(); true }
+            else -> false
+        }
+        if (done) {
+            keys.pressAt = SystemClock.uptimeMillis() - ev.lagMs
+            DebugLog.log("KEY", "controller 17-%02X · %d ms after the controller sent it".format(ev.code, ev.lagMs))
         }
     }
 
@@ -210,6 +239,11 @@ class DockKeyboard : InputMethodService() {
         }
         if (!isInputViewShown || minimized || event.keyCode !in KEYS) return false
         if (event.action != KeyEvent.ACTION_DOWN) return true // the matching "up": swallowed too
+        // Already done from the controller itself (≤ 500 ms ago): this is the KSW service's late copy.
+        if (McuKeys.justHad(event.keyCode)) {
+            DebugLog.log("KEY", "  (late copy of a controller key — ignored)")
+            return true
+        }
         keys.pressAt = event.eventTime
         when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_UP -> keys.move(KeyGrid.Dir.UP)

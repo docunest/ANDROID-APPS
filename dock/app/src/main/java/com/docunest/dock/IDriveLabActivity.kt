@@ -84,7 +84,6 @@ class IDriveLabActivity : Activity() {
     private var index = 0
     private var stepStartUptime = 0L
     private var stepStartWall = 0L
-    @Volatile private var geOffset = 0L
     private val got = mutableListOf<String>()
     /** One line per complete press: "DPAD_RIGHT 120 ms" / "BACK 3010 ms (long, 14 repeats)". */
     private val presses = mutableListOf<String>()
@@ -117,6 +116,12 @@ class IDriveLabActivity : Activity() {
         nav.addView(bigButton("↺ Again", Palette.CARD_HI, 17f) { go(index) }, LinearLayout.LayoutParams(0, dp(72), 1f).apply { marginEnd = dp(8) })
         nav.addView(bigButton("Done ▶", Palette.BLUE, 20f) { go(index + 1) }, LinearLayout.LayoutParams(0, dp(72), 1.4f))
         leftCol.addView(nav)
+        val jump = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for ((name, prefix) in listOf("Wheel" to "wheel-slow", "Push" to "push-", "Press" to "press", "Buttons" to "btn-", "Steering" to "wheel-mode", "Combos" to "combo-")) {
+            jump.addView(bigButton(name, Palette.CARD, 14f) { steps.indexOfFirst { it.id.startsWith(prefix) }.takeIf { it >= 0 }?.let { go(it) } },
+                LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginEnd = dp(6); topMargin = dp(8) })
+        }
+        leftCol.addView(jump)
         leftCol.addView(label("Tap the screen to move on — the iDrive is being recorded, not used. Each step is saved and sent when you tap Done.", 13f, Palette.MUTED).apply { setPadding(0, dp(10), 0, 0) })
         body.addView(leftCol, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.1f).apply { marginEnd = dp(14) })
 
@@ -133,21 +138,20 @@ class IDriveLabActivity : Activity() {
         root.addView(body, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
 
-        DebugLog.log("IDRIVE", "test opened at step ${index + 1}/${steps.size} (${steps[index].id})")
-        worker.execute { startRaw() }
+        DebugLog.log("IDRIVE", "test opened at step ${index + 1}/${steps.size} (${steps[index].id}) · controller: ${McuKeys.status}")
+        McuKeys.start(this)
+        McuKeys.rawListeners += rawListener
         begin()
     }
 
     private fun prefs() = getSharedPreferences("dock", Context.MODE_PRIVATE)
 
-    /** Raw input events, recorded by root in the background for as long as the test is open. */
-    private fun startRaw() {
-        val out = Root.output(
-            "pkill -x getevent; rm -f $GE",
-            "setsid nohup getevent -lt > $GE 2>&1 < /dev/null &",
-            "sleep 1; echo running: \$(pidof getevent); wc -c < $GE",
-        )
-        DebugLog.log("IDRIVE", "raw recorder: ${out?.trim()?.replace("\n", " · ") ?: "no root"}")
+    /** Controller messages and the KSW service's injected keys, as they happen ([McuKeys]). */
+    private val rawListener: (String) -> Unit = { line -> note("⚙ $line") }
+
+    override fun onDestroy() {
+        McuKeys.rawListeners -= rawListener
+        super.onDestroy()
     }
 
     private fun begin() {
@@ -163,18 +167,17 @@ class IDriveLabActivity : Activity() {
         instruction.text = steps[index].text
         events.text = "(nothing yet)"
         raw.text = ""
-        worker.execute { geOffset = Root.output("wc -c < $GE")?.trim()?.toLongOrNull() ?: 0L }
     }
 
     /** Finish the current step (record it) and show step [to]. */
     private fun go(to: Int) {
         val step = steps[index]
         val start = stepStartWall
-        val offset = geOffset
         val mine = got.toList()
         val leftApp = left
         val presses = this.presses.toList()
-        worker.execute { record(step, start, offset, mine, leftApp, presses) }
+        val end = System.currentTimeMillis()
+        worker.execute { record(step, start, end, mine, leftApp, presses) }
         if (to > steps.lastIndex) {
             DebugLog.log("IDRIVE", "all ${steps.size} steps done")
             prefs().edit().putInt("idriveLabStep", 0).apply()
@@ -185,23 +188,20 @@ class IDriveLabActivity : Activity() {
         begin()
     }
 
-    private fun record(step: Step, startWall: Long, offset: Long, mine: List<String>, leftApp: Boolean, presses: List<String>) {
+    private fun record(step: Step, startWall: Long, endWall: Long, mine: List<String>, leftApp: Boolean, presses: List<String>) {
         DebugLog.log("IDRIVE", "── ${step.id} · this screen got ${mine.size} event(s)${if (leftApp) " · LEFT THE APP" else ""}")
         mine.forEach { DebugLog.log("IDRIVE", "  app  $it") }
         if (presses.isNotEmpty()) DebugLog.log("IDRIVE", "  presses: " + presses.joinToString(" · "))
-        val geLines = Root.output(
-            "tail -c +${offset + 1} $GE | grep -v -E 'ABS_MT|BTN_TOUCH|SYN_REPORT|ABS_X |ABS_Y |ABS_PRESSURE|BTN_TOOL' | head -150; true",
-        )?.lines()?.filter { it.isNotBlank() }.orEmpty()
-        DebugLog.log("IDRIVE", "  raw input: ${geLines.size} line(s)")
-        geLines.forEach { DebugLog.log("IDRIVE", "  ge   ${it.trim().take(200)}") }
         val since = "%d.%03d".format(startWall / 1000, startWall % 1000)
+        val until = "%d.%03d".format(endWall / 1000, endWall % 1000)
         val lc = Root.output(
-            "logcat -d -v epoch -t '$since' 2>/dev/null | grep -i -E 'key|idrive|knob|rotat|encoder|inject|wheel|button|ksw|wits|mcu|canbus|swc' " +
-                "| grep -v -i -E 'docunest|IDRIVE|keystore|keyguard|keychain' | head -150; true",
+            // Up to the moment Done was tapped, minus the controller chatter (speed, climate, heartbeats).
+            "logcat -d -v epoch -t '$since' 2>/dev/null | awk '\$1 <= $until' | grep -i -E 'key|idrive|knob|rotat|encoder|wheel|button|mcu|swc|mode|media|voice|phone' " +
+                "| grep -v -i -E 'docunest|IDRIVE|keystore|keyguard|keychain|data:19-|data:12-|data:10-|cmdType:68|cmdType:1C|mcuJson|acData|gear|CenterCallBack|ContextImpl|onMcuMessageChange' | head -200; true",
         )?.lines()?.filter { it.isNotBlank() }.orEmpty()
         DebugLog.log("IDRIVE", "  system log: ${lc.size} line(s)")
         lc.forEach { DebugLog.log("IDRIVE", "  log  ${it.trim().take(220)}") }
-        main.post { if (!isFinishing) raw.text = "\nlast step: raw ${geLines.size} · system log ${lc.size} line(s) — sent" }
+        main.post { if (!isFinishing) raw.text = "\nlast step: system log ${lc.size} line(s) — sent" }
         runCatching { DebugLog.uploadNow(applicationContext) }
     }
 
@@ -261,14 +261,10 @@ class IDriveLabActivity : Activity() {
 
     private fun finishLab() {
         worker.execute {
-            Root.run("pkill -x getevent; rm -f $GE")
             DebugLog.log("IDRIVE", "test closed")
             runCatching { DebugLog.uploadNow(applicationContext) }
         }
         finish()
     }
 
-    companion object {
-        private const val GE = "/data/local/tmp/dock_idrive_ge.txt"
-    }
 }
