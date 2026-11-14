@@ -122,13 +122,13 @@ class DockKeyboard : InputMethodService() {
         return m.widthPixels
     }
 
-    /** Panel ~42 % wide, ~55 % high, bottom corner on [side]; or the small button there when minimized. */
+    /** Panel ~46 % wide, ~60 % high, bottom corner on [side]; or the small button there when minimized. */
     private fun layoutPanel() {
         if (!::root.isInitialized) return
         val w = screenWidth()
         val m = DisplayMetrics().also { @Suppress("DEPRECATION") (getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay.getRealMetrics(it) }
-        val pw = (w * 0.42f).toInt().coerceAtLeast(dp(380))
-        val ph = (m.heightPixels * 0.55f).toInt().coerceAtLeast(dp(250))
+        val pw = (w * 0.46f).toInt().coerceAtLeast(dp(420))
+        val ph = (m.heightPixels * 0.60f).toInt().coerceAtLeast(dp(275))
         val g = Gravity.BOTTOM or if (side == Side.RIGHT) Gravity.END else Gravity.START
         keys.layoutParams = FrameLayout.LayoutParams(pw, ph, g).apply { setMargins(dp(6), 0, dp(6), dp(6)) }
         pill.layoutParams = FrameLayout.LayoutParams(dp(56), dp(56), g).apply { setMargins(dp(10), 0, dp(10), dp(10)) }
@@ -139,6 +139,7 @@ class DockKeyboard : InputMethodService() {
             val v = if (minimized) pill else keys
             val at = IntArray(2).also { v.getLocationOnScreen(it) }
             panelOnScreen = Rect(at[0], at[1], at[0] + v.width, at[1] + v.height)
+            DebugLog.change("KEY", "panel", "${panelOnScreen?.toShortString()}", "screen ${w}×${m.heightPixels} · keyboard area ${root.width}×${root.height}")
             onPanel?.invoke() // the floating dock button moves out of the panel's way
         }
     }
@@ -229,7 +230,12 @@ class DockKeyboard : InputMethodService() {
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
             val m = DisplayMetrics()
             @Suppress("DEPRECATION") (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay.getRealMetrics(m)
-            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(m.heightPixels, MeasureSpec.EXACTLY))
+            // Never taller than the space Android gives the keyboard window (the screen minus the
+            // status bar): asking for the full screen height pushed the bottom row off screen.
+            val given = MeasureSpec.getSize(heightMeasureSpec)
+            val h = if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.UNSPECIFIED || given <= 0) m.heightPixels
+                else minOf(given, m.heightPixels)
+            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY))
         }
     }
 
