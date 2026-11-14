@@ -59,17 +59,65 @@ object McuKeys {
                 SystemClock.sleep(60_000)
                 continue
             }
-            status = "following the controller"
-            DebugLog.change("KEY", "controller", "following")
-            runCatching {
-                val since = System.currentTimeMillis() / 1000.0
-                val p = ProcessBuilder("logcat", "-v", "epoch", "-T", "1", "-s", "KswMcuListener:I", "CenterControl:I")
-                    .redirectErrorStream(true).start()
-                p.inputStream.bufferedReader().useLines { lines -> lines.forEach { feed(it, since) } }
+            // Straight from the log service, one entry at a time. `logcat` into a pipe holds its output
+            // until ~4 KB pile up — 5–15 s late at this rate (seen live) — so it's only the fallback.
+            val direct = runCatching { readLogd() }
+            if (direct.isFailure) {
+                DebugLog.change("KEY", "controller", "direct read failed (${direct.exceptionOrNull()?.javaClass?.simpleName}) — logcat")
+                runCatching {
+                    status = "following the controller (logcat, may be late)"
+                    val since = System.currentTimeMillis() / 1000.0
+                    val p = ProcessBuilder("logcat", "-v", "epoch", "-T", "1", "-s", "KswMcuListener:I", "CenterControl:I")
+                        .redirectErrorStream(true).start()
+                    p.inputStream.bufferedReader().useLines { lines -> lines.forEach { feed(it, since) } }
+                }
             }
             status = "log stream ended — retrying"
             DebugLog.change("KEY", "controller", "stream ended")
             SystemClock.sleep(5_000)
+        }
+    }
+
+    /**
+     * Read the main log buffer from logd's reader socket (needs READ_LOGS → the "log" group). Each
+     * packet is one entry: header (len, hdr_size, pid, tid, sec, nsec, …), then priority, tag\0, message\0.
+     */
+    private fun readLogd() {
+        val sock = android.net.LocalSocket(android.net.LocalSocket.SOCKET_SEQPACKET)
+        sock.connect(android.net.LocalSocketAddress("logdr", android.net.LocalSocketAddress.Namespace.RESERVED))
+        // The controller chatters ~1×/s while the car is on: 30 s of nothing from it means logd isn't
+        // giving us other apps' entries (no "log" group yet) → the logcat fallback.
+        sock.soTimeout = 30_000
+        var seen = false
+        sock.use { s ->
+            s.outputStream.write("stream lids=0 tail=1".toByteArray())
+            val input = s.inputStream
+            val buf = ByteArray(5 * 1024 + 128)
+            val since = System.currentTimeMillis() / 1000.0
+            status = "following the controller (direct)"
+            DebugLog.change("KEY", "controller", "following (direct)")
+            while (true) {
+                val n = try { input.read(buf) } catch (e: java.io.IOException) {
+                    if (seen) return else throw e
+                }
+                if (n <= 0) return
+                if (n < 20) continue
+                val bb = java.nio.ByteBuffer.wrap(buf, 0, n).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                val hdr = (bb.getShort(2).toInt() and 0xffff).let { if (it in 20..64) it else 20 }
+                val sec = bb.getInt(12).toLong() and 0xffffffffL
+                val nsec = bb.getInt(16).toLong() and 0xffffffffL
+                if (n <= hdr + 2) continue
+                var i = hdr + 1 // skip priority
+                val tagEnd = (i until n).firstOrNull { buf[it] == 0.toByte() } ?: continue
+                val tag = String(buf, i, tagEnd - i)
+                if (tag != "KswMcuListener" && tag != "CenterControl") continue
+                seen = true
+                i = tagEnd + 1
+                var msgEnd = n
+                while (msgEnd > i && (buf[msgEnd - 1] == 0.toByte() || buf[msgEnd - 1] == '\n'.code.toByte())) msgEnd--
+                val msg = String(buf, i, msgEnd - i)
+                feed("$sec.${"%09d".format(nsec)} $tag: $msg", since)
+            }
         }
     }
 
