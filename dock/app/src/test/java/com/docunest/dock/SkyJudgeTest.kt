@@ -80,7 +80,9 @@ class SkyJudgeTest {
     @Test fun lostAtSpeedButSatellitesInViewIsNotATunnel() {
         val s = sim(48.1372, 11.5756)
         s.run(60, strong = 8, fix = true, speed = 20f)
-        val flicker = (0 until 30).flatMap { i -> listOf(3, 4, 2, 5, 3, 1, 4, 3).let { p -> List(4) { p[(i + it) % p.size] } } }
+        // Mostly 2–3 strong with a 4 now and then: never 4+ long enough to count as "open sky".
+        val p = listOf(3, 2, 3, 3, 4, 2, 3, 3)
+        val flicker = List(120) { p[it % p.size] }
         val calls = flicker.flatMap { st -> s.run(1, strong = st, fix = false, driving = true) }
         val first = calls.indexOfFirst { it.fixNow }
         assertTrue("should fix within ~65 s, was $first", first in 55..70)
