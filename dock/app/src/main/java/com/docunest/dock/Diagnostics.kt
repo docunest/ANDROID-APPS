@@ -32,6 +32,18 @@ object Diagnostics {
         "can devices" to "ls /dev | grep -iE 'tty|can|mcu'",
         "speed broadcasts" to "dumpsys activity broadcasts | grep -iE 'speed|canbus|can_|vehicle|mcu' | sort | uniq -c | sort -rn | head -40",
         "sensors" to "dumpsys sensorservice | head -40",
+        // KSW head-unit configuration, read only: which setting sends NAV to Android and TEL / MEDIA / RADIO
+        // to the original BMW system (owner, 2026-11-15). Nothing here is changed.
+        "ksw packages" to "pm list packages -f | grep -iE 'wits|ksw|txz'; true",
+        "ksw settings system" to "settings list system",
+        "ksw settings global" to "settings list global | grep -iE 'ksw|wits|nav|key|oem|car|mcu|factory|idrive|original|bt_|media'; true",
+        "ksw props" to "getprop | grep -iE 'ksw|wits|mcu|persist\\.sys|persist\\.vendor\\.car'; true",
+        "ksw prefs files" to "ls -la /data/data/com.wits.pms/shared_prefs /data/data/com.wits.ksw/shared_prefs " +
+            "/data/data/com.wits.ksw.settings/shared_prefs /data/user_de/0/com.wits.pms/shared_prefs 2>&1; true",
+        "ksw prefs" to "for f in /data/data/com.wits.pms/shared_prefs/*.xml /data/data/com.wits.ksw/shared_prefs/*.xml " +
+            "/data/data/com.wits.ksw.settings/shared_prefs/*.xml; do [ -f \"\$f\" ] && { echo \"== \$f\"; head -c 6000 \"\$f\"; echo; }; done; true",
+        "ksw files" to "ls -la /sdcard | grep -iE 'ksw|wits|config'; ls -la /mnt/vendor/persist 2>&1 | head -30; " +
+            "find /data/data/com.wits.pms /data/data/com.wits.ksw -maxdepth 2 2>/dev/null | head -60; true",
         "split screen" to "dumpsys activity activities | grep -E 'Stack #|TaskRecord' | head -20; getprop | grep -iE 'multiwindow|freeform|split'; " +
             "settings get global force_resizable_activities; settings get global enable_freeform_support; dumpsys package com.waze | grep -iE 'resizeMode|resizeable' | head -3",
     )
@@ -87,7 +99,7 @@ object Diagnostics {
             }.getOrNull()
             val body = out?.lines()?.map { it.trimEnd() }?.filter { it.isNotBlank() }.orEmpty()
             DebugLog.log("DIAG", "[$name] " + if (body.isEmpty()) "(nothing)" else "${body.size} lines")
-            body.take(80).forEach { DebugLog.log("DIAG", "  $it"); lines++ }
+            body.take(if (name.startsWith("ksw")) 400 else 80).forEach { DebugLog.log("DIAG", "  $it"); lines++ }
         }
         BtKick.runCatching { DebugLog.log("DIAG", "[bluetooth as the app sees it] ${report()}") }
         DebugLog.log("DIAG", "[gps] per system: ${GpsDoctor.perSystem.ifEmpty { "—" }} · raw measurements: ${GpsDoctor.rawMeasurements}")
