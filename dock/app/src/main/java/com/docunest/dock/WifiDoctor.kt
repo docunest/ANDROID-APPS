@@ -62,6 +62,11 @@ object WifiDoctor {
     private const val VISIBLE_MS = 6_000L
     /** The hotspot silent this long (and a fresh check failing) before a forced reconnect. */
     private const val STALL_MS = 45_000L
+    /** Automatic network switches per session before Dock stops and asks. */
+    private const val MAX_JUMPS = 3
+    /** Stay on a network this long after switching to it (unless it doesn't work). */
+    private const val DWELL_MS = 2 * 60_000L
+    private const val ASK_ID = 8
     private const val CHANNEL = "wifi"
 
     enum class Fault(val label: String) {
@@ -461,6 +466,48 @@ object WifiDoctor {
     private var lastPreferScan = 0L
     private var lastPreferSwitch = 0L
     private var preferTries = 0
+    /** Automatic network switches this session (since the dock started or the owner last answered). */
+    private val jumps = mutableListOf<Long>()
+    /** After [MAX_JUMPS] switches: no more automatic ones until the owner answers. */
+    @Volatile private var held = false
+    /** The owner's choice for this session (null = automatic). */
+    @Volatile var pinned: String? = null
+        private set
+
+    /** The owner answered "which network?": [ssid] to stay on it this session, null to keep switching automatically. */
+    fun ownerChoice(ssid: String?) {
+        held = false
+        jumps.clear()
+        pinned = ssid
+        DebugLog.log("WIFI", if (ssid == null) "owner: keep switching automatically (counter reset)" else "owner: stay on $ssid this session")
+        lastAction = if (ssid == null) "Switching networks automatically" else "Staying on $ssid (your choice)"
+        if (::app.isInitialized) runCatching { (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(ASK_ID) }
+        refreshNow()
+    }
+
+    /** "Wi-Fi switched 3 times — which network?" with one button per answer. */
+    private fun askOwner(current: String?, other: String) {
+        DebugLog.log("WIFI", "prefer: ${jumps.size} switches this session — holding on ${current ?: "—"}, asking the owner (other: $other)")
+        lastAction = "Switched ${jumps.size}× — holding on ${current ?: "this network"}, waiting for your choice"
+        runCatching {
+            val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.createNotificationChannel(NotificationChannel(CHANNEL, "Wi-Fi lost", NotificationManager.IMPORTANCE_LOW))
+            fun choice(code: Int, ssid: String?, label: String) = Notification.Action.Builder(
+                null as android.graphics.drawable.Icon?, label,
+                PendingIntent.getService(app, code, Intent(app, DockService::class.java).setAction(DockService.ACTION_WIFI_CHOICE)
+                    .putExtra(DockService.EXTRA_SSID, ssid ?: ""), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT),
+            ).build()
+            val b = Notification.Builder(app, CHANNEL)
+                .setSmallIcon(R.drawable.ic_dock)
+                .setContentTitle("Wi-Fi switched ${jumps.size}× — which network?")
+                .setStyle(Notification.BigTextStyle().bigText("${current ?: "This network"} and $other keep trading places. Dock stays where it is until you choose."))
+                .setContentIntent(PendingIntent.getActivity(app, 21, Intent(app, WifiDoctorActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE))
+            current?.let { b.addAction(choice(22, it, "Stay on $it")) }
+            b.addAction(choice(23, other, "Use $other"))
+            b.addAction(choice(24, null, "Keep switching"))
+            nm.notify(ASK_ID, b.build())
+        }
+    }
     /** Networks whose internet just failed (a Starlink with no internet): not switched to for 10 min. */
     private val failedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
@@ -480,10 +527,24 @@ object WifiDoctor {
         val works = if (connected && now() - checkedAt < 90_000) verdict.internet else null
         if (connected && current != null && works == false) failedAt[current] = now()
         val avoid = failedAt.filterValues { now() - it < 10 * 60_000L }.keys
-        val to = WifiPrefer.switchTo(current, visible, if (connected) rssi else null, works, avoid)
+        val auto = WifiPrefer.switchTo(current, visible, if (connected) rssi else null, works, avoid)
+        // The owner chose a network for this session: only ever go back to it.
+        val p = pinned
+        val to = if (p != null) p.takeIf { current != p && visible.containsKey(it) } else auto
         if (to == null) {
             preferTries = 0
             return
+        }
+        if (p == null) {
+            if (held) return
+            // Just switched: give it 2 min before judging again — unless it isn't working at all.
+            if (now() - lastPreferSwitch < DWELL_MS && connected && works != false) return
+            // Third automatic switch this session: stop and ask the owner instead.
+            if (jumps.size >= MAX_JUMPS) {
+                held = true
+                askOwner(current, to)
+                return
+            }
         }
         val gap = if (preferTries < 3) 20_000L else 60_000L
         if (now() - lastPreferSwitch < gap || hasRoot != true) {
@@ -492,6 +553,7 @@ object WifiDoctor {
         }
         lastPreferSwitch = now()
         preferTries++
+        if (p == null) jumps += now()
         DebugLog.log("WIFI", "prefer: on $current (${if (connected) rssi else "—"} dBm, internet $works) but $to is visible (${visible[to]} dBm) — switching (try $preferTries)")
         lastAction = "Switching to $to (preferred over $current)"
         actions.post {

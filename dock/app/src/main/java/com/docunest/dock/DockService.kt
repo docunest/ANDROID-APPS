@@ -134,6 +134,8 @@ class DockService : Service() {
             addBubble()
         } else if (intent?.action == ACTION_RELAYOUT) {
             relayoutBubble()
+        } else if (intent?.action == ACTION_WIFI_CHOICE) {
+            WifiDoctor.ownerChoice(intent.getStringExtra(EXTRA_SSID)?.takeIf { it.isNotEmpty() })
         } else if (intent?.action == ACTION_CLEAR_SKY) {
             ClearSky.hint(this)
         } else if (intent?.action == ACTION_RESET_POSITION) {
@@ -786,6 +788,8 @@ class DockService : Service() {
         const val ACTION_RELAYOUT = "com.docunest.dock.RELAYOUT"
         const val ACTION_RESET_POSITION = "com.docunest.dock.RESET_POSITION"
         const val ACTION_CLEAR_SKY = "com.docunest.dock.CLEAR_SKY"
+        const val ACTION_WIFI_CHOICE = "com.docunest.dock.WIFI_CHOICE"
+        const val EXTRA_SSID = "ssid"
         private var rootTried = false
 
         fun start(context: Context, action: String? = null) {
