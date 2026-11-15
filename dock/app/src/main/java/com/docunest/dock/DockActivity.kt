@@ -47,6 +47,7 @@ class DockActivity : Activity() {
     private lateinit var map: MapView
     private lateinit var bar: LinearLayout
     private lateinit var gpsChip: TextView
+    private lateinit var skyChip: TextView
     private lateinit var wifiChip: TextView
     private val gpsTicker = object : Runnable {
         override fun run() {
@@ -207,6 +208,12 @@ class DockActivity : Activity() {
         val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         chips.addView(gpsChip)
         chips.addView(space(8))
+        skyChip = chip("☀ Clear sky", GpsDoctorActivity::class.java).apply {
+            setTextColor(Palette.AMBER)
+            setOnClickListener { ClearSky.hint(this@DockActivity); renderGps() }
+        }
+        chips.addView(skyChip)
+        chips.addView(space(8))
         chips.addView(wifiChip)
         chips.addView(space(8))
         chips.addView(chip("🛰", GpsDoctorActivity::class.java).apply {
@@ -300,6 +307,10 @@ class DockActivity : Activity() {
         }
         gpsChip.text = text
         gpsChip.setTextColor(color)
+        if (::skyChip.isInitialized) {
+            skyChip.visibility = if (fresh || ParkedPosition.mocking) View.GONE else View.VISIBLE
+            skyChip.text = if (ClearSky.active) "☀ Fixing now" else "☀ Clear sky"
+        }
 
         // Wi-Fi: the watchdog in the dock service keeps this current.
         val w = WifiDoctor

@@ -59,6 +59,8 @@ object GpsDoctor {
         Step("driver", "Restart GPS driver", "Restart the GPS driver process (root)", 180_000),
     )
     val remedyIds: List<String> get() = REMEDIES.map { it.id }
+    /** Steps that reset the chip themselves: the satellites vanish for a while afterwards. */
+    private val RESET_STEPS = setOf("warm", "toggle", "cold", "driver", "assist")
     fun title(id: String) = (REMEDIES.firstOrNull { it.id == id } ?: when (id) {
         "permission" -> Step(id, "Allow location", "", 0)
         "location" -> Step(id, "Switch location on", "", 0)
@@ -418,6 +420,7 @@ object GpsDoctor {
             note("${step.title}: ${step.note.ifEmpty { "done" }} — waiting up to ${duration(step.waitMs)} for a fix")
             val outcome = waitForFix(step)
             val secs = ((now() - stepStart) / 1000).toInt()
+            DebugLog.log("GPS", "  step ${step.title}: ${step.note} (${secs}s)")
             step.state = when (outcome) {
                 FixStats.Outcome.FIXED -> State.OK
                 FixStats.Outcome.NO_FIX -> State.NO_FIX
@@ -511,6 +514,7 @@ object GpsDoctor {
                 return true
             }
             "listen" -> {
+                if (ClearSky.active) return skip(step, "skipped — you said the sky is clear")
                 rewatch(context)
                 step.note = "asking the GPS once a second, changing nothing"
                 return true
@@ -600,14 +604,19 @@ object GpsDoctor {
      */
     private fun waitForFix(step: Step): FixStats.Outcome {
         val start = now()
-        step.endsAt = start + step.waitMs
+        // "☀ Clear sky": shorter waits — the owner is watching and the sky is open.
+        val wait = if (ClearSky.active) minOf(step.waitMs, if (step.id == "cold" || step.id == "driver") 120_000L else 60_000L) else step.waitMs
+        step.endsAt = start + wait
         changed()
         while (!cancelled && now() < step.endsAt) {
             if (fixAt > start && hasFix()) {
                 step.note += " → fix after ${duration(now() - start)}"
                 return FixStats.Outcome.FIXED
             }
-            if (skyCollapsedAt > start) {
+            // A drop right after our own reset is the reset (the chip forgets the satellites), not a
+            // tunnel; and with the owner's "☀ clear sky" there is no tunnel.
+            val grace = if (step.id in RESET_STEPS) 45_000L else 0L
+            if (skyCollapsedAt > start + grace && !ClearSky.active) {
                 step.note += " → sky suddenly blocked (tunnel?) — not counted"
                 return FixStats.Outcome.VOID
             }
@@ -618,7 +627,7 @@ object GpsDoctor {
             step.note += " → stopped (not counted)"
             return FixStats.Outcome.VOID
         }
-        step.note += " → no fix in ${duration(step.waitMs)} (heard $satsHeard, strong $strongSats, used $satsUsed)"
+        step.note += " → no fix in ${duration(wait)} (heard $satsHeard, strong $strongSats, used $satsUsed · $perSystem)"
         return FixStats.Outcome.NO_FIX
     }
 

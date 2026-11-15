@@ -94,6 +94,13 @@ object AutoDoctor {
         return if (lastResult.isNotEmpty() && on) "$base\nLast auto run: $lastResult" else base
     }
 
+    /** "☀ Clear sky": no back-off, no waiting — the next tick starts a run. */
+    fun clearSkyHint(context: Context) {
+        app = context.applicationContext
+        nextAllowedAt = 0L
+        main.post { runCatching { step() } }
+    }
+
     private fun step() {
         if (on && !GpsDoctor.isWatching) GpsDoctor.watch(app, "auto") // permission may have come since
         if (!GpsDoctor.isWatching) {
@@ -122,15 +129,21 @@ object AutoDoctor {
                 skyKnown = GpsDoctor.skyKnown(),
             ),
         )
-        call = c
-        DebugLog.change("AUTO", "judge", c.mode.name, "${c.why} · fix ${if (fresh) "±${f!!.accuracy.toInt()} m" else "none"} · strong ${GpsDoctor.strongSats} · sky known ${GpsDoctor.skyKnown()} · driving ${Sensors.driving()}")
+        // The owner says the sky is clear: whatever the judge thinks (tunnel, car park), fix now.
+        val hinted = ClearSky.active
+        if (hinted && fresh) ClearSky.clear("GPS is back")
+        val use = if (hinted && !fresh) SkyJudge.Call(SkyJudge.Mode.BROKEN, "You said the sky is clear — fixing now", true, "clearsky") else c
+        call = use
+        DebugLog.change("AUTO", "judge", use.mode.name, "${use.why} · fix ${if (fresh) "±${f!!.accuracy.toInt()} m" else "none"} · strong ${GpsDoctor.strongSats} · " +
+            "sky known ${GpsDoctor.skyKnown()} · driving ${Sensors.driving()} · ${GpsDoctor.perSystem}")
+        lostNotice(use, fresh)
         j.selfRecoveredAt?.let {
             j.selfRecoveredAt = null
             FixHistory.addDeadZone(app, it)
         }
-        if (on && c.fixNow && !GpsDoctor.running && now >= nextAllowedAt) {
-            DebugLog.log("AUTO", "starting a fix run: ${c.why}")
-            notify("GPS lost — auto doctor fixing", c.why, ongoing = true)
+        if (on && use.fixNow && !GpsDoctor.running && (now >= nextAllowedAt || hinted)) {
+            DebugLog.log("AUTO", "starting a fix run: ${use.why}")
+            notify("GPS lost — auto doctor fixing", use.why, ongoing = true)
             GpsDoctor.fix(app, byAuto = true)
         }
     }
@@ -145,7 +158,8 @@ object AutoDoctor {
                 nextAllowedAt = now + 2 * 60_000L
             }
             "paused" -> nextAllowedAt = now + 30_000L // the judge holds while the sky stays blocked
-            "stopped" -> nextAllowedAt = now + 30 * 60_000L
+            // Stopped by hand: a short pause only (30 min held the auto doctor back while the GPS stayed broken).
+            "stopped" -> nextAllowedAt = now + 3 * 60_000L
             else -> {
                 failures++
                 val minutes = (10L shl (failures - 1).coerceIn(0, 3)).coerceAtMost(60L)
@@ -171,7 +185,21 @@ object AutoDoctor {
         return SkyJudge.Fix(l.latitude, l.longitude, 0f) // parked: we're starting up
     }
 
-    private fun notify(title: String, text: String, ongoing: Boolean = false, timeoutMs: Long = 0) = runCatching {
+    private var lostShown = false
+
+    /** Waiting out a "tunnel" / "car park" for 20 s: say so, with the ☀ button to skip the wait. */
+    private fun lostNotice(c: SkyJudge.Call, fresh: Boolean) {
+        val waiting = !fresh && !GpsDoctor.running && c.mode in setOf(SkyJudge.Mode.TUNNEL, SkyJudge.Mode.COVERED, SkyJudge.Mode.WAITING, SkyJudge.Mode.DEAD_ZONE)
+        if (waiting && !lostShown && SystemClock.elapsedRealtime() - (GpsDoctor.fixAt.takeIf { it > 0 } ?: 0L) > 20_000) {
+            lostShown = true
+            notify("No GPS — ${c.why}", "Open sky? Tap ☀ Clear sky and the doctor fixes it now instead of waiting.", clearSkyAction = true)
+        } else if (!waiting && lostShown) {
+            lostShown = false
+            if (fresh) notifyCancel()
+        }
+    }
+
+    private fun notify(title: String, text: String, ongoing: Boolean = false, timeoutMs: Long = 0, clearSkyAction: Boolean = false) = runCatching {
         val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "GPS auto doctor", NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(
@@ -186,6 +214,10 @@ object AutoDoctor {
             .setOngoing(ongoing)
             .setAutoCancel(!ongoing)
         if (timeoutMs > 0) b.setTimeoutAfter(timeoutMs)
+        if (clearSkyAction) {
+            val pi = PendingIntent.getService(app, 8, Intent(app, DockService::class.java).setAction(DockService.ACTION_CLEAR_SKY), PendingIntent.FLAG_IMMUTABLE)
+            b.addAction(Notification.Action.Builder(null as android.graphics.drawable.Icon?, "☀ Clear sky — fix now", pi).build())
+        }
         nm.notify(NOTE_ID, b.build())
     }
 

@@ -33,6 +33,7 @@ class GpsDoctorActivity : Activity() {
     private lateinit var live: TextView
     private lateinit var summary: TextView
     private lateinit var fixButton: TextView
+    private lateinit var clearSkyButton: TextView
     private lateinit var stepsBox: LinearLayout
     private lateinit var logText: TextView
     private lateinit var sensorsText: TextView
@@ -166,6 +167,12 @@ class GpsDoctorActivity : Activity() {
             render()
         }
         left.addView(fixButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)))
+        clearSkyButton = bigButton("☀ The sky is clear — fix now, no waiting", Palette.AMBER, 17f) {
+            ClearSky.hint(this)
+            if (!GpsDoctor.running) GpsDoctor.fix(this, byAuto = true)
+            render()
+        }
+        left.addView(clearSkyButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(60)).apply { topMargin = dp(8) })
         summary = label("", 15f, Palette.AMBER).apply { setPadding(0, dp(8), 0, dp(4)) }
         left.addView(summary)
         left.addView(label("Each fix waits up to 1–3 min for a real GPS fix, then moves on. Parked with open sky is best. Every try is measured (statistics on the right).", 13f, Palette.MUTED))
@@ -330,6 +337,8 @@ class GpsDoctorActivity : Activity() {
             "Clock: " + (d.clockOffsetMs?.let { if (kotlin.math.abs(it) < 120_000) "right" else "${d.duration(kotlin.math.abs(it))} off" } ?: "checked when fixing"),
         ).joinToString("\n")
 
+        clearSkyButton.visibility = if (ok) View.GONE else View.VISIBLE
+        clearSkyButton.text = if (ClearSky.active) "☀ Clear sky — fixing without waiting" else "☀ The sky is clear — fix now, no waiting"
         fixButton.text = if (d.running) (if (d.auto) "Stop auto fix" else "Stop") else if (ok) "Fix GPS (works now)" else "Fix GPS"
         val autoOn = AutoDoctor.enabled(this)
         autoButton.text = if (autoOn) "Auto doctor: ON" else "Auto doctor: off"

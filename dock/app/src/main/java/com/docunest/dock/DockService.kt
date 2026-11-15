@@ -134,6 +134,8 @@ class DockService : Service() {
             addBubble()
         } else if (intent?.action == ACTION_RELAYOUT) {
             relayoutBubble()
+        } else if (intent?.action == ACTION_CLEAR_SKY) {
+            ClearSky.hint(this)
         } else if (intent?.action == ACTION_RESET_POSITION) {
             prefs.bubbleX = -1
             prefs.bubbleY = -1
@@ -783,6 +785,7 @@ class DockService : Service() {
         const val ACTION_STOP = "com.docunest.dock.STOP"
         const val ACTION_RELAYOUT = "com.docunest.dock.RELAYOUT"
         const val ACTION_RESET_POSITION = "com.docunest.dock.RESET_POSITION"
+        const val ACTION_CLEAR_SKY = "com.docunest.dock.CLEAR_SKY"
         private var rootTried = false
 
         fun start(context: Context, action: String? = null) {
