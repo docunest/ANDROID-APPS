@@ -50,6 +50,8 @@ class SkyJudge(private val deadZones: () -> List<Spot> = { emptyList() }) {
          * talks" mean nothing and only fixes, speed, movement and time count.
          */
         val skyKnown: Boolean = true,
+        /** Satellites heard at all (any signal); -1 = not given (then [strongSats] counts). Only ≤ 1 means "no sky". */
+        val heard: Int = -1,
     )
 
     enum class Mode { STARTING, OK, WAITING, TUNNEL, COVERED, DEAD_ZONE, BROKEN }
@@ -103,7 +105,8 @@ class SkyJudge(private val deadZones: () -> List<Spot> = { emptyList() }) {
             if (r.t - blockedSince >= 5_000) openSince = -1
         }
         if (r.fixing) fixedDuringOutage = true
-        if (r.skyKnown && r.strongSats >= HEARD_SATS) {
+        val heardNow = if (r.heard >= 0) r.heard else r.strongSats
+        if (r.skyKnown && heardNow >= HEARD_SATS) {
             unheardSince = -1
             if (heardSince < 0) heardSince = r.t
         } else {
@@ -156,9 +159,17 @@ class SkyJudge(private val deadZones: () -> List<Spot> = { emptyList() }) {
         }
 
         if (r.driving == true) drivingMs += dt
-        // Satellites keep coming in (a tunnel or car park hears none): not a tunnel — the chip is stuck.
-        if (cause != Cause.NONE && heardSince >= 0 && r.t - max(heardSince, outageAt) >= HEARD_NOT_TUNNEL_MS) {
-            return Call(Mode.BROKEN, "Satellites in view for ${secs(r.t - max(heardSince, outageAt))} but no fix — not a tunnel", true, "nofix")
+        // Just started and the chip hasn't said what it hears yet: don't call it a car park.
+        if (!r.skyKnown && !hadFixThisSession && r.t - startedAt < SKY_UNKNOWN_GRACE_MS) {
+            return Call(Mode.STARTING, "Looking for satellites (${secs(r.t - startedAt)})")
+        }
+        // Satellites are heard (even weakly — this antenna gives fixes with none "strong"): not a tunnel,
+        // not a car park — those hear nothing. Wait a little for the fix, then fix the chip.
+        if (heardSince >= 0) {
+            val inView = r.t - max(heardSince, outageAt)
+            val limit = if (hadFixThisSession) HEARD_NOT_TUNNEL_MS else max(HEARD_NOT_TUNNEL_MS, STARTUP_OPEN_NO_FIX_MS)
+            return if (inView >= limit) Call(Mode.BROKEN, "$heardNow satellites in view for ${secs(inView)} but no fix — not a tunnel", true, "nofix")
+            else Call(if (hadFixThisSession) Mode.WAITING else Mode.STARTING, "$heardNow satellites in view — waiting for the fix (${secs(inView)})")
         }
         return when (cause) {
             Cause.TUNNEL ->
@@ -215,6 +226,7 @@ class SkyJudge(private val deadZones: () -> List<Spot> = { emptyList() }) {
         /** Somport (8.6 km) at ~50 km/h ≈ 10 min; Vielha 5.2 km, Marão 5.7 km. */
         const val TUNNEL_MAX_MS = 7 * 60_000L
         const val HEARD_SATS = 2
+        const val SKY_UNKNOWN_GRACE_MS = 20_000L
         const val HEARD_NOT_TUNNEL_MS = 60_000L
         const val DRIVING_MAX_MS = 4 * 60_000L
         const val NO_SENSOR_COVER_MAX_MS = 30 * 60_000L

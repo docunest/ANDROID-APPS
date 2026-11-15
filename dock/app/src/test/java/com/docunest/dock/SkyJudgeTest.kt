@@ -183,6 +183,27 @@ class SkyJudgeTest {
         assertEquals(Mode.TUNNEL, tunnel.last().mode)
     }
 
+    /** 2026-11-15: starting from street parking with this weak antenna — 6 heard, none ≥ 25 dB-Hz — was called "no sky". */
+    @Test fun streetParkingWithWeakSatellitesIsNotNoSky() {
+        val j = SkyJudge().apply { seed(SkyJudge.Fix(48.1372, 11.5756, 0f)) }
+        var t = 0L
+        val calls = (0 until 90).map {
+            j.judge(SkyJudge.Reading(t, true, true, null, 0, false, skyKnown = true, heard = 6)).also { t += 1000 }
+        }
+        assertTrue(calls.none { it.mode == Mode.COVERED || it.mode == Mode.TUNNEL })
+        assertEquals(Mode.STARTING, calls[30].mode)
+        assertEquals(75, calls.indexOfFirst { it.fixNow })
+    }
+
+    /** Underground with only a stray satellite heard now and then: still a car park. */
+    @Test fun oneStraySatelliteUndergroundIsStillCovered() {
+        val s = sim(38.7253, -9.1500)
+        s.run(60, strong = 7, fix = true, speed = 3f)
+        val calls = s.run(10 * 60, strong = 1, fix = false, driving = false)
+        assertTrue(calls.none { it.fixNow })
+        assertEquals(Mode.COVERED, calls.last().mode)
+    }
+
     @Test fun workingGpsNeverCallsForAFix() {
         val s = sim(43.4800, -3.5260)
         val calls = s.run(3600, strong = 8, fix = true, speed = 22f)

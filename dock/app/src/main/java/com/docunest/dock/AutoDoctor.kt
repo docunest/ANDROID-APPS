@@ -127,6 +127,7 @@ object AutoDoctor {
                 driving = Sensors.driving(),
                 fixing = GpsDoctor.running,
                 skyKnown = GpsDoctor.skyKnown(),
+                heard = GpsDoctor.satsHeard,
             ),
         )
         // The owner says the sky is clear: whatever the judge thinks (tunnel, car park), fix now.
