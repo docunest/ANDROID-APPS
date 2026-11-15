@@ -71,6 +71,9 @@ class SkyJudge(private val deadZones: () -> List<Spot> = { emptyList() }) {
     private var openSince = -1L
     private var blockedSince = -1L
     private var silentSince = -1L
+    /** Since when ≥ [HEARD_SATS] strong satellites are in view (5 s dips allowed) — no tunnel then. */
+    private var heardSince = -1L
+    private var unheardSince = -1L
     private var offSince = -1L
     private var drivingMs = 0L
     private var fixedDuringOutage = false
@@ -100,6 +103,13 @@ class SkyJudge(private val deadZones: () -> List<Spot> = { emptyList() }) {
             if (r.t - blockedSince >= 5_000) openSince = -1
         }
         if (r.fixing) fixedDuringOutage = true
+        if (r.skyKnown && r.strongSats >= HEARD_SATS) {
+            unheardSince = -1
+            if (heardSince < 0) heardSince = r.t
+        } else {
+            if (unheardSince < 0) unheardSince = r.t
+            if (r.t - unheardSince >= 5_000) heardSince = -1
+        }
 
         if (r.fix != null) {
             if (outageAt >= 0 && (cause == Cause.COVERED || cause == Cause.DEAD_ZONE || cause == Cause.UNKNOWN) &&
@@ -146,6 +156,10 @@ class SkyJudge(private val deadZones: () -> List<Spot> = { emptyList() }) {
         }
 
         if (r.driving == true) drivingMs += dt
+        // Satellites keep coming in (a tunnel or car park hears none): not a tunnel — the chip is stuck.
+        if (cause != Cause.NONE && heardSince >= 0 && r.t - max(heardSince, outageAt) >= HEARD_NOT_TUNNEL_MS) {
+            return Call(Mode.BROKEN, "Satellites in view for ${secs(r.t - max(heardSince, outageAt))} but no fix — not a tunnel", true, "nofix")
+        }
         return when (cause) {
             Cause.TUNNEL ->
                 if (out > TUNNEL_MAX_MS) Call(Mode.BROKEN, "No sky for ${secs(out)} — longer than any tunnel", true, "nosky")
@@ -179,6 +193,8 @@ class SkyJudge(private val deadZones: () -> List<Spot> = { emptyList() }) {
         offSince = -1
         drivingMs = 0
         fixedDuringOutage = false
+        heardSince = -1
+        unheardSince = -1
     }
 
     private fun classify(): Cause {
@@ -197,7 +213,9 @@ class SkyJudge(private val deadZones: () -> List<Spot> = { emptyList() }) {
         /** m/s — 20 km/h. */
         const val TUNNEL_SPEED = 5.5f
         /** Somport (8.6 km) at ~50 km/h ≈ 10 min; Vielha 5.2 km, Marão 5.7 km. */
-        const val TUNNEL_MAX_MS = 12 * 60_000L
+        const val TUNNEL_MAX_MS = 7 * 60_000L
+        const val HEARD_SATS = 2
+        const val HEARD_NOT_TUNNEL_MS = 60_000L
         const val DRIVING_MAX_MS = 4 * 60_000L
         const val NO_SENSOR_COVER_MAX_MS = 30 * 60_000L
         const val UNKNOWN_MAX_MS = 5 * 60_000L

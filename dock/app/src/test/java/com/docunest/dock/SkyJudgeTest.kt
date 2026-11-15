@@ -72,8 +72,19 @@ class SkyJudgeTest {
         s.run(30, strong = 9, fix = true, speed = 16.7f)
         val calls = s.run(13 * 60, strong = 0, fix = false, driving = true)
         val first = calls.indexOfFirst { it.fixNow }
-        assertTrue(first > 11 * 60)
+        assertTrue("longest Iberian tunnel at 60 km/h is ~6 min, fixed at $first s", first > 6 * 60)
         assertEquals("nosky", calls[first].symptom)
+    }
+
+    /** 2026-11-15, autobahn: lost at 72 km/h under open sky, 2–8 strong satellites flickering, no fix. */
+    @Test fun lostAtSpeedButSatellitesInViewIsNotATunnel() {
+        val s = sim(48.1372, 11.5756)
+        s.run(60, strong = 8, fix = true, speed = 20f)
+        val flicker = (0 until 30).flatMap { i -> listOf(3, 4, 2, 5, 3, 1, 4, 3).let { p -> List(4) { p[(i + it) % p.size] } } }
+        val calls = flicker.flatMap { st -> s.run(1, strong = st, fix = false, driving = true) }
+        val first = calls.indexOfFirst { it.fixNow }
+        assertTrue("should fix within ~65 s, was $first", first in 55..70)
+        assertEquals("nofix", calls[first].symptom)
     }
 
     @Test fun underCoverAtLowSpeedWaitsWhileParkedAndLearnsTheSpot() {

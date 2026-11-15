@@ -91,8 +91,9 @@ class GpsDoctorActivity : Activity() {
 
     override fun onDestroy() {
         if (isFinishing) {
-            // A manual run needs this screen; an auto run carries on in the background.
-            if (!GpsDoctor.auto) GpsDoctor.cancel()
+            // Leaving the screen (back to Waze) must not stop the fix — that, and the 30-min hold-off it
+            // caused, kept the GPS dead for 22 min on the autobahn (2026-11-15). Only ■ Stop stops it.
+            GpsDoctor.handOver()
             GpsDoctor.unwatch(this)
             GpsDoctor.askUser = null
         }

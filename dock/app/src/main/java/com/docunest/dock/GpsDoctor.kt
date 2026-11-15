@@ -382,6 +382,14 @@ object GpsDoctor {
         worker.post { ladder(app, symptom, byAuto) }
     }
 
+    /** The doctor screen closed during a manual run: carry on in the background as the auto doctor's. */
+    fun handOver() {
+        if (running && !auto) {
+            auto = true
+            DebugLog.log("GPS", "doctor screen closed — the fix run carries on in the background")
+        }
+    }
+
     fun cancel() {
         if (running) cancelled = true
     }
