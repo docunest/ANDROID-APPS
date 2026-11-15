@@ -61,19 +61,27 @@ class GocState {
 }
 
 /**
- * Which Wi-Fi to be on. Owner's rule, no exceptions and no toggle: whenever
- * the iPhone hotspot ("Lukas’s iPhone" — curly apostrophe U+2019) is visible,
- * be on it; any other network (Starlink) only while it isn't. Another iPhone
- * hotspot still beats Starlink. Pure, unit-tested.
+ * Which Wi-Fi to be on. Owner's rule (changed 2026-11-15 — "Starlink signal wins, it's unmetered"):
+ * a working Starlink with a decent signal beats the iPhone hotspot; the iPhone ("Lukas’s iPhone",
+ * curly apostrophe U+2019) is for when Starlink isn't there (driving), is weak, or has no internet.
+ * Hysteresis so it doesn't ping-pong: go to Starlink at ≥ [UNMETERED_JOIN] dBm, leave it only below
+ * [UNMETERED_LEAVE] or without internet. Pure, unit-tested.
  */
 object WifiPrefer {
     const val PRIMARY = "Lukas’s iPhone"
     /** A hotspot this weak couldn't be joined anyway — don't drop a working network for it. */
     const val MIN_RSSI = -85
+    /** Starlink at least this strong: switch to it. */
+    const val UNMETERED_JOIN = -72
+    /** On Starlink: leave only when it's weaker than this (or has no internet). */
+    const val UNMETERED_LEAVE = -80
 
     private fun norm(s: String) = s.replace('’', '\'').replace('‘', '\'').trim().lowercase()
 
-    /** 3 = the owner's iPhone, 2 = another iPhone hotspot, 1 = anything else, 0 = nothing. */
+    /** Unmetered: the van's Starlink. */
+    fun unmetered(ssid: String?): Boolean = ssid?.contains("starlink", ignoreCase = true) == true
+
+    /** Among the metered ones: 3 = the owner's iPhone, 2 = another iPhone hotspot, 1 = anything else, 0 = nothing. */
     fun rank(ssid: String?): Int = when {
         ssid.isNullOrBlank() -> 0
         norm(ssid) == norm(PRIMARY) -> 3
@@ -81,8 +89,26 @@ object WifiPrefer {
         else -> 1
     }
 
-    /** The network to switch to from [current], given what's visible (SSID → dBm); null = stay. */
-    fun switchTo(current: String?, visible: Map<String, Int>): String? =
-        visible.filter { (ssid, dbm) -> rank(ssid) > rank(current) && dbm >= MIN_RSSI }
+    /**
+     * The network to switch to from [current], given what's visible (SSID → dBm); null = stay.
+     * [currentDbm]: the signal of the network we're on; [currentWorks]: its last internet check
+     * (null = unknown); [avoid]: networks that just failed (Starlink with no internet).
+     */
+    fun switchTo(
+        current: String?,
+        visible: Map<String, Int>,
+        currentDbm: Int? = current?.let { visible[it] },
+        currentWorks: Boolean? = null,
+        avoid: Set<String> = emptySet(),
+    ): String? {
+        fun bestMetered(min: Int) = visible.filter { (s, d) -> !unmetered(s) && s !in avoid && rank(s) >= min && d >= MIN_RSSI }
             .maxWithOrNull(compareBy({ rank(it.key) }, { it.value }))?.key
+        if (unmetered(current)) {
+            val weak = currentDbm != null && currentDbm < UNMETERED_LEAVE
+            if (currentWorks != false && !weak) return null // a working Starlink: stay
+            return bestMetered(2) // weak or no internet: the iPhone, if it's there
+        }
+        visible.filter { (s, d) -> unmetered(s) && s !in avoid && d >= UNMETERED_JOIN }.maxByOrNull { it.value }?.let { return it.key }
+        return bestMetered(rank(current) + 1)
+    }
 }

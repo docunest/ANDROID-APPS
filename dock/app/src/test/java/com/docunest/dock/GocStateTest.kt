@@ -69,14 +69,27 @@ class GocStateTest {
         assertEquals("84D328D8B613", GocState.moduleMac("84:d3:28:d8:b6:13"))
     }
 
-    @Test fun iPhoneHotspotAlwaysWinsOverStarlink() {
-        val visible = mapOf("STARLINK" to -50, "Lukas’s iPhone" to -62)
-        assertEquals("Lukas’s iPhone", WifiPrefer.switchTo("STARLINK", visible))
-        assertNull(WifiPrefer.switchTo("Lukas’s iPhone", visible)) // already there
+    /** Owner 2026-11-15: "Starlink signal wins — it's unmetered". Log: on Starlink at −60 dBm with internet, pulled to a −85 dBm iPhone. */
+    @Test fun workingStarlinkWinsOverTheIPhone() {
+        val visible = mapOf("StarlinkVilnius" to -60, "Lukas’s iPhone" to -75)
+        assertNull(WifiPrefer.switchTo("StarlinkVilnius", visible, currentDbm = -60, currentWorks = true)) // stay
+        assertEquals("StarlinkVilnius", WifiPrefer.switchTo("Lukas’s iPhone", visible)) // go to Starlink
+        // Starlink weak (car 4 m away, through the body) or without internet: the iPhone.
+        assertEquals("Lukas’s iPhone", WifiPrefer.switchTo("StarlinkVilnius", mapOf("StarlinkVilnius" to -84, "Lukas’s iPhone" to -60), currentDbm = -84))
+        assertEquals("Lukas’s iPhone", WifiPrefer.switchTo("StarlinkVilnius", visible, currentDbm = -60, currentWorks = false))
+        // Hysteresis: a −76 dBm Starlink isn't worth leaving the iPhone for, but isn't left either.
+        assertNull(WifiPrefer.switchTo("Lukas’s iPhone", mapOf("StarlinkVilnius" to -76, "Lukas’s iPhone" to -60)))
+        assertNull(WifiPrefer.switchTo("StarlinkVilnius", mapOf("StarlinkVilnius" to -76, "Lukas’s iPhone" to -60), currentDbm = -76, currentWorks = true))
+        // A Starlink that just had no internet isn't switched back to.
+        assertNull(WifiPrefer.switchTo("Lukas’s iPhone", visible, avoid = setOf("StarlinkVilnius")))
+    }
+
+    @Test fun amongTheMeteredOnesTheOwnersIPhoneFirst() {
+        assertNull(WifiPrefer.switchTo("Lukas’s iPhone", mapOf("Lukas’s iPhone" to -62))) // already there
         assertEquals(3, WifiPrefer.rank("Lukas's iPhone")) // straight apostrophe still matches
-        assertNull(WifiPrefer.switchTo("STARLINK", mapOf("STARLINK" to -50))) // iPhone not visible: stay
-        assertNull(WifiPrefer.switchTo("STARLINK", mapOf("Lukas’s iPhone" to -90))) // too weak to join
-        assertEquals("Ona’s iPhone", WifiPrefer.switchTo("STARLINK", mapOf("Ona’s iPhone" to -70)))
+        assertNull(WifiPrefer.switchTo("Lukas’s iPhone", mapOf("Ona’s iPhone" to -50)))
         assertEquals("Lukas’s iPhone", WifiPrefer.switchTo("Ona’s iPhone", mapOf("Lukas’s iPhone" to -70)))
+        assertEquals("Ona’s iPhone", WifiPrefer.switchTo("Cafe", mapOf("Ona’s iPhone" to -70)))
+        assertNull(WifiPrefer.switchTo("Cafe", mapOf("Lukas’s iPhone" to -90))) // too weak to join
     }
 }

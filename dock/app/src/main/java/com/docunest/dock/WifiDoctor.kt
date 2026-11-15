@@ -60,6 +60,8 @@ object WifiDoctor {
     private const val NOTIFY_ID = 7
     /** "Ours" seen this recently counts as visible. */
     private const val VISIBLE_MS = 6_000L
+    /** The hotspot silent this long (and a fresh check failing) before a forced reconnect. */
+    private const val STALL_MS = 45_000L
     private const val CHANNEL = "wifi"
 
     enum class Fault(val label: String) {
@@ -330,6 +332,8 @@ object WifiDoctor {
     }
 
     private var lastStallFix = 0L
+    /** Pause between forced reconnects: 5 min, doubled (to 30 min) while they keep not helping. */
+    private var stallGap = 5 * 60_000L
 
     /**
      * Wi-Fi still says "connected" but the iPhone hasn't answered for 20 s: force a reconnect to it
@@ -340,9 +344,13 @@ object WifiDoctor {
         val silent = now() - maxOf(lastGatewayAnswerAt, upSince)
         // 12 s quiet: get a fresh verdict from the parallel checks before deciding anything.
         if (silent >= 12_000 && now() - checkedAt > 10_000) checkNow()
-        if (silent < 20_000 || now() - lastStallFix < 60_000 || hasRoot != true) return
+        // The iPhone hotspot goes quiet for 20–45 s and comes back by itself; reconnecting every
+        // minute just cut a usable link (owner, 2026-11-15: 7 forced reconnects in 10 min, none helped).
+        if (silent < STALL_MS || now() - lastStallFix < stallGap || hasRoot != true) return
         // Pings can be lost while the internet works: only a fresh check that also fails counts as a stall.
         if (now() - checkedAt > 15_000 || verdict.internet != false) return
+        // Stalling again soon after the last reconnect: that one didn't help — wait longer next time.
+        stallGap = if (lastStallFix > 0 && now() - lastStallFix < 15 * 60_000L) (stallGap * 2).coerceAtMost(30 * 60_000L) else 5 * 60_000L
         lastStallFix = now()
         val name = ssid ?: return
         DebugLog.log("WIFI", "stall: $name connected but $gw silent for ${silent / 1000} s — forcing a reconnect")
@@ -352,7 +360,7 @@ object WifiDoctor {
             val r = rootWifi("enable", name)
             DebugLog.log("WIFI", "stall: rejoin $name → ${r ?: "root refused"}")
             Thread.sleep(10_000)
-            if (now() - lastGatewayAnswerAt > 25_000) {
+            if (now() - lastGatewayAnswerAt > 60_000) {
                 DebugLog.log("WIFI", "stall: still silent — Wi-Fi off/on, then join $name")
                 Root.run("svc wifi disable", "sleep 2", "svc wifi enable", "sleep 5")
                 rootWifi("enable", name)
@@ -453,24 +461,30 @@ object WifiDoctor {
     private var lastPreferScan = 0L
     private var lastPreferSwitch = 0L
     private var preferTries = 0
+    /** Networks whose internet just failed (a Starlink with no internet): not switched to for 10 min. */
+    private val failedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     /**
-     * Owner's rule, no exceptions, no toggle: on any network but the iPhone hotspot (Starlink…), scan every
-     * 6 s and switch to the iPhone the moment it's visible ([WifiPrefer]). Retries every 20 s, every 60 s
-     * after 3 tries that didn't stick. Uses the root join ([RootWifi] "enable": user-connect, others off).
+     * Owner's rule ([WifiPrefer], 2026-11-15): a working Starlink with a decent signal first, the iPhone
+     * hotspot when Starlink is away, weak or without internet. Scans every 6 s; retries every 20 s, every
+     * 60 s after 3 tries that didn't stick. Uses the root join ([RootWifi] "enable": user-connect, others off).
      */
     private fun preferIPhone(wm: WifiManager) {
         val current = ssid
-        if (WifiPrefer.rank(current) >= 3) {
-            preferTries = 0
-            return
-        }
         if (now() - lastPreferScan > 6_000) {
             lastPreferScan = now()
             @Suppress("DEPRECATION") runCatching { wm.startScan() }
         }
         val visible = if (now() - oursSeenAt < VISIBLE_MS) oursVisible else emptyMap()
-        val to = WifiPrefer.switchTo(current, visible) ?: return
+        // What we're on: its signal, and whether its internet worked at the last check (≤ 90 s old).
+        val works = if (connected && now() - checkedAt < 90_000) verdict.internet else null
+        if (connected && current != null && works == false) failedAt[current] = now()
+        val avoid = failedAt.filterValues { now() - it < 10 * 60_000L }.keys
+        val to = WifiPrefer.switchTo(current, visible, if (connected) rssi else null, works, avoid)
+        if (to == null) {
+            preferTries = 0
+            return
+        }
         val gap = if (preferTries < 3) 20_000L else 60_000L
         if (now() - lastPreferSwitch < gap || hasRoot != true) {
             if (hasRoot != true) DebugLog.change("WIFI", "prefer", "$to visible but no root to switch from $current")
@@ -478,7 +492,7 @@ object WifiDoctor {
         }
         lastPreferSwitch = now()
         preferTries++
-        DebugLog.log("WIFI", "prefer: on $current but $to is visible (${visible[to]} dBm) — switching (try $preferTries)")
+        DebugLog.log("WIFI", "prefer: on $current (${if (connected) rssi else "—"} dBm, internet $works) but $to is visible (${visible[to]} dBm) — switching (try $preferTries)")
         lastAction = "Switching to $to (preferred over $current)"
         actions.post {
             val r = rootWifi("enable", to)
