@@ -62,6 +62,7 @@ class DockService : Service() {
     }
 
     private var miniMap: MiniMap? = null
+    private var policeFlash: PoliceFlash? = null
     // Mini-map shown/hidden (dock map open?) every 2 s; trip (Waze destination, arrival, route) every 30 s.
     private var tripTicks = 0
     private val roadLoop = object : Runnable {
@@ -123,6 +124,9 @@ class DockService : Service() {
             main.post(locationLoop)
             Trip.init(this)
             main.postDelayed(roadLoop, 3000)
+            // Police reports from Waze's log → flashing screen edges.
+            Police.start(this)
+            policeFlash = PoliceFlash(this, wm).also { it.start() }
             FixHistory.resetBrokenStatsOnce(this)
             GpsWatch.start(this)
             ParkedPosition.start(this)
@@ -150,6 +154,8 @@ class DockService : Service() {
             relayoutBubble()
         } else if (intent?.action == ACTION_WIFI_CHOICE) {
             WifiDoctor.ownerChoice(intent.getStringExtra(EXTRA_SSID)?.takeIf { it.isNotEmpty() })
+        } else if (intent?.action == ACTION_POLICE_TEST) {
+            policeFlash?.test()
         } else if (intent?.action == ACTION_MINIMAP) {
             miniMap?.relayout() ?: miniMap?.sync()
         } else if (intent?.action == ACTION_CLEAR_SKY) {
@@ -786,6 +792,8 @@ class DockService : Service() {
 
     override fun onDestroy() {
         miniMap?.hide()
+        policeFlash?.stop()
+        Police.stop()
         Sync.stop()
         Sync.onNewLinks = null
         Store.removeListener(storeListener)
@@ -810,6 +818,7 @@ class DockService : Service() {
         const val ACTION_RESET_POSITION = "com.docunest.dock.RESET_POSITION"
         const val ACTION_CLEAR_SKY = "com.docunest.dock.CLEAR_SKY"
         const val ACTION_MINIMAP = "com.docunest.dock.MINIMAP"
+        const val ACTION_POLICE_TEST = "com.docunest.dock.POLICE_TEST"
         const val ACTION_WIFI_CHOICE = "com.docunest.dock.WIFI_CHOICE"
         const val EXTRA_SSID = "ssid"
         private var rootTried = false

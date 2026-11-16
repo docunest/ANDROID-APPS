@@ -152,6 +152,26 @@ class SettingsActivity : Activity() {
             prefs.miniSpanM = 0; DockService.start(this, DockService.ACTION_MINIMAP)
         })
 
+        section("Police ahead (from Waze)")
+        col.addView(label("When Waze has a police report ahead (along the route, or in front of you without one) the " +
+            "screen edges flash red / blue with \"🚓 POLICE · 650 m\" at the top — about 45 s before you get there " +
+            "(at least 700 m). Touches go through; the middle of the screen stays clear. Reads Waze's detail log " +
+            "on this unit; nothing is sent anywhere.\n" + policeStatus(), 13f, Palette.MUTED))
+        switch("Flash for police ahead", prefs.policeFlash) { prefs.policeFlash = it }
+        row(bigButton("🚓 Test the flash (6 s)", Palette.RED, 14f) {
+            DockService.start(this, DockService.ACTION_POLICE_TEST)
+            Toast.makeText(this, "Close this screen to see it over Waze", Toast.LENGTH_SHORT).show()
+        })
+        row(bigButton("Turn Waze's detail log back on", Palette.CARD_HI, 14f) {
+            AlertDialog.Builder(this).setMessage("Waze closes for a few seconds and reopens (navigation resumes). Do it now?")
+                .setPositiveButton("Do it") { _, _ ->
+                    Thread {
+                        val ok = Police.enableDebug()
+                        runOnUiThread { Toast.makeText(this, if (ok) "Done — Waze restarted" else "Couldn't (root?)", Toast.LENGTH_LONG).show() }
+                    }.start()
+                }.setNegativeButton("Not now", null).show()
+        })
+
         section("Dock keyboard")
         row(bigButton("🧪 iDrive test (records every control)", Palette.CARD_HI, 15f) {
             startActivity(Intent(this, IDriveLabActivity::class.java))
@@ -246,6 +266,12 @@ class SettingsActivity : Activity() {
 
     private fun names(pkgs: List<String>) =
         pkgs.joinToString(", ") { Apps.entry(this, it)?.label ?: "$it (not installed)" }.ifBlank { "none" }
+
+    private fun policeStatus(): String {
+        val log = when (Police.debugLog) { true -> "Waze detail log: on ✓"; false -> "⚠ Waze detail log is OFF — no police reports until it's back on"; null -> "Waze detail log: not checked yet" }
+        val n = Police.reports.size
+        return "$log · ${Police.status}" + if (n > 0) " · $n report${if (n == 1) "" else "s"} known now" else ""
+    }
 
     private fun section(title: String) {
         col.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(18)) })

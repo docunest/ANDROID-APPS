@@ -142,6 +142,8 @@ class TripOverlay(context: Context, private val drawVan: Boolean) : Overlay() {
     private val dashed = Paint(line).apply { pathEffect = DashPathEffect(floatArrayOf(18 * density, 12 * density), 0f) }
     private val flag = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; textSize = 24 * density }
     private val startDot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(22, 163, 74) }
+    private val policeBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(235, 220, 38, 38) }
+    private val police = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; textSize = 17 * density }
     private val van = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(245, 158, 11) }
     private val vanEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2 * density; color = Color.BLACK }
     private val path = Path()
@@ -170,6 +172,16 @@ class TripOverlay(context: Context, private val drawVan: Boolean) : Overlay() {
             gp.setCoords(d.lat, d.lng); proj.toPixels(gp, pt)
             c.save(); c.rotate(-map.mapOrientation, pt.x.toFloat(), pt.y.toFloat())
             c.drawText("🏁", pt.x.toFloat() + 8 * density, pt.y.toFloat(), flag)
+            c.restore()
+        }
+        // Police reported in Waze (Police.kt): 🚓 on a red disc, upright on a turned map.
+        for (rep in Police.reports.values) {
+            if (rep.done) continue
+            gp.setCoords(rep.lat, rep.lng); proj.toPixels(gp, pt)
+            val x = pt.x.toFloat(); val y = pt.y.toFloat()
+            c.drawCircle(x, y, 15 * density, policeBg)
+            c.save(); c.rotate(-map.mapOrientation, x, y)
+            c.drawText("🚓", x, y + 6 * density, police)
             c.restore()
         }
         val h = here

@@ -224,6 +224,7 @@ class MiniMap(private val ctx: Context, private val wm: WindowManager) {
         trip.here = here
         val spanM = spanOverride ?: spanM()
         if (spanOverride == null) dial.setT(Dial.spanToT(spanM), manual = prefs.miniSpanM > 0)
+        dial.police = Police.active != null && prefs.policeFlash
 
         // Heading: along the planned road when on it (steady), else the GPS course while moving.
         val target: Float? = run {
@@ -301,6 +302,9 @@ class MiniMap(private val ctx: Context, private val wm: WindowManager) {
         var t = 0.5f
             private set
         private var manual = false
+        /** Police ahead: the ring flashes red / blue too. */
+        var police = false
+            set(v) { if (v != field) { field = v; invalidate() } }
         private val knobR get() = 13 * d
         private val trackR get() = width / 2f - 16 * d
 
@@ -318,7 +322,13 @@ class MiniMap(private val ctx: Context, private val wm: WindowManager) {
 
         override fun onDraw(c: Canvas) {
             val cx = width / 2f; val cy = height / 2f
-            c.drawCircle(cx, cy, width / 2f - 2.5f * d, ring)
+            if (police) {
+                val red = (android.os.SystemClock.elapsedRealtime() / 500) % 2 == 0L
+                ring.color = if (red) Color.rgb(255, 30, 30) else Color.rgb(40, 100, 255)
+                ring.strokeWidth = 9 * d
+                postInvalidateDelayed(250)
+            } else { ring.color = Color.argb(235, 17, 24, 39); ring.strokeWidth = 5 * d }
+            c.drawCircle(cx, cy, width / 2f - ring.strokeWidth / 2, ring)
             oval.set(cx - trackR, cy - trackR, cx + trackR, cy + trackR)
             // Android arcs start at 3 o'clock; the sweep starts at 7:30 (−135° from the top).
             c.drawArc(oval, 135f, 270f, false, track)

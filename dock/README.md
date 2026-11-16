@@ -94,6 +94,23 @@ where I am … where is my floating circular thingy from GTA?"
   route + places; zoom by speed (~1.2 / 3 / 6 km across); bottom label = next diesel. Tap = dock
   map, drag = move. ◉ Mini on the map or Settings → Mini-map (size, reset position).
 
+## Police ahead flash (2026-11-17)
+
+Owner: "Add police alert. Like big red flashing outline with glow … Waze default is not enough to
+catch eyes if focused on road. I need something flashy! But don't cover maps".
+
+- `Police.kt`: reads Waze's DEBUG log (`/data/data/com.waze/spdlog.logdata`, root, only the new
+  bytes every 2 s, starting at the end; follows rotation) and parses `add_alert_action { … type:
+  POLICE … position { lon/lat_times_1000000 } … }` blocks (monorepo docs/ksw/docs/waze-debug-log.md).
+  Reports kept 90 min, older than 3 h ignored. Waze's log level is checked every 30 min (Settings shows
+  it; "Turn Waze's detail log back on" re-applies DEBUG — Waze restarts for a few seconds).
+- Ahead = along the dock's route (≤ 150 m off it), else within ±35° of the GPS course. Flash from
+  ~45 s before it (700 m – 2.5 km by speed) until passed; each report flashes once.
+- `PoliceFlash`: full-screen touch-through overlay; red / blue glow on all four edges (70 dp deep,
+  12 dp line), pulsing, ~20 fps; "🚓 POLICE · 650 m · street" tag top centre. The mini-map ring flashes
+  too; 🚓 on both maps. Settings → Police ahead: on/off, "Test the flash (6 s)".
+- The first 3 raw police blocks go to the dock's debug log (POLICE), to check the format on a drive.
+
 ## Dock map + mini-map, round 2 (2026-11-17)
 
 Owner after the first drive with v68: "much better … the UI became very crowded … buttons still have

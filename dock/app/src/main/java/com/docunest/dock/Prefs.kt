@@ -95,6 +95,10 @@ class Prefs(context: Context) {
     var miniY: Int
         get() = sp.getInt("miniY", -1)
         set(value) = sp.edit().putInt("miniY", value).apply()
+    /** Police reports from Waze flash the screen edges (owner 2026-11-17). */
+    var policeFlash: Boolean
+        get() = sp.getBoolean("policeFlash", true)
+        set(value) = sp.edit().putBoolean("policeFlash", value).apply()
     /** Mini-map zoom set with the ring: metres across, 0 = Auto. */
     var miniSpanM: Int
         get() = sp.getInt("miniSpanM", 0)
