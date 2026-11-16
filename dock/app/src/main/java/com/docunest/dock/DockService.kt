@@ -560,6 +560,7 @@ class DockService : Service() {
             // Recognisable at a glance: direction + distance, town, how long ago — plus the area map.
             val bits = mutableListOf<String>()
             if (item.isNew) bits += "NEW"
+            item.kindIcon.takeIf { it.isNotEmpty() }?.let { bits += it }
             Near.label(here, item)?.let { bits += it }
             Near.town(item.address, item.title)?.let { bits += it }
             bits += if (item.kind == "bookmark") "★ ${ago(item.recency)}" else ago(item.recency)

@@ -62,6 +62,9 @@ class DockActivity : Activity() {
     private var dropped: Marker? = null
     private var centeredOnce = false
     private var showMore = false
+    /** Category chip chosen above the list (null = all; [Kinds.CITY] = the 🏙 badge). */
+    private var kind: String? = null
+    private lateinit var kinds: LinearLayout
     private val storeListener: () -> Unit = { render() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -171,6 +174,11 @@ class DockActivity : Activity() {
         status = label("", 12f, Palette.MUTED)
         head.addView(status)
         placesCol.addView(head)
+        kinds = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        placesCol.addView(android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(kinds)
+        })
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         placesCol.addView(ScrollView(this).apply { addView(list) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
@@ -333,7 +341,9 @@ class DockActivity : Activity() {
     private fun render() {
         if (!::list.isInitialized) return
         status.text = Store.status
-        val items = Store.sorted()
+        val all = Store.sorted()
+        renderKinds(all)
+        val items = all.filter { matches(it) }
         val here = Near.here(this)
         val (main, more) = items.partition { Near.isMain(here, it) }
         list.removeAllViews()
@@ -356,8 +366,35 @@ class DockActivity : Activity() {
         renderMarkers(if (showMore) items else main)
     }
 
+    private fun matches(i: Item) = when (val k = kind) {
+        null -> true
+        Kinds.CITY -> i.bigCity
+        else -> i.category == k
+    }
+
+    /** ⛺ 3 · 🛒 6 · 🅿️ 5 … chips for the kinds in the history; tap = only those, again = all. */
+    private fun renderKinds(items: List<Item>) {
+        kinds.removeAllViews()
+        val counts = Kinds.ORDER.map { k -> k to items.count { it.category == k } }.filter { it.second > 0 } +
+            listOf(Kinds.CITY to items.count { it.bigCity }).filter { it.second > 0 }
+        if (counts.size < 2) {
+            kinds.visibility = View.GONE
+            return
+        }
+        kinds.visibility = View.VISIBLE
+        for ((k, n) in counts) {
+            val on = kind == k
+            val text = (if (k == Kinds.CITY) "🏙️ Cities" else "${Kinds.ICON[k]} ${Kinds.LABEL[k]}") + "  $n"
+            kinds.addView(bigButton(text, if (on) Palette.BLUE else Palette.CARD, 14f) {
+                kind = if (on) null else k
+                render()
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)).apply { setMargins(0, dp(4), dp(6), dp(6)) })
+        }
+    }
+
     private fun subtitle(item: Item): String {
         val bits = mutableListOf<String>()
+        item.kindIcon.takeIf { it.isNotEmpty() }?.let { bits += it }
         Near.label(Near.here(this), item)?.let { bits += it }
         Near.town(item.address, item.title)?.let { bits += it }
         if (item.isNew) bits += "NEW"
