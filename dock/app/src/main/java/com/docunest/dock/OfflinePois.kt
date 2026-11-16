@@ -24,7 +24,7 @@ object OfflinePois {
         "airport" to "✈️", "castle" to "🏰", "viewpoint" to "⛰️", "lighthouse" to "🗼",
     )
     val LABEL = mapOf(
-        "fuel" to "Fuel", "rest" to "Rest area", "toilets" to "Toilets", "water" to "Drinking water", "grocery" to "Grocery",
+        "fuel" to "Diesel", "rest" to "Rest area", "toilets" to "Toilets", "water" to "Drinking water", "grocery" to "Grocery",
         "dump" to "Camper service", "aire" to "Aire / campsite", "limit" to "Height / weight limit",
         "playground" to "Playground", "picnic" to "Picnic site", "beach" to "Beach",
         "works" to "Factory", "power" to "Power plant", "quarry" to "Quarry", "dam" to "Dam", "bridge" to "Bridge",

@@ -25,7 +25,7 @@ VERSION = 1
 
 def layer_of(t):
     g = t.get
-    if g("amenity") == "fuel": return "fuel"
+    if g("amenity") == "fuel": return "fuel" if diesel_maybe(t) else None
     if g("highway") in ("rest_area", "services"): return "rest"
     if g("amenity") == "sanitary_dump_station": return "dump"
     if g("tourism") in ("caravan_site", "camp_site"): return "aire"
@@ -48,6 +48,22 @@ def layer_of(t):
     return None
 
 
+GAS_ONLY = {"cng", "lng", "biogas", "h2", "hydrogen", "electricity"}
+
+
+def diesel_maybe(t):
+    """Owner: "I only care about diesel" — EV chargers are never here (amenity=charging_station isn't
+    a fuel layer). Drop stations tagged fuel:diesel=no, and ones whose listed fuels are only CNG/LNG/
+    hydrogen/electricity (Dourogás-style gas stations). NOT ones listing only LPG or AdBlue: in Portugal
+    334 normal Repsol/Galp/BP stations carry just fuel:lpg=yes — mappers note the extra, not diesel."""
+    if t.get("fuel:diesel") == "yes" or t.get("fuel:HGV_diesel") == "yes":
+        return True
+    if t.get("fuel:diesel") == "no":
+        return False
+    listed = {k[5:] for k, v in t.items() if k.startswith("fuel:") and v == "yes"}
+    return not listed or not listed <= GAS_ONLY
+
+
 def num(v):
     """"3.5", "3,5 m", "3.5 t" → 3.5; "default", "none", feet → None."""
     m = re.match(r"\s*(\d+(?:[.,]\d+)?)\s*(m|t)?\s*$", v or "")
@@ -62,10 +78,8 @@ def limit_matters(t):
 
 def info_of(layer, t):
     bits = []
-    if layer == "fuel":
-        if t.get("fuel:diesel") == "yes": bits.append("diesel")
-        if t.get("fuel:lpg") == "yes": bits.append("LPG")
-        if t.get("fuel:adblue") == "yes": bits.append("AdBlue")
+    if layer == "fuel" and (t.get("fuel:diesel") == "yes" or t.get("fuel:HGV_diesel") == "yes"):
+        bits.append("diesel ✓")  # confirmed in OSM; otherwise unknown (but almost always there)
     if layer == "limit":
         h, w = t.get("maxheight", ""), t.get("maxweight", "")
         if num(h) is not None and num(h) < 4.0: bits.append(f"height {h}" + (" m" if re.fullmatch(r"[\d.]+", h) else ""))

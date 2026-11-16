@@ -75,7 +75,7 @@ Owner: "POI now, packs later" — POIs offline first; offline vector maps and ro
 
 - `dock/tools/poi-packs/` + `.github/workflows/dock-poi.yml`: monthly (and on change) GitHub Actions
   downloads Geofabrik's Spain, Portugal, France, Italy and Germany extracts, keeps only the Road ahead
-  layers (`filter.txt`: fuel, rest areas, toilets, water, groceries, camper dump, aires/campsites,
+  layers (`filter.txt`: diesel stations — owner: diesel only, no EV chargers / gas-only / LPG / AdBlue info — rest areas, toilets, water, groceries, camper dump, aires/campsites,
   height/weight limits under 4 m / 12 t, playgrounds, picnic, beaches, factories, power plants,
   quarries, dams, named bridges, airports, castles, viewpoints, lighthouses) and writes one SQLite
   per country (`build.py`, table `poi`, index `(layer, lat)`), gzipped, on release `dock-poi` with
@@ -83,7 +83,8 @@ Owner: "POI now, packs later" — POIs offline first; offline vector maps and ro
 - Dock: Settings → 🗺 Offline map data (`OfflineDataActivity`). Downloads only on Starlink Wi-Fi
   (`WifiPrefer.unmetered`) unless "Download now on this network" is confirmed; resumes after car-off
   (HTTP Range), checks SHA-256 and the place count before replacing a pack. On Starlink it checks
-  weekly for newer packs and updates installed ones (`OfflinePacks.tick`, every 3 min from DockService).
+  weekly for newer packs and updates installed ones (`OfflinePacks.tick`, every 3 min from DockService);
+  the same Settings button turns into "⬇ Update over Starlink" when newer data is out.
 - `OfflinePois.nearest(ctx, lat, lng, layer)` — offline lookup for Road ahead / Nearby.
 
 ## Crashes (2026-11-14)

@@ -34,8 +34,8 @@ class OfflineDataActivity : Activity() {
 
         col.addView(label("🗺 Offline map data", 22f, bold = true))
         col.addView(label(
-            "Fuel, rest areas, camper services, groceries, toilets, water, playgrounds and the cool stuff — " +
-                "found with no signal at all. From OpenStreetMap, rebuilt every month; on Starlink the dock fetches newer data by itself. " +
+            "Diesel stations (no EV chargers), rest areas, camper services, groceries, toilets, water, playgrounds and the cool stuff — " +
+                "found with no signal at all. From OpenStreetMap, rebuilt every month; on Starlink the dock checks weekly and updates by itself — or tap the same button to update now. " +
                 "Offline maps and routing come later.", 13f, Palette.MUTED))
 
         val ssid = OfflinePacks.ssid(this)
@@ -49,6 +49,7 @@ class OfflineDataActivity : Activity() {
         val have = OfflinePacks.installed(this)
         val wanted = OfflinePacks.wanted(this)
         var toGet = 0L
+        var updates = false
         for ((cc, name) in OfflinePacks.COUNTRIES) {
             val p = m?.get(cc)
             val i = have[cc]
@@ -62,6 +63,7 @@ class OfflineDataActivity : Activity() {
                 else -> "not installed"
             }
             if (cc in wanted && p != null && i?.sha256 != p.sha256) toGet += p.bytes
+            if (i != null && p != null && i.sha256 != p.sha256) updates = true
             col.addView(Switch(this).apply {
                 text = "$name — $state"
                 textSize = 16f
@@ -76,7 +78,10 @@ class OfflineDataActivity : Activity() {
         col.addView(label(OfflinePacks.status + if (OfflinePacks.queued(this) && !OfflinePacks.busy) " (queued)" else "", 15f,
             if (OfflinePacks.busy) Palette.WAZE else Palette.TEXT))
         row(
-            bigButton("⬇ Install over Starlink" + if (toGet > 0) " (${mb(toGet)})" else "", Palette.BLUE, 15f) {
+            bigButton(
+                (if (updates) "⬇ Update over Starlink" else "⬇ Install / update over Starlink") + if (toGet > 0) " (${mb(toGet)})" else "",
+                if (updates) Palette.AMBER else Palette.BLUE, 15f,
+            ) {
                 OfflinePacks.install(this); render()
             },
             bigButton("Check for updates", Palette.CARD_HI, 15f) { OfflinePacks.checkNow() },
