@@ -206,7 +206,9 @@ def web_chunks(rows, cc, out_dir):
         with open(os.path.join(out_dir, name), "wb") as f:
             f.write(gz)
         chunks.append({"file": name, "bytes": len(gz), "sha256": hashlib.sha256(gz).hexdigest(),
-                       "cells": len(cur), "count": sum(len(v) for v in cur.values())})
+                       "cells": len(cur), "count": sum(len(v) for v in cur.values()),
+                       # Which cells are in it — MapPal's Road ahead fetches only the chunks along a route.
+                       "cellList": ",".join(cur)})
         cur, size = {}, 0
 
     for key in sorted(cells):
