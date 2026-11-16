@@ -41,8 +41,11 @@ jobs:
 
       - name: Download extract
         run: |
-          curl -fsSL --retry 8 --retry-delay 60 --retry-all-errors -o full.osm.pbf \
-            "https://download.geofabrik.de/${{ matrix.region }}-latest.osm.pbf"
+          # Some runner IPs can't reach Geofabrik at all (connect refused) — then OSM France's mirror.
+          curl -fsSL --retry 3 --retry-delay 20 --retry-all-errors --connect-timeout 20 -o full.osm.pbf \
+            "https://download.geofabrik.de/${{ matrix.region }}-latest.osm.pbf" \
+          || curl -fsSL --retry 5 --retry-delay 30 --retry-all-errors --connect-timeout 20 -o full.osm.pbf \
+            "https://download.openstreetmap.fr/extracts/${{ matrix.region }}-latest.osm.pbf"
           ls -la full.osm.pbf
 
       - name: Keep only POI objects
