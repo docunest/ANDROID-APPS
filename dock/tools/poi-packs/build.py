@@ -22,6 +22,12 @@ import osmium
 
 VERSION = 1
 
+# Layer order for the web chunks (rows carry the index). Append only — the web app reads it from the manifest.
+LAYERS = ["fuel", "rest", "toilets", "water", "grocery", "dump", "aire", "limit", "playground", "picnic", "beach",
+          "works", "power", "quarry", "dam", "bridge", "airport", "castle", "viewpoint", "lighthouse"]
+CELL = 4  # web cells are 1/4° (~28 km north–south)
+WEB_CHUNK_BYTES = 6_000_000  # JSON before gzip (~2 MB gzipped) — small enough for a Vercel function to pass on
+
 
 def layer_of(t):
     g = t.get
@@ -178,12 +184,55 @@ def build(src, out, country, source_date):
     return meta
 
 
+def web_chunks(rows, cc, out_dir):
+    """MapPal web app (iPhone, offline): the same rows as gzipped JSON chunks of 1/4° cells, stored per
+    cell in IndexedDB and read back by the cells around the phone. Row: [layer index, lat×1e5, lng×1e5,
+    name, brand, info, osm id]."""
+    import gzip, hashlib, json
+    cells = {}
+    for osm, layer, lat, lng, name, brand, info in rows:
+        key = f"{math.floor(lat * CELL)}_{math.floor(lng * CELL)}"
+        cells.setdefault(key, []).append([LAYERS.index(layer), round(lat * 1e5), round(lng * 1e5), name, brand, info, osm])
+    os.makedirs(out_dir, exist_ok=True)
+    chunks, cur, size = [], {}, 0
+
+    def flush():
+        nonlocal cur, size
+        if not cur:
+            return
+        name = f"poi-{cc}-w{len(chunks) + 1}.json.gz"
+        body = json.dumps({"v": 1, "cc": cc, "cells": cur}, ensure_ascii=False, separators=(",", ":")).encode()
+        gz = gzip.compress(body, 9, mtime=0)
+        with open(os.path.join(out_dir, name), "wb") as f:
+            f.write(gz)
+        chunks.append({"file": name, "bytes": len(gz), "sha256": hashlib.sha256(gz).hexdigest(),
+                       "cells": len(cur), "count": sum(len(v) for v in cur.values())})
+        cur, size = {}, 0
+
+    for key in sorted(cells):
+        n = len(json.dumps(cells[key], ensure_ascii=False, separators=(",", ":")))
+        if size and size + n > WEB_CHUNK_BYTES:
+            flush()
+        cur[key] = cells[key]
+        size += n
+    flush()
+    return chunks
+
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("src")
     p.add_argument("out")
     p.add_argument("--country", required=True)
     p.add_argument("--source-date", default="")
+    p.add_argument("--web-dir", help="also write the web app's JSON chunks here (+ web.json listing them)")
     a = p.parse_args()
     m = build(a.src, a.out, a.country, a.source_date)
     print(m, file=sys.stderr)
+    if a.web_dir:
+        import json
+        rows = sqlite3.connect(a.out).execute("SELECT osm, layer, lat, lng, name, brand, info FROM poi ORDER BY id").fetchall()
+        chunks = web_chunks(rows, a.country, a.web_dir)
+        with open(os.path.join(a.web_dir, f"{a.country}.web.json"), "w") as f:
+            json.dump({"layers": LAYERS, "cell": CELL, "chunks": chunks}, f)
+        print(f"web: {len(chunks)} chunks, {sum(c['bytes'] for c in chunks) // 1000} kB", file=sys.stderr)

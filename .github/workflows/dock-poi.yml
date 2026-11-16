@@ -3,7 +3,8 @@ name: Dock offline POI packs
 # Builds the offline POI packs for the car dock (fuel, rest areas, camper services, playgrounds,
 # cool stuff — the Road ahead layers) from Geofabrik's OpenStreetMap extracts, one small SQLite
 # file per country, and publishes them on release "dock-poi" with poi-manifest.json.
-# The dock downloads them over Starlink Wi-Fi (Settings → Offline map data).
+# The dock downloads them over Starlink Wi-Fi (Settings → Offline map data); the MapPal web app
+# (iPhone, /offline) downloads the same places as small JSON chunks ("web" in the manifest).
 on:
   schedule:
     - cron: "17 3 3 * *" # monthly, after Geofabrik's daily extracts
@@ -59,7 +60,7 @@ jobs:
       - name: Build pack
         run: |
           python3 dock/tools/poi-packs/build.py small.osm.pbf poi-${{ matrix.cc }}.sqlite \
-            --country ${{ matrix.cc }} --source-date "$SOURCE_DATE"
+            --country ${{ matrix.cc }} --source-date "$SOURCE_DATE" --web-dir web
           gzip -9 -k poi-${{ matrix.cc }}.sqlite
           python3 - <<'PY'
           import hashlib, json, os, sqlite3
@@ -70,6 +71,8 @@ jobs:
                   "sha256": hashlib.sha256(open(gz, "rb").read()).hexdigest(),
                   "count": int(meta["count"]), "sourceDate": meta["sourceDate"], "built": meta["built"],
                   "layers": meta["layers"]}
+          # MapPal web app (iPhone offline): the same places as small JSON chunks.
+          info["web"] = json.load(open(f"web/{cc}.web.json"))
           json.dump(info, open(f"{cc}.json", "w"))
           print(json.dumps(info, indent=1))
           PY
@@ -80,6 +83,7 @@ jobs:
           path: |
             poi-${{ matrix.cc }}.sqlite.gz
             ${{ matrix.cc }}.json
+            web/*.json.gz
 
   publish:
     needs: pack
@@ -115,5 +119,5 @@ jobs:
           gh release view dock-poi >/dev/null 2>&1 || gh release create dock-poi --latest=false --target "${{ github.sha }}" \
             --title "Dock offline POI packs" \
             --notes "Offline POIs per country for the car dock (OpenStreetMap © contributors, ODbL, via Geofabrik). Rebuilt monthly. Installed from Settings → Offline map data."
-          gh release upload dock-poi poi-*.sqlite.gz --clobber
+          gh release upload dock-poi poi-*.sqlite.gz web/*.json.gz --clobber
           gh release upload dock-poi poi-manifest.json --clobber
