@@ -99,6 +99,10 @@ class Prefs(context: Context) {
     var policeFlash: Boolean
         get() = sp.getBoolean("policeFlash", true)
         set(value) = sp.edit().putBoolean("policeFlash", value).apply()
+    /** Waze's useful log lines into the dock's debug log while driving (WazeTap). */
+    var wazeRecord: Boolean
+        get() = sp.getBoolean("wazeRecord", true)
+        set(value) = sp.edit().putBoolean("wazeRecord", value).apply()
     /** Mini-map zoom set with the ring: metres across, 0 = Auto. */
     var miniSpanM: Int
         get() = sp.getInt("miniSpanM", 0)

@@ -104,8 +104,16 @@ catch eyes if focused on road. I need something flashy! But don't cover maps".
   POLICE … position { lon/lat_times_1000000 } … }` blocks (monorepo docs/ksw/docs/waze-debug-log.md).
   Reports kept 90 min, older than 3 h ignored. Waze's log level is checked every 30 min (Settings shows
   it; "Turn Waze's detail log back on" re-applies DEBUG — Waze restarts for a few seconds).
-- Ahead = along the dock's route (≤ 150 m off it), else within ±35° of the GPS course. Flash from
-  ~45 s before it (700 m – 2.5 km by speed) until passed; each report flashes once.
+- Ahead (owner: "better to err on more alerting than less"): along the dock's route (≤ 300 m off it),
+  else within ±60° of the GPS course (±100° when Waze marks it on its route); anything within 500 m
+  whatever the direction; within 1 km when stopped. Flash from ~90 s before it (1.5–4 km by speed)
+  until well passed (150 m behind / 400 m away); each report flashes once.
+- **Drive recording** (`WazeTap`, owner: "Build logging"; Settings switch, on): Waze's useful log lines
+  into the dock's debug log (tag WAZE, uploaded to MapPal): road type on change + every 30 s with the
+  distance to the next turn, road matched yes/no, the turn list when a route is (re)calculated, route
+  lifecycle (calculating / changed / near destination / no progress), every community report as one
+  line (police all, others ≤ 40 an hour), lines mentioning ETA / street / speed limit / camera (each
+  kind once per 10 min), and 30 raw non-noise lines every 10 min.
 - `PoliceFlash`: full-screen touch-through overlay; red / blue glow on all four edges (70 dp deep,
   12 dp line), pulsing, ~20 fps; "🚓 POLICE · 650 m · street" tag top centre. The mini-map ring flashes
   too; 🚓 on both maps. Settings → Police ahead: on/off, "Test the flash (6 s)".

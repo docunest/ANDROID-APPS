@@ -65,6 +65,7 @@ object Police {
         if (running) return
         running = true
         val app = ctx.applicationContext
+        WazeTap.enabled = Prefs(app).wazeRecord
         worker.post(object : Runnable {
             override fun run() {
                 if (!running) return
@@ -103,7 +104,11 @@ object Police {
         val text = carry + out.substring(nl + 1)
         val lines = text.split('\n')
         carry = lines.last()
-        for (i in 0 until lines.size - 1) line(lines[i])
+        for (i in 0 until lines.size - 1) {
+            val inReport = depth > 0 || lines[i].contains("add_alert_action {")
+            line(lines[i])
+            if (!inReport) runCatching { WazeTap.line(lines[i]) }
+        }
     }
 
     internal fun line(l: String) {
@@ -126,6 +131,7 @@ object Police {
     private fun str(b: String, key: String) = Regex("""\b$key:\s*"([^"]*)"""").find(b)?.groupValues?.get(1)
 
     private fun parse(b: String) {
+        Regex("""\btype:\s*([A-Z_]+)""").find(b)?.groupValues?.get(1)?.let { runCatching { WazeTap.alert(it, b) } }
         if (!Regex("""\btype:\s*POLICE""").containsMatchIn(b)) return
         if (rawLogged < 3) { rawLogged++; DebugLog.log("POLICE", "raw report: " + b.take(1500).replace('\n', ' ')) }
         val lat = num(b, "lat_times_1000000") ?: return
@@ -166,33 +172,45 @@ object Police {
 
     // --- Is one ahead? ---------------------------------------------------------------------------
 
-    /** Every second: the nearest report ahead within warning distance (along the route when on it, else in the heading's cone). */
+    /**
+     * Every second: the nearest report ahead within warning distance. Owner 2026-11-17: "better to
+     * err on more alerting than less" — so generous: ~90 s ahead (1.5–4 km), 300 m either side of the
+     * route, a ±60° cone ahead without a route (±100° when Waze says it's on its route), anything
+     * within 500 m whatever the direction, and within 1 km when stopped / no heading.
+     */
     fun evaluate(here: Location?) {
         if (here == null || reports.isEmpty()) { active = null; return }
         val speed = if (here.hasSpeed()) here.speed else 0f
-        val warnM = (speed * 45.0).coerceIn(700.0, 2500.0) // ~45 s ahead: 1.4 km at 110 km/h
+        val warnM = (speed * 90.0).coerceIn(1500.0, 4000.0)
         val r = Trip.route
         val p = Trip.progress(here.latitude, here.longitude)?.takeIf { r != null && !r.straight && it.offM < 300 }
+        val heading = if (here.hasBearing() && speed > 1.5f) here.bearing else null
         var best: Pair<Report, Double>? = null
         for (rep in reports.values) {
             if (rep.done) continue
             val d = RouteGeo.distM(here.latitude, here.longitude, rep.lat, rep.lng)
-            val aheadM: Double? = if (p != null && r != null) {
+            val onRoute: Double? = if (p != null && r != null) {
                 val pr = RouteGeo.project(r.lat, r.lng, r.cum, rep.lat, rep.lng)
-                if (pr.off < 150) pr.along - p.alongM else null
-            } else if (here.hasBearing() && speed > 2f) {
-                val b = bearing(here.latitude, here.longitude, rep.lat, rep.lng)
-                val diff = abs(((b - here.bearing + 540f) % 360f) - 180f)
-                if (diff <= 35f || d < 120) d else null
+                if (pr.off < 300) pr.along - p.alongM else null
             } else null
-            // Passed it (behind, or getting further after having been close): never again.
-            if (rep.lastAheadM < 400 && (aheadM == null && d > 150 || (aheadM != null && aheadM < -60))) rep.done = true
+            val cone: Double? = heading?.let { h ->
+                val diff = abs(((bearing(here.latitude, here.longitude, rep.lat, rep.lng) - h + 540f) % 360f) - 180f)
+                if (diff <= 60f || (rep.wazeOnRoute && diff <= 100f)) d else null
+            }
+            val aheadM: Double? = onRoute ?: cone ?: when {
+                d < 500 -> d
+                heading == null && d < 1000 -> d
+                else -> null
+            }
+            // Passed it (well behind, or moving away after having been close): never again.
+            if (rep.lastAheadM < 600 && ((aheadM != null && aheadM < -150) || (aheadM == null && d > 400))) rep.done = true
             if (aheadM != null) rep.lastAheadM = aheadM
-            if (rep.done || aheadM == null || aheadM < -40 || aheadM > warnM) continue
+            if (rep.done || aheadM == null || aheadM < -100 || aheadM > warnM) continue
             if (best == null || aheadM < best.second) best = rep to aheadM
         }
         if (best != null && active?.first?.id != best.first.id) {
-            DebugLog.log("POLICE", "FLASH: police ${best.second.toInt()} m ahead (${best.first.street ?: "?"})")
+            DebugLog.log("POLICE", "FLASH: police ${best.second.toInt()} m ahead (${best.first.street ?: "?"}), " +
+                "${(speed * 3.6f).toInt()} km/h, ${if (p != null) "on the dock route" else if (heading != null) "by heading" else "no heading"}")
         }
         active = best
     }

@@ -43,4 +43,18 @@ class PoliceTest {
         assertTrue(r.wazeOnRoute)
         assertEquals("Lg. dos Caminhos de Ferro", r.street); assertEquals("LISBOA", r.city); assertEquals(7, r.thumbs)
     }
+
+    @Test fun recordsWazeLines() {
+        listOf(
+            "[23:15:45.810 23403 D] NVG_LOG: distance_to_next_turn=277, distance_to_prev_turn=0, current_road_type=3",
+            "[23:15:46.000 23403 D] [LANES] ------ Route map ------",
+            "[23:15:46.001 23403 D] [LANES]-->SEG #0   INSTR:0  NODE:150312569 TEXT:\"NONE\")",
+            "[23:15:46.002 23403 D] [LANES]   SEG #5   INSTR:2  NODE:340146872 TEXT:\"TURN_RIGHT\")",
+            "[23:15:46.100 23403 D] route changed new_generation=1, prev_generation=-1",
+        ).forEach { WazeTap.line(it) }
+        val got = DebugLog.lines("WAZE").map { it.msg }.joinToString("\n")
+        assertTrue(got, got.contains("road type") && got.contains("3"))
+        assertTrue(got, got.contains("route turns (2)") && got.contains("TURN_RIGHT"))
+        assertTrue(got, got.contains("route changed new_generation=1"))
+    }
 }
