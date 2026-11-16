@@ -1,0 +1,115 @@
+name: Dock offline POI packs
+
+# Builds the offline POI packs for the car dock (fuel, rest areas, camper services, playgrounds,
+# cool stuff — the Road ahead layers) from Geofabrik's OpenStreetMap extracts, one small SQLite
+# file per country, and publishes them on release "dock-poi" with poi-manifest.json.
+# The dock downloads them over Starlink Wi-Fi (Settings → Offline map data).
+on:
+  schedule:
+    - cron: "17 3 3 * *" # monthly, after Geofabrik's daily extracts
+  push:
+    paths:
+      - "dock/tools/poi-packs/**"
+      - ".github/workflows/dock-poi.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { cc: es, region: europe/spain }
+          - { cc: pt, region: europe/portugal }
+          - { cc: fr, region: europe/france }
+          - { cc: it, region: europe/italy }
+          - { cc: de, region: europe/germany }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: dock/tools/poi-packs
+
+      - name: Tools
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq osmium-tool
+          pip install -q osmium
+
+      - name: Download extract
+        run: |
+          curl -fsSL --retry 5 --retry-delay 30 -o full.osm.pbf \
+            "https://download.geofabrik.de/${{ matrix.region }}-latest.osm.pbf"
+          ls -la full.osm.pbf
+
+      - name: Keep only POI objects
+        run: |
+          osmium tags-filter full.osm.pbf $(cat dock/tools/poi-packs/filter.txt) -o small.osm.pbf --overwrite
+          ts=$(osmium fileinfo -g header.option.osmosis_replication_timestamp full.osm.pbf || true)
+          echo "SOURCE_DATE=${ts%%T*}" >> "$GITHUB_ENV"
+          rm full.osm.pbf
+          ls -la small.osm.pbf
+
+      - name: Build pack
+        run: |
+          python3 dock/tools/poi-packs/build.py small.osm.pbf poi-${{ matrix.cc }}.sqlite \
+            --country ${{ matrix.cc }} --source-date "$SOURCE_DATE"
+          gzip -9 -k poi-${{ matrix.cc }}.sqlite
+          python3 - <<'PY'
+          import hashlib, json, os, sqlite3
+          cc = "${{ matrix.cc }}"
+          gz, db = f"poi-{cc}.sqlite.gz", f"poi-{cc}.sqlite"
+          meta = dict(sqlite3.connect(db).execute("select k, v from meta"))
+          info = {"file": gz, "bytes": os.path.getsize(gz), "sqliteBytes": os.path.getsize(db),
+                  "sha256": hashlib.sha256(open(gz, "rb").read()).hexdigest(),
+                  "count": int(meta["count"]), "sourceDate": meta["sourceDate"], "built": meta["built"],
+                  "layers": meta["layers"]}
+          json.dump(info, open(f"{cc}.json", "w"))
+          print(json.dumps(info, indent=1))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: poi-${{ matrix.cc }}
+          path: |
+            poi-${{ matrix.cc }}.sqlite.gz
+            ${{ matrix.cc }}.json
+
+  publish:
+    needs: pack
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: packs
+          merge-multiple: true
+
+      - name: Publish on release dock-poi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd packs
+          ls -la
+          [ -n "$(ls *.json 2>/dev/null)" ] || { echo "no packs built"; exit 1; }
+          # Countries whose build failed this time keep last month's pack (kept in the manifest).
+          gh release download dock-poi -p poi-manifest.json -O old-manifest.json 2>/dev/null || echo '{"packs":{}}' > old-manifest.json
+          python3 - <<'PY'
+          import json, glob, time
+          old = json.load(open("old-manifest.json")).get("packs", {})
+          packs = dict(old)
+          for f in glob.glob("*.json"):
+              if f in ("old-manifest.json", "poi-manifest.json"): continue
+              packs[f[:-5]] = json.load(open(f))
+          json.dump({"version": 1, "updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "packs": packs},
+                    open("poi-manifest.json", "w"), indent=1)
+          print(open("poi-manifest.json").read())
+          PY
+          gh release view dock-poi >/dev/null 2>&1 || gh release create dock-poi --latest=false --target "${{ github.sha }}" \
+            --title "Dock offline POI packs" \
+            --notes "Offline POIs per country for the car dock (OpenStreetMap © contributors, ODbL, via Geofabrik). Rebuilt monthly. Installed from Settings → Offline map data."
+          gh release upload dock-poi poi-*.sqlite.gz --clobber
+          gh release upload dock-poi poi-manifest.json --clobber

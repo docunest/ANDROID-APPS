@@ -191,7 +191,10 @@ class DockService : Service() {
         }.also { runCatching { cm.registerDefaultNetworkCallback(it) } }
     }
 
-    private fun checkUpdate() = Updater.checkSoon(this)
+    private fun checkUpdate() {
+        Updater.checkSoon(this)
+        OfflinePacks.tick(this)
+    }
 
     private fun screen(): DisplayMetrics = DisplayMetrics().also {
         @Suppress("DEPRECATION")

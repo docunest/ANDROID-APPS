@@ -114,6 +114,11 @@
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation" />
 
         <activity
+            android:name=".OfflineDataActivity"
+            android:exported="false"
+            android:label="Offline map data" />
+
+        <activity
             android:name=".NavTestActivity"
             android:exported="false"
             android:label="Waze test" />

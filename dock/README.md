@@ -69,6 +69,23 @@ docunest/MapPal `lib/dock/`).
   - Needs background location (granted with root automatically) to see Wi-Fi names while Waze is in front.
 - Links sent while the car was off arrive within seconds of switching on: the app starts on boot and keeps a long-poll open to MapPal (server answers the moment something arrives, ~1 s), re-asking at once on wake / network.
 
+## Offline POI packs (2026-11-16)
+
+Owner: "POI now, packs later" — POIs offline first; offline vector maps and routing later.
+
+- `dock/tools/poi-packs/` + `.github/workflows/dock-poi.yml`: monthly (and on change) GitHub Actions
+  downloads Geofabrik's Spain, Portugal, France, Italy and Germany extracts, keeps only the Road ahead
+  layers (`filter.txt`: fuel, rest areas, toilets, water, groceries, camper dump, aires/campsites,
+  height/weight limits under 4 m / 12 t, playgrounds, picnic, beaches, factories, power plants,
+  quarries, dams, named bridges, airports, castles, viewpoints, lighthouses) and writes one SQLite
+  per country (`build.py`, table `poi`, index `(layer, lat)`), gzipped, on release `dock-poi` with
+  `poi-manifest.json` (size, SHA-256, count, OSM data date). A country that fails keeps last month's pack.
+- Dock: Settings → 🗺 Offline map data (`OfflineDataActivity`). Downloads only on Starlink Wi-Fi
+  (`WifiPrefer.unmetered`) unless "Download now on this network" is confirmed; resumes after car-off
+  (HTTP Range), checks SHA-256 and the place count before replacing a pack. On Starlink it checks
+  weekly for newer packs and updates installed ones (`OfflinePacks.tick`, every 3 min from DockService).
+- `OfflinePois.nearest(ctx, lat, lng, layer)` — offline lookup for Road ahead / Nearby.
+
 ## Crashes (2026-11-14)
 
 Builds 43–44 restarted the dock every ~30–60 min: the floating button's "stay on top" check read every window's content on every window change (Waze changes windows constantly) and never released those objects (Android 10 requires it) — memory leaked until Android killed the dock. Now the button's window is found by its position, only windows overlapping it are read (and released), the window list is released, and checks are coalesced to twice a second. Picture caches are capped at 8 MB each.

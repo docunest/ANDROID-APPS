@@ -129,6 +129,15 @@ class SettingsActivity : Activity() {
         }.toTypedArray())
         switch("\"🔎 Nearby\" in press-and-slide", prefs.fanNearby) { prefs.fanNearby = it }
 
+        section("Offline map data")
+        col.addView(label(OfflinePacks.installed(this).let { i ->
+            if (i.isEmpty()) "Nothing installed — fuel, rest areas, camper services … for driving with no signal."
+            else "Installed: " + i.keys.joinToString { OfflinePacks.COUNTRIES[it] ?: it } + " · " + OfflinePacks.status
+        }, 13f, Palette.MUTED))
+        row(bigButton("🗺 Offline map data (Spain, Portugal, France, Italy, Germany)", Palette.BLUE, 15f) {
+            startActivity(Intent(this, OfflineDataActivity::class.java))
+        })
+
         section("Dock keyboard")
         row(bigButton("🧪 iDrive test (records every control)", Palette.CARD_HI, 15f) {
             startActivity(Intent(this, IDriveLabActivity::class.java))
