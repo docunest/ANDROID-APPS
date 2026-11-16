@@ -16,6 +16,8 @@ import org.json.JSONObject
  */
 object Nav {
     fun go(context: Context, item: Item, app: String = Prefs(context).defaultNav) {
+        // Road ahead: the picked place is the trip's destination (start = here, locked).
+        if (item.lat != null && item.lng != null) Trip.setDockDestination(context, item.lat, item.lng, item.title)
         val ok = start(context, app, item.lat, item.lng, item.title, item.address, item.resolvedUrl ?: item.sourceUrl)
         if (ok) Sync.patch(item.id, JSONObject().put("opened", true))
     }

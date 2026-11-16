@@ -69,6 +69,31 @@ docunest/MapPal `lib/dock/`).
   - Needs background location (granted with root automatically) to see Wi-Fi names while Waze is in front.
 - Links sent while the car was off arrive within seconds of switching on: the app starts on boot and keeps a long-poll open to MapPal (server answers the moment something arrives, ~1 s), re-asking at once on wake / network.
 
+## Road ahead on the dock map + GTA mini-map (2026-11-16)
+
+Owner: "if there is a route, I want to see what's along the route and what's close to me … show me
+where I am … where is my floating circular thingy from GTA?"
+
+- **Dock map** (tap the button): every offline place (packs, `OfflinePois`) drawn as its icon.
+  Buttons above the map: ⛽ Diesel · 🅿️ Rest · 🛒 Shops · 🚻 WC & water · ⛺ Camper · ⚠️ Limits ·
+  🛝 Kids · 🏰 Cool stuff (all on; tap = off/on) and 🔎 Filter (name/brand/facts: "lidl", "24/7").
+  Zoomed far out only diesel / rest / camper show (plus everything on the route).
+- **Trip** (`Trip.kt`): destination = Waze's (newest `RECENTS` row in a root copy of Waze's
+  `user.db`, deleted right after; checked every 30 s when the file changed) or the place driven to
+  from the dock (Drive on a place / long-pressed pin). Start locked where the van was. Route line
+  from MapPal `/api/dock/road` (OSRM); with no signal a dashed straight line until the route can be
+  fetched. A Waze stop on the way (≤ 3 km off the route) keeps the long trip. New route after
+  > 700 m off it for a minute; arrived within 250 m. Saved in `files/trip.json`.
+- **Views** (right side of the map): Auto · Route · 3 km · 25 km · 80 km. Auto = 3 km in town
+  (< 35 km/h) or when the next diesel / rest / shop / aire is ≤ 3 km ahead, 25 km when it's
+  ≤ 25 km, else 80 km. The map follows the van, looking ahead along the route; dragging stops
+  following until a view is tapped.
+- **Lists** (left column tabs): 📍 Places (sent / saved) · 🛣 Along route ("in 12 km · ~8 min ·
+  right · diesel ✓") · 🎯 Near me (≈ 15 km, nearest first). Tap = on the map + Drive.
+- **Mini-map** (`MiniMap.kt`): round, over Waze, on by default; north-up, van arrow in the middle,
+  route + places; zoom by speed (~1.2 / 3 / 6 km across); bottom label = next diesel. Tap = dock
+  map, drag = move. ◉ Mini on the map or Settings → Mini-map (size, reset position).
+
 ## Offline POI packs (2026-11-16)
 
 Owner: "POI now, packs later" — POIs offline first; offline vector maps and routing later.

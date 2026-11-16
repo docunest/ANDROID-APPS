@@ -138,6 +138,15 @@ class SettingsActivity : Activity() {
             startActivity(Intent(this, OfflineDataActivity::class.java))
         })
 
+        section("Mini-map (round, over Waze)")
+        col.addView(label("North-up, the van in the middle, the route and the places switched on above the dock map; " +
+            "the next diesel at the bottom. Tap it = the dock map, drag = move it. Hidden while the dock map is open.", 13f, Palette.MUTED))
+        switch("Show the mini-map", prefs.miniMap) { prefs.miniMap = it; DockService.start(this, DockService.ACTION_MINIMAP) }
+        slider("Mini-map size", prefs.miniSizeDp, 140, 360, " dp") { prefs.miniSizeDp = it; DockService.start(this, DockService.ACTION_MINIMAP) }
+        row(bigButton("Put it back bottom-left", Palette.CARD_HI, 14f) {
+            prefs.miniX = -1; prefs.miniY = -1; DockService.start(this, DockService.ACTION_MINIMAP)
+        })
+
         section("Dock keyboard")
         row(bigButton("🧪 iDrive test (records every control)", Palette.CARD_HI, 15f) {
             startActivity(Intent(this, IDriveLabActivity::class.java))

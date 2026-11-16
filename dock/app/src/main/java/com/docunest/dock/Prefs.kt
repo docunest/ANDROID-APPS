@@ -82,6 +82,24 @@ class Prefs(context: Context) {
         set(value) = sp.edit().putString("previousKeyboard", value).apply()
 
     /** Satellites drawn around the van on the dock map (🛰 chip). */
+    /** Round GTA-style mini-map over Waze (owner 2026-11-16: "I want this to be visible" — on by default). */
+    var miniMap: Boolean
+        get() = sp.getBoolean("miniMap", true)
+        set(value) = sp.edit().putBoolean("miniMap", value).apply()
+    var miniSizeDp: Int
+        get() = sp.getInt("miniSizeDp", 210)
+        set(value) = sp.edit().putInt("miniSizeDp", value).apply()
+    var miniX: Int
+        get() = sp.getInt("miniX", -1)
+        set(value) = sp.edit().putInt("miniX", value).apply()
+    var miniY: Int
+        get() = sp.getInt("miniY", -1)
+        set(value) = sp.edit().putInt("miniY", value).apply()
+    /** Dock map view: auto / route / 3 / 25 / 80. */
+    var mapView: String
+        get() = sp.getString("mapView", MapViews.AUTO) ?: MapViews.AUTO
+        set(value) = sp.edit().putString("mapView", value).apply()
+
     var skyOnMap: Boolean
         get() = sp.getBoolean("skyOnMap", true)
         set(value) = sp.edit().putBoolean("skyOnMap", value).apply()

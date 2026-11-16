@@ -61,6 +61,18 @@ class DockService : Service() {
         }
     }
 
+    private var miniMap: MiniMap? = null
+    // Mini-map shown/hidden (dock map open?) every 2 s; trip (Waze destination, arrival, route) every 30 s.
+    private var tripTicks = 0
+    private val roadLoop = object : Runnable {
+        override fun run() {
+            if (miniMap == null) miniMap = MiniMap(this@DockService, wm)
+            miniMap?.sync()
+            if (tripTicks++ % 15 == 0) Trip.tick(this@DockService)
+            main.postDelayed(this, 2000)
+        }
+    }
+
     private val updateLoop = object : Runnable {
         override fun run() {
             checkUpdate()
@@ -109,6 +121,8 @@ class DockService : Service() {
             Updater.checkSoon(this, force = true)
             main.postDelayed(updateLoop, Updater.EVERY_MS)
             main.post(locationLoop)
+            Trip.init(this)
+            main.postDelayed(roadLoop, 3000)
             FixHistory.resetBrokenStatsOnce(this)
             GpsWatch.start(this)
             ParkedPosition.start(this)
@@ -136,6 +150,8 @@ class DockService : Service() {
             relayoutBubble()
         } else if (intent?.action == ACTION_WIFI_CHOICE) {
             WifiDoctor.ownerChoice(intent.getStringExtra(EXTRA_SSID)?.takeIf { it.isNotEmpty() })
+        } else if (intent?.action == ACTION_MINIMAP) {
+            miniMap?.relayout() ?: miniMap?.sync()
         } else if (intent?.action == ACTION_CLEAR_SKY) {
             ClearSky.hint(this)
         } else if (intent?.action == ACTION_RESET_POSITION) {
@@ -769,6 +785,7 @@ class DockService : Service() {
     }
 
     override fun onDestroy() {
+        miniMap?.hide()
         Sync.stop()
         Sync.onNewLinks = null
         Store.removeListener(storeListener)
@@ -792,6 +809,7 @@ class DockService : Service() {
         const val ACTION_RELAYOUT = "com.docunest.dock.RELAYOUT"
         const val ACTION_RESET_POSITION = "com.docunest.dock.RESET_POSITION"
         const val ACTION_CLEAR_SKY = "com.docunest.dock.CLEAR_SKY"
+        const val ACTION_MINIMAP = "com.docunest.dock.MINIMAP"
         const val ACTION_WIFI_CHOICE = "com.docunest.dock.WIFI_CHOICE"
         const val EXTRA_SSID = "ssid"
         private var rootTried = false
