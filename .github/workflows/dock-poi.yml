@@ -21,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      max-parallel: 2 # be gentle with Geofabrik (3 parallel connects were refused)
       matrix:
         include:
           - { cc: es, region: europe/spain }
@@ -40,7 +41,7 @@ jobs:
 
       - name: Download extract
         run: |
-          curl -fsSL --retry 5 --retry-delay 30 -o full.osm.pbf \
+          curl -fsSL --retry 8 --retry-delay 60 --retry-all-errors -o full.osm.pbf \
             "https://download.geofabrik.de/${{ matrix.region }}-latest.osm.pbf"
           ls -la full.osm.pbf
 
