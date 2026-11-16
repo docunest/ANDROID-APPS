@@ -87,7 +87,7 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("miniMap", true)
         set(value) = sp.edit().putBoolean("miniMap", value).apply()
     var miniSizeDp: Int
-        get() = sp.getInt("miniSizeDp", 210)
+        get() = sp.getInt("miniSizeDp", 240)
         set(value) = sp.edit().putInt("miniSizeDp", value).apply()
     var miniX: Int
         get() = sp.getInt("miniX", -1)
@@ -95,7 +95,15 @@ class Prefs(context: Context) {
     var miniY: Int
         get() = sp.getInt("miniY", -1)
         set(value) = sp.edit().putInt("miniY", value).apply()
-    /** Dock map view: auto / route / 3 / 25 / 80. */
+    /** Mini-map zoom set with the ring: metres across, 0 = Auto. */
+    var miniSpanM: Int
+        get() = sp.getInt("miniSpanM", 0)
+        set(value) = sp.edit().putInt("miniSpanM", value).apply()
+    /** Dock map full width (list hidden, ⤢ button). */
+    var mapWide: Boolean
+        get() = sp.getBoolean("mapWide", false)
+        set(value) = sp.edit().putBoolean("mapWide", value).apply()
+    /** Dock map view: auto / route / a span in km (1, 3, 8, 25, 80, 250). */
     var mapView: String
         get() = sp.getString("mapView", MapViews.AUTO) ?: MapViews.AUTO
         set(value) = sp.edit().putString("mapView", value).apply()

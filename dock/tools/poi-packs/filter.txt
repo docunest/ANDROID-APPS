@@ -1,4 +1,4 @@
-nwr/amenity=fuel,toilets,drinking_water,sanitary_dump_station
+nwr/amenity=fuel,toilets,drinking_water,sanitary_dump_station,parking
 nwr/highway=rest_area,services
 nwr/shop=supermarket,convenience
 nwr/tourism=caravan_site,camp_site,picnic_site,viewpoint

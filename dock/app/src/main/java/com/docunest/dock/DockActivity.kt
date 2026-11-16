@@ -77,6 +77,11 @@ class DockActivity : Activity() {
     private lateinit var tabs: LinearLayout
     private lateinit var tripRow: LinearLayout
     private lateinit var tripText: TextView
+    private lateinit var placesCol: View
+    private lateinit var mapFrameView: View
+    private lateinit var statusChips: View
+    private lateinit var spanLabel: TextView
+    private val autoZoom = AutoZoom()
     /** Left column: "places" (sent / saved), "route" (along the route), "near" (around the van). */
     private var listMode = "places"
     /** The map follows the van (Auto / 3 / 25 / 80 km) until it's dragged. */
@@ -222,12 +227,8 @@ class DockActivity : Activity() {
                 .setPositiveButton("End trip") { _, _ -> Trip.end(this) }.setNegativeButton("Keep", null).show()
         }, LinearLayout.LayoutParams(dp(48), dp(48)))
         placesCol.addView(tripRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(0, dp(4), 0, dp(4)) })
-        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        head.addView(label("Places", 20f, bold = true))
-        head.addView(space(10))
-        status = label("", 12f, Palette.MUTED)
-        head.addView(status)
-        placesCol.addView(head)
+        // (No "Places" heading: the tab says it. Sync status sits under the list.)
+        status = label("", 11f, Palette.MUTED)
         kinds = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         placesCol.addView(android.widget.HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
@@ -235,6 +236,8 @@ class DockActivity : Activity() {
         })
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         placesCol.addView(ScrollView(this).apply { addView(list) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        placesCol.addView(status)
+        this.placesCol = placesCol
 
         // Map
         val mapFrame = FrameLayout(this)
@@ -247,7 +250,7 @@ class DockActivity : Activity() {
         }
         mapFrame.addView(map, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         tripOverlay = TripOverlay(this, drawVan = false)
-        poiOverlay = PoiOverlay(this) { p -> showPoi(p) }
+        poiOverlay = PoiOverlay(this) { hits -> tapPois(hits) }
         map.overlays.add(tripOverlay)
         map.overlays.add(poiOverlay)
         feeder = MapFeeder(this, map, poiOverlay)
@@ -267,27 +270,27 @@ class DockActivity : Activity() {
             setMargins(dp(8), dp(8), dp(8), dp(8))
         })
         // GPS and Wi-Fi state at a glance; tap = the doctor screens (diagnose + fix).
-        fun chip(text: String, target: Class<*>) = label(text, 14f, bold = true).apply {
-            background = rounded(Color.argb(235, 17, 24, 39), dp(12).toFloat())
+        fun chip(text: String, target: Class<*>) = label(text, 12f, bold = true).apply {
+            background = rounded(Color.argb(215, 17, 24, 39), dp(10).toFloat())
             gravity = Gravity.CENTER_VERTICAL
-            minHeight = dp(48)
-            setPadding(dp(12), dp(6), dp(12), dp(6))
+            minHeight = dp(40)
+            setPadding(dp(10), dp(4), dp(10), dp(4))
             isClickable = true
             setOnClickListener { startActivity(Intent(this@DockActivity, target)) }
         }
         gpsChip = chip("📡 GPS", GpsDoctorActivity::class.java)
         wifiChip = chip("📶 Wi-Fi", WifiDoctorActivity::class.java)
-        val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.BOTTOM }
         chips.addView(gpsChip)
-        chips.addView(space(8))
+        chips.addView(space(6))
         skyChip = chip("☀ Clear sky", GpsDoctorActivity::class.java).apply {
             setTextColor(Palette.AMBER)
             setOnClickListener { ClearSky.hint(this@DockActivity); renderGps() }
         }
         chips.addView(skyChip)
-        chips.addView(space(8))
+        chips.addView(space(6))
         chips.addView(wifiChip)
-        chips.addView(space(8))
+        chips.addView(space(6))
         chips.addView(chip("🛰", GpsDoctorActivity::class.java).apply {
             alpha = if (prefs.skyOnMap) 1f else 0.5f
             setOnClickListener { v ->
@@ -297,17 +300,20 @@ class DockActivity : Activity() {
                 map.invalidate()
             }
         })
-        val topLeft = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        topLeft.addView(chips)
-        groupChips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        topLeft.addView(android.widget.HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            addView(groupChips)
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
-        mapFrame.addView(topLeft, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply {
+        // GPS / Wi-Fi state: small, bottom-left (hidden while a place card is open there).
+        statusChips = chips
+        mapFrame.addView(chips, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
             setMargins(dp(8), dp(8), dp(84), dp(8))
         })
-        // Views: Auto · whole route · 3 / 25 / 80 km — and the mini-map switch.
+        // What's on the map: one square icon button per kind (owner 2026-11-17: less crowded, still easy to hit).
+        groupChips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        mapFrame.addView(android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(groupChips)
+        }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply {
+            setMargins(dp(8), dp(8), dp(84), dp(8))
+        })
+        // Views: Auto · ＋ · span · － · whole route · ⤢ full width · mini-map switch.
         viewChips = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         mapFrame.addView(viewChips, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply {
             setMargins(dp(8), dp(8), dp(8), dp(8))
@@ -317,7 +323,7 @@ class DockActivity : Activity() {
         renderGps()
         map.overlays.add(MapEventsOverlay(object : MapEventsReceiver {
             override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
-                bar.visibility = View.GONE
+                hideBar()
                 return false
             }
             override fun longPressHelper(p: GeoPoint?): Boolean {
@@ -333,9 +339,9 @@ class DockActivity : Activity() {
             (GpsDoctor.fix ?: lastLocation)?.let { GeoPoint(it.latitude, it.longitude) }
         }.also { it.isEnabled = prefs.skyOnMap; map.overlays.add(it) }
 
+        mapFrameView = mapFrame
         if (landscape) {
-            root.addView(placesCol, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-            root.addView(space(10))
+            root.addView(placesCol, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply { marginEnd = dp(10) })
             root.addView(mapFrame, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.3f))
         } else {
             root.addView(top)
@@ -345,6 +351,13 @@ class DockActivity : Activity() {
             root.addView(placesCol, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         }
         setContentView(root)
+        applyWide()
+    }
+
+    /** ⤢: the map takes the whole window (the list hides); again = back. */
+    private fun applyWide() {
+        if (!::placesCol.isInitialized) return
+        placesCol.visibility = if (prefs.mapWide) View.GONE else View.VISIBLE
     }
 
     // --- Version badge: "v15 · Up to date", spinner while checking/installing; tap = check now.
@@ -659,6 +672,12 @@ class DockActivity : Activity() {
             startActivity(NavTestActivity.intent(this, lat, lng, title, item?.address, item?.let { it.resolvedUrl ?: it.sourceUrl }))
         }, LinearLayout.LayoutParams(dp(56), dp(56)))
         bar.visibility = View.VISIBLE
+        statusChips.visibility = View.GONE
+    }
+
+    private fun hideBar() {
+        bar.visibility = View.GONE
+        if (::statusChips.isInitialized) statusChips.visibility = View.VISIBLE
     }
 
     // --- Road ahead ---------------------------------------------------------------------------------
@@ -672,20 +691,27 @@ class DockActivity : Activity() {
         val on = MapFilter.groups(this)
         for (g in OfflinePois.GROUPS) {
             val active = g.id in on
-            groupChips.addView(mapChip(if (active) "${g.icon} ${g.label}" else g.icon, active) { MapFilter.toggle(this, g.id) })
+            groupChips.addView(mapChip(g.icon, active, square = true) {
+                MapFilter.toggle(this, g.id)
+                toast("${g.icon} ${g.label}: ${if (active) "hidden" else "shown"}")
+            }.apply {
+                setOnLongClickListener { toast("${g.icon} ${g.label} — tap to ${if (active) "hide" else "show"}"); true }
+            })
         }
         val t = MapFilter.text
-        groupChips.addView(mapChip(if (t.isEmpty()) "🔎 Filter" else "🔎 $t  ✕", t.isNotEmpty()) {
+        groupChips.addView(mapChip(if (t.isEmpty()) "🔎" else "🔎 $t ✕", t.isNotEmpty(), square = t.isEmpty()) {
             if (t.isNotEmpty()) MapFilter.setText(this, "") else askFilter()
         })
     }
 
-    private fun mapChip(text: String, active: Boolean, onClick: () -> Unit) = label(text, 13f, bold = active).apply {
+    /** A map button: at least 48 dp, so it's easy to hit while driving. [square] = one icon, 52 × 48. */
+    private fun mapChip(text: String, active: Boolean, square: Boolean = false, onClick: () -> Unit) = label(text, if (square) 20f else 13f, bold = active).apply {
         background = rounded(if (active) Color.argb(235, 37, 99, 235) else Color.argb(200, 17, 24, 39), dp(12).toFloat())
-        alpha = if (active) 1f else 0.7f
+        alpha = if (active) 1f else 0.55f
         gravity = Gravity.CENTER
-        minHeight = dp(44)
-        setPadding(dp(10), dp(4), dp(10), dp(4))
+        minHeight = dp(48)
+        if (square) minWidth = dp(52)
+        setPadding(dp(if (square) 4 else 10), dp(4), dp(if (square) 4 else 10), dp(4))
         isClickable = true
         setOnClickListener { onClick() }
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(6) }
@@ -704,23 +730,56 @@ class DockActivity : Activity() {
         if (!::viewChips.isInitialized) return
         viewChips.removeAllViews()
         val mode = prefs.mapView
-        fun add(text: String, id: String?, onClick: () -> Unit) {
-            val active = id != null && following && mode == id
-            viewChips.addView(mapChip(text, active, onClick).apply {
-                layoutParams = LinearLayout.LayoutParams(dp(72), ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) }
+        fun add(text: String, active: Boolean, size: Float = 13f, onClick: () -> Unit) =
+            viewChips.addView(mapChip(text, active, onClick = onClick).apply {
+                textSize = size
+                layoutParams = LinearLayout.LayoutParams(dp(68), ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) }
             })
+        add("Auto", following && mode == MapViews.AUTO) { setView(MapViews.AUTO) }
+        add("＋", false, 22f) { zoomBy(closer = true) }
+        spanLabel = label("", 12f, bold = true).apply {
+            gravity = Gravity.CENTER
+            setShadowLayer(4f, 0f, 0f, Color.BLACK)
         }
-        add("Auto", MapViews.AUTO) { setView(MapViews.AUTO) }
-        add("Route", MapViews.ROUTE) {
-            if (Trip.route == null) toast("No trip yet — start navigation in Waze, or tap a place → Drive") else setView(MapViews.ROUTE)
+        viewChips.addView(spanLabel, LinearLayout.LayoutParams(dp(68), ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) })
+        add("－", false, 22f) { zoomBy(closer = false) }
+        add("Route", following && mode == MapViews.ROUTE) {
+            if (Trip.route == null) toast("No trip yet — start navigation in Waze, or tap a place → Waze") else setView(MapViews.ROUTE)
         }
-        for (k in MapViews.SPANS.keys) add("$k km", k) { setView(k) }
-        add(if (prefs.miniMap) "◉ Mini" else "○ Mini", null) {
+        add(if (prefs.mapWide) "⤡" else "⤢", prefs.mapWide, 20f) {
+            prefs.mapWide = !prefs.mapWide
+            applyWide()
+            renderViews()
+            map.postDelayed({ follow(force = true) }, 300)
+        }
+        add(if (prefs.miniMap) "◉ Mini" else "○ Mini", false, 12f) {
             prefs.miniMap = !prefs.miniMap
             DockService.start(this, DockService.ACTION_MINIMAP)
             toast(if (prefs.miniMap) "Mini-map on — shows over Waze when this screen is closed" else "Mini-map off")
             renderViews()
         }
+        renderSpan()
+    }
+
+    /** "25 km" under ＋ (what the map shows across now; "Auto 25 km" when Auto picked it). */
+    private fun renderSpan() {
+        if (!::spanLabel.isInitialized || !::map.isInitialized || map.width == 0) return
+        val k = MapViews.spanKm(map)
+        val t = if (k >= 10) "${k.toInt()} km" else if (k >= 1) "%.1f km".format(k) else "${(k * 1000).toInt()} m"
+        spanLabel.text = if (following && prefs.mapView == MapViews.AUTO) "Auto\n$t" else t
+    }
+
+    /** ＋ / －: the next fixed span from what's shown now; follows the van again. */
+    private fun zoomBy(closer: Boolean) {
+        val now = MapViews.spanKm(map)
+        val next = MapViews.zoomStep(now, closer)
+        if (Trip.here(this) == null || !following) {
+            following = false
+            if (closer) map.controller.zoomIn() else map.controller.zoomOut()
+            map.postDelayed({ renderSpan() }, 450)
+            return
+        }
+        setView(if (next == next.toInt().toDouble()) next.toInt().toString() else next.toString())
     }
 
     private fun setView(id: String) {
@@ -728,27 +787,31 @@ class DockActivity : Activity() {
         following = true
         renderViews()
         if (id == MapViews.ROUTE) MapViews.showRoute(map) else follow(force = true)
+        map.postDelayed({ renderSpan() }, 300)
     }
 
     private var lastFollowAt = 0L
-    /** Every 2 s while following: keep the chosen view around the van (Auto picks 3 / 25 / 80 km). */
+    /** Every 2 s while following: keep the chosen view around the van (Auto: town 3 / road 25 / open road 80 km). */
     private fun follow(force: Boolean = false) {
         if (!::map.isInitialized) return
         renderTrip()
         val now = SystemClock.elapsedRealtime()
         if (listMode != "places" && now - lastListAt > 15_000) render()
+        val here = Trip.here(this)
+        here?.let { autoZoom.feed(it) }
+        renderSpan()
         if (!following || prefs.mapView == MapViews.ROUTE) return
         if (!force && now - lastFollowAt < 1900) return
         lastFollowAt = now
-        val here = Trip.here(this) ?: return
-        val span = MapViews.SPANS[prefs.mapView]
-            ?: MapViews.autoSpan(if (here.hasSpeed()) here.speed * 3.6f else null, feeder.nextEssentialM)
+        here ?: return
+        val span = prefs.mapView.toDoubleOrNull() ?: MapViews.autoSpan(autoZoom.phase)
         MapViews.follow(map, here, span)
     }
 
     private fun renderTrip() {
         if (!::tripRow.isInitialized) return
         val d = Trip.dest
+        if (listMode != "route") { tripRow.visibility = View.GONE; return }
         if (d == null) {
             tripRow.visibility = if (Trip.status.startsWith("Arrived")) View.VISIBLE else View.GONE
             tripText.text = "🏁 ${Trip.status}"
@@ -770,9 +833,12 @@ class DockActivity : Activity() {
     private fun renderTabs() {
         if (!::tabs.isInitialized) return
         tabs.removeAllViews()
-        for ((id, text) in listOf("places" to "📍 Places", "route" to "🛣 Along route", "near" to "🎯 Near me")) {
+        val left = Trip.dest?.let { Trip.here(this)?.let { h -> Trip.progress(h.latitude, h.longitude)?.leftM } }
+        val routeTab = if (left != null) "🛣 Route · ${km(left.toFloat())}" else "🛣 Along route"
+        for ((id, text) in listOf("places" to "📍 Places", "route" to routeTab, "near" to "🎯 Near me")) {
             tabs.addView(bigButton(text, if (listMode == id) Palette.BLUE else Palette.CARD, 14f) {
                 listMode = id
+                renderTrip()
                 render()
             }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { setMargins(0, 0, dp(6), dp(6)) })
         }
@@ -848,16 +914,55 @@ class DockActivity : Activity() {
         }
     }
 
+    /** Tap on the map's icons: several under the finger (or far out) → zoom in there; one → its card. */
+    private fun tapPois(hits: List<OfflinePois.Poi>) {
+        val z = map.zoomLevelDouble
+        val p = hits.first()
+        following = false
+        renderViews()
+        if (hits.size > 1 && z < 17) {
+            val lat = hits.map { it.lat }.average(); val lng = hits.map { it.lng }.average()
+            map.controller.animateTo(GeoPoint(lat, lng), (z + 2.5).coerceAtMost(18.0), 450L)
+            return
+        }
+        if (z < 14) map.controller.animateTo(GeoPoint(p.lat, p.lng), 15.5, 450L)
+        showPoi(p)
+    }
+
+    /** The place card on the map: what it is, how far, and Waze / Google Maps (details, photos, drive). */
     private fun showPoi(p: OfflinePois.Poi) {
         val here = Trip.here(this)
+        val prog = here?.let { Trip.progress(it.latitude, it.longitude) }
+        val onRoute = Trip.pois.firstOrNull { it.poi.osm == p.osm }
+        val dist = when {
+            onRoute != null && prog != null && prog.offM < 2000 && onRoute.km * 1000 > prog.alongM - 200 ->
+                aheadText(onRoute.km * 1000 - prog.alongM, here.speed.takeIf { here.hasSpeed() }) + " on the route"
+            here != null -> km(OfflinePois.distM(here.latitude, here.longitude, p.lat, p.lng).toFloat()) + " away"
+            else -> null
+        }
         val sub = listOfNotNull(
             OfflinePois.LABEL[p.layer],
             p.brand?.takeIf { it != p.title },
             p.info,
-            here?.let { km(OfflinePois.distM(it.latitude, it.longitude, p.lat, p.lng).toFloat()) },
-            "OpenStreetMap",
+            dist,
         ).joinToString(" · ")
-        showBar("${p.icon} ${p.title}", sub, p.lat, p.lng, null)
+        bar.removeAllViews()
+        val text = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        text.addView(label("${p.icon} ${p.title}", 17f, bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+        text.addView(label(sub, 12f, Palette.MUTED).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
+        bar.addView(text, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        bar.addView(bigButton("Waze", Palette.WAZE, 16f) {
+            // Drive there now: also the dock's trip (start = here).
+            Trip.setDockDestination(this, p.lat, p.lng, p.title)
+            Nav.goTo(this, p.lat, p.lng, Prefs.NAV_WAZE)
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(56)).apply { marginStart = dp(6) })
+        bar.addView(bigButton("Google Maps", Palette.GMAPS, 15f) {
+            // Its Google card (photos, reviews, hours) beside Waze; Directions is one tap there.
+            val q = if (p.name != null) Uri.encode(p.name) else "${p.lat},${p.lng}(${Uri.encode(p.title)})"
+            Split.openMaps(this, "geo:${p.lat},${p.lng}?q=$q")
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(56)).apply { marginStart = dp(6) })
+        bar.visibility = View.VISIBLE
+        statusChips.visibility = View.GONE
     }
 
     companion object {

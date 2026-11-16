@@ -17,18 +17,18 @@ object OfflinePois {
     }
 
     val ICON = linkedMapOf(
-        "fuel" to "⛽", "rest" to "🅿️", "toilets" to "🚻", "water" to "💧", "grocery" to "🛒",
+        "fuel" to "⛽", "rest" to "☕", "toilets" to "🚻", "water" to "💧", "grocery" to "🛒",
         "dump" to "🚐", "aire" to "⛺", "limit" to "⚠️",
         "playground" to "🛝", "picnic" to "🧺", "beach" to "🏖️",
         "works" to "🏭", "power" to "⚡", "quarry" to "⛏️", "dam" to "🌊", "bridge" to "🌉",
-        "airport" to "✈️", "castle" to "🏰", "viewpoint" to "⛰️", "lighthouse" to "🗼",
+        "airport" to "✈️", "castle" to "🏰", "viewpoint" to "⛰️", "lighthouse" to "🗼", "parking" to "🅿️",
     )
     val LABEL = mapOf(
-        "fuel" to "Diesel", "rest" to "Rest area", "toilets" to "Toilets", "water" to "Drinking water", "grocery" to "Grocery",
+        "fuel" to "Diesel", "rest" to "Rest area / services", "toilets" to "Toilets", "water" to "Drinking water", "grocery" to "Grocery",
         "dump" to "Camper service", "aire" to "Aire / campsite", "limit" to "Height / weight limit",
         "playground" to "Playground", "picnic" to "Picnic site", "beach" to "Beach",
         "works" to "Factory", "power" to "Power plant", "quarry" to "Quarry", "dam" to "Dam", "bridge" to "Bridge",
-        "airport" to "Airport", "castle" to "Castle", "viewpoint" to "Viewpoint", "lighthouse" to "Lighthouse",
+        "airport" to "Airport", "castle" to "Castle", "viewpoint" to "Viewpoint", "lighthouse" to "Lighthouse", "parking" to "Parking",
     )
 
     /** How far off the road each kind still counts as "on the way" (MapPal ROAD_LAYERS radius). */
@@ -36,23 +36,24 @@ object OfflinePois {
         "fuel" to 1000, "rest" to 1000, "toilets" to 300, "water" to 300, "grocery" to 1500,
         "dump" to 3000, "aire" to 3000, "limit" to 20, "playground" to 600, "picnic" to 1000, "beach" to 3000,
         "works" to 3000, "power" to 5000, "quarry" to 3000, "dam" to 3000, "bridge" to 60,
-        "airport" to 8000, "castle" to 3000, "viewpoint" to 2000, "lighthouse" to 3000,
+        "airport" to 8000, "castle" to 3000, "viewpoint" to 2000, "lighthouse" to 3000, "parking" to 300,
     )
 
-    /** The on/off buttons above the map: one per group (owner 2026-11-16: all on by default). */
-    data class Group(val id: String, val icon: String, val label: String, val layers: List<String>)
+    /** The on/off buttons above the map: one per group (owner 2026-11-16: all on by default; parking optional = off). */
+    data class Group(val id: String, val icon: String, val label: String, val layers: List<String>, val onByDefault: Boolean = true)
     val GROUPS = listOf(
         Group("fuel", "⛽", "Diesel", listOf("fuel")),
-        Group("rest", "🅿️", "Rest", listOf("rest")),
+        Group("rest", "☕", "Rest areas & services", listOf("rest")),
         Group("food", "🛒", "Shops", listOf("grocery")),
         Group("wc", "🚻", "WC & water", listOf("toilets", "water")),
         Group("camper", "⛺", "Camper", listOf("aire", "dump")),
+        Group("parking", "🅿️", "Parking", listOf("parking"), onByDefault = false),
         Group("limit", "⚠️", "Limits", listOf("limit")),
         Group("kids", "🛝", "Kids", listOf("playground", "picnic", "beach")),
         Group("cool", "🏰", "Cool stuff", listOf("castle", "viewpoint", "lighthouse", "dam", "bridge", "works", "power", "quarry", "airport")),
     )
     /** Drawn first / kept when the map is crowded. */
-    val PRIORITY = listOf("fuel", "rest", "grocery", "aire", "dump", "limit", "toilets", "water", "playground", "picnic",
+    val PRIORITY = listOf("fuel", "rest", "grocery", "aire", "dump", "limit", "toilets", "water", "parking", "playground", "picnic",
         "castle", "viewpoint", "beach", "lighthouse", "dam", "works", "power", "quarry", "airport", "bridge")
 
     private val dbs = HashMap<String, SQLiteDatabase>()

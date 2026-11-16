@@ -24,7 +24,8 @@ VERSION = 1
 
 # Layer order for the web chunks (rows carry the index). Append only — the web app reads it from the manifest.
 LAYERS = ["fuel", "rest", "toilets", "water", "grocery", "dump", "aire", "limit", "playground", "picnic", "beach",
-          "works", "power", "quarry", "dam", "bridge", "airport", "castle", "viewpoint", "lighthouse"]
+          "works", "power", "quarry", "dam", "bridge", "airport", "castle", "viewpoint", "lighthouse", "parking"]
+CAR_ONLY = {"parking"}  # many rows, only the dock map shows them — not in the web chunks
 CELL = 4  # web cells are 1/4° (~28 km north–south)
 WEB_CHUNK_BYTES = 6_000_000  # JSON before gzip (~2 MB gzipped) — small enough for a Vercel function to pass on
 
@@ -51,7 +52,22 @@ def layer_of(t):
     if g("historic") == "castle" and g("name"): return "castle"
     if g("tourism") == "viewpoint" and g("name"): return "viewpoint"
     if g("man_made") == "lighthouse": return "lighthouse"
+    if g("amenity") == "parking" and parking_useful(t): return "parking"
     return None
+
+
+# Owner 2026-11-16: "add parking spots as optional item in the map … sometimes the parkings are
+# pretty important for me to see". Not the ones nobody can use: private / permit-only, roadside
+# strips (every street would be one), garage boxes, and tiny ones (< 5 places when tagged).
+PARKING_SKIP_ACCESS = {"private", "no", "permit", "residents", "permissive_no", "delivery"}
+PARKING_SKIP_KIND = {"street_side", "lane", "on_kerb", "half_on_kerb", "shoulder", "garage_boxes", "carports", "layby"}
+
+
+def parking_useful(t):
+    if t.get("access") in PARKING_SKIP_ACCESS or t.get("parking") in PARKING_SKIP_KIND:
+        return False
+    cap = num(t.get("capacity", ""))
+    return cap is None or cap >= 5
 
 
 GAS_ONLY = {"cng", "lng", "biogas", "h2", "hydrogen", "electricity"}
@@ -93,6 +109,17 @@ def info_of(layer, t):
     if layer == "power" and t.get("plant:source"): bits.append(t["plant:source"])
     if layer == "rest" and t.get("highway") == "services": bits.append("services")
     if layer == "aire" and t.get("tourism") == "caravan_site": bits.append("aire")
+    if layer == "parking":
+        kind = t.get("parking")
+        if kind in ("underground", "multi-storey", "rooftop"): bits.append(kind.replace("-", " "))
+        if t.get("motorhome") in ("yes", "designated"): bits.append("campers OK")
+        elif t.get("motorhome") == "no": bits.append("no campers")
+        if num(t.get("maxheight", "")) is not None: bits.append(f"max {num(t['maxheight']):g} m")
+        if t.get("fee") == "no": bits.append("free")
+        elif t.get("fee") == "yes": bits.append("paid")
+        if t.get("access") == "customers": bits.append("customers")
+        cap = num(t.get("capacity", ""))
+        if cap: bits.append(f"{cap:g} places")
     if t.get("opening_hours") == "24/7": bits.append("24/7")
     return " · ".join(bits) or None
 
@@ -191,6 +218,8 @@ def web_chunks(rows, cc, out_dir):
     import gzip, hashlib, json
     cells = {}
     for osm, layer, lat, lng, name, brand, info in rows:
+        if layer in CAR_ONLY:
+            continue
         key = f"{math.floor(lat * CELL)}_{math.floor(lng * CELL)}"
         cells.setdefault(key, []).append([LAYERS.index(layer), round(lat * 1e5), round(lng * 1e5), name, brand, info, osm])
     os.makedirs(out_dir, exist_ok=True)

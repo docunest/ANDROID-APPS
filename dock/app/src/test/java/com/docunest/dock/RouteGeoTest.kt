@@ -29,10 +29,26 @@ class RouteGeoTest {
     }
 
     @Test fun autoZoom() {
-        assertEquals(3.0, MapViews.autoSpan(20f, 50_000.0), 0.0)     // town speed
-        assertEquals(3.0, MapViews.autoSpan(110f, 2_000.0), 0.0)     // services right ahead
-        assertEquals(25.0, MapViews.autoSpan(110f, 18_000.0), 0.0)
-        assertEquals(80.0, MapViews.autoSpan(110f, 60_000.0), 0.0)   // empty motorway
-        assertEquals(80.0, MapViews.autoSpan(110f, null), 0.0)
+        val T = AutoZoom.Phase.TOWN; val R = AutoZoom.Phase.ROAD; val O = AutoZoom.Phase.OPEN
+        // Trip: town close-up near the start and the end, whatever the speed.
+        assertEquals(T, AutoZoom.phaseFor(1_000.0, 250_000.0, 100.0, O))
+        assertEquals(T, AutoZoom.phaseFor(250_000.0, 3_000.0, 100.0, O))
+        // Middle of a long drive: far out; a town on the way (average dropped to 60) stays ROAD, never TOWN.
+        assertEquals(O, AutoZoom.phaseFor(80_000.0, 170_000.0, 100.0, R))
+        assertEquals(R, AutoZoom.phaseFor(80_000.0, 170_000.0, 60.0, O))
+        assertEquals(R, AutoZoom.phaseFor(80_000.0, 170_000.0, 5.0, R))
+        // Hysteresis: 72 km/h average keeps OPEN, needs 84+ to enter it.
+        assertEquals(O, AutoZoom.phaseFor(80_000.0, 170_000.0, 72.0, O))
+        assertEquals(R, AutoZoom.phaseFor(80_000.0, 170_000.0, 80.0, R))
+        // No trip: by the averaged speed.
+        assertEquals(T, AutoZoom.phaseFor(null, null, 20.0, T))
+        assertEquals(R, AutoZoom.phaseFor(null, null, 50.0, T))
+        assertEquals(O, AutoZoom.phaseFor(null, null, 110.0, R))
+        assertEquals(25.0, MapViews.autoSpan(R), 0.0)
+        // ＋ / － steps.
+        assertEquals(8.0, MapViews.zoomStep(25.0, closer = true), 0.0)
+        assertEquals(80.0, MapViews.zoomStep(25.0, closer = false), 0.0)
+        assertEquals(3.0, MapViews.zoomStep(5.0, closer = true), 0.0)
+        assertEquals(1.0, MapViews.zoomStep(1.0, closer = true), 0.0)
     }
 }

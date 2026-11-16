@@ -139,12 +139,17 @@ class SettingsActivity : Activity() {
         })
 
         section("Mini-map (round, over Waze)")
-        col.addView(label("North-up, the van in the middle, the route and the places switched on above the dock map; " +
-            "the next diesel at the bottom. Tap it = the dock map, drag = move it. Hidden while the dock map is open.", 13f, Palette.MUTED))
+        col.addView(label("Turns with you (heading-up), the van low in the circle so most of it is the road ahead; the route and the " +
+            "places switched on above the dock map; the next diesel at the bottom. Zoom: drag the dot around the ring " +
+            "(clockwise = further out); tap the dot = Auto (close-up near the trip's start and end, far out mid-trip). " +
+            "Tap the middle = the dock map, drag the middle = move it. Hidden while the dock map is open.", 13f, Palette.MUTED))
         switch("Show the mini-map", prefs.miniMap) { prefs.miniMap = it; DockService.start(this, DockService.ACTION_MINIMAP) }
         slider("Mini-map size", prefs.miniSizeDp, 140, 360, " dp") { prefs.miniSizeDp = it; DockService.start(this, DockService.ACTION_MINIMAP) }
         row(bigButton("Put it back bottom-left", Palette.CARD_HI, 14f) {
             prefs.miniX = -1; prefs.miniY = -1; DockService.start(this, DockService.ACTION_MINIMAP)
+        })
+        row(bigButton("Zoom back to Auto", Palette.CARD_HI, 14f) {
+            prefs.miniSpanM = 0; DockService.start(this, DockService.ACTION_MINIMAP)
         })
 
         section("Dock keyboard")

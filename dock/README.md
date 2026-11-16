@@ -94,6 +94,36 @@ where I am … where is my floating circular thingy from GTA?"
   route + places; zoom by speed (~1.2 / 3 / 6 km across); bottom label = next diesel. Tap = dock
   map, drag = move. ◉ Mini on the map or Settings → Mini-map (size, reset position).
 
+## Dock map + mini-map, round 2 (2026-11-17)
+
+Owner after the first drive with v68: "much better … the UI became very crowded … buttons still have
+to be easy to reach … the GTA bubble has to show a way longer horizon, not north-up, me off centre …
+a draggable dot like a Nest thermostat … a smart auto mode (zoom in near the start/end, out in the
+middle, not when just passing a city) … parking as an optional item … tap on the map zooms in, then
+a place → Google Maps or Waze".
+
+- **Dock map buttons:** one square icon per kind on top (⛽ ☕ 🛒 🚻 ⛺ 🅿️ ⚠️ 🛝 🏰 🔎), 52 × 48 dp; faded = hidden;
+  long-press = its name. Rest areas are now ☕ (🅿️ is parking). Right column: Auto · ＋ · span · － ·
+  Route · ⤢ (map full width, list hidden; ⤡ = back) · ◉ Mini. ＋/－ step 1 / 3 / 8 / 25 / 80 / 250 km.
+  GPS / Wi-Fi chips are small, bottom-left (hidden while a place card is open).
+- **Left column:** no "Places" heading (the tab says it); the trip row only in the 🛣 tab, whose
+  label shows the km left ("🛣 Route · 255 km"); sync status under the list.
+- **Tap on the map:** several icons under the finger → zoom in there; one → zoom to it (if far out)
+  and its card: what it is, info, "in 12 km · ~8 min on the route" or "3.4 km away", and **Waze**
+  (drive; also the dock's trip) / **Google Maps** (its Google card beside Waze: photos, hours, Directions).
+- **Auto zoom** (`AutoZoom`, both maps): trip → close-up within 3 km of the start or 5 km of the end;
+  mid-trip far out, by the speed averaged over ~2.5 min (75 km/h ± 8 hysteresis), never town level
+  (a town on the way doesn't zoom in). No trip: by the averaged speed. Dock map 3 / 25 / 80 km.
+- **Mini-map:** heading-up (the road's direction when on the route, else the GPS course; smoothed),
+  the van 28 % below the centre (~¾ of the circle ahead). Auto 1.5 / 6 / 18 km across. Zoom dial:
+  drag the dot around the ring, 0.5–60 km over a 270° sweep (clockwise = out); tap the dot = Auto
+  (green "A"; amber "±" = set by hand, kept until tapped or Settings → "Zoom back to Auto"). Default
+  size 240 dp. Places re-read only when the view moved ~15 %.
+- **Parking** (pack layer `parking`, group 🅿️, off by default): `amenity=parking` without
+  private / permit / residents access, not roadside strips / garage boxes / under 5 places; info:
+  underground / multi-storey, campers OK / no campers, max height, free / paid, customers, places.
+  Car only (not in the web chunks). Shown when the map is ≤ 12 km across.
+
 ## Offline POI packs (2026-11-16)
 
 Owner: "POI now, packs later" — POIs offline first; offline vector maps and routing later.
