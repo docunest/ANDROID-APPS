@@ -17,6 +17,11 @@ on:
 permissions:
   contents: write
 
+# A newer push replaces a build still running (both would publish the same release).
+concurrency:
+  group: dock-poi
+  cancel-in-progress: true
+
 jobs:
   pack:
     runs-on: ubuntu-latest

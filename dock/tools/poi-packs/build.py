@@ -57,17 +57,22 @@ def layer_of(t):
 
 
 # Owner 2026-11-16: "add parking spots as optional item in the map … sometimes the parkings are
-# pretty important for me to see". Not the ones nobody can use: private / permit-only, roadside
-# strips (every street would be one), garage boxes, and tiny ones (< 5 places when tagged).
-PARKING_SKIP_ACCESS = {"private", "no", "permit", "residents", "permissive_no", "delivery"}
-PARKING_SKIP_KIND = {"street_side", "lane", "on_kerb", "half_on_kerb", "shoulder", "garage_boxes", "carports", "layby"}
+# pretty important for me to see"; 2026-11-17: "add all parkings that are usable, even paid private".
+# Kept: every public / customers / unknown-access parking (street-side too, any size), and private
+# ones that charge a fee (Empark/Saba-style garages). Dropped: private without a fee (company and
+# residents' lots), no / permit / residents / delivery, garage boxes / carports / sheds, bus-only.
+PARKING_SKIP_ACCESS = {"no", "permit", "residents", "delivery"}
+PARKING_SKIP_KIND = {"garage_boxes", "carports", "sheds", "garage"}
 
 
 def parking_useful(t):
     if t.get("access") in PARKING_SKIP_ACCESS or t.get("parking") in PARKING_SKIP_KIND:
         return False
-    cap = num(t.get("capacity", ""))
-    return cap is None or cap >= 5
+    if t.get("access") == "private" and t.get("fee") != "yes":
+        return False
+    if t.get("bus") == "designated" or t.get("parking") == "bus":
+        return False
+    return True
 
 
 GAS_ONLY = {"cng", "lng", "biogas", "h2", "hydrogen", "electricity"}
@@ -110,16 +115,22 @@ def info_of(layer, t):
     if layer == "rest" and t.get("highway") == "services": bits.append("services")
     if layer == "aire" and t.get("tourism") == "caravan_site": bits.append("aire")
     if layer == "parking":
+        # Context icons (owner 2026-11-17): the dock also draws the most useful one as a badge.
         kind = t.get("parking")
-        if kind in ("underground", "multi-storey", "rooftop"): bits.append(kind.replace("-", " "))
-        if t.get("motorhome") in ("yes", "designated"): bits.append("campers OK")
-        elif t.get("motorhome") == "no": bits.append("no campers")
-        if num(t.get("maxheight", "")) is not None: bits.append(f"max {num(t['maxheight']):g} m")
-        if t.get("fee") == "no": bits.append("free")
-        elif t.get("fee") == "yes": bits.append("paid")
-        if t.get("access") == "customers": bits.append("customers")
+        if kind == "underground": bits.append("⬇️ underground")
+        elif kind in ("multi-storey", "rooftop"): bits.append("🏢 " + kind.replace("-", " "))
+        elif kind in ("street_side", "lane", "on_kerb", "half_on_kerb", "layby", "shoulder"): bits.append("🛣️ street side")
+        if t.get("motorhome") in ("yes", "designated"): bits.append("🚐 campers OK")
+        elif t.get("motorhome") == "no": bits.append("🚫 no campers")
+        if num(t.get("maxheight", "")) is not None: bits.append(f"↕️ max {num(t['maxheight']):g} m")
+        if t.get("fee") == "no": bits.append("🆓 free")
+        elif t.get("fee") == "yes": bits.append("💶 paid")
+        if t.get("access") == "customers": bits.append("🛒 customers")
+        elif t.get("access") == "private": bits.append("🔒 private, paid")
+        if t.get("supervised") == "yes": bits.append("👮 guarded")
+        if t.get("covered") == "yes" and kind not in ("underground", "multi-storey"): bits.append("☂️ covered")
         cap = num(t.get("capacity", ""))
-        if cap: bits.append(f"{cap:g} places")
+        if cap: bits.append(f"🚗 {cap:g}")
     if t.get("opening_hours") == "24/7": bits.append("24/7")
     return " · ".join(bits) or None
 

@@ -119,10 +119,15 @@ a place → Google Maps or Waze".
   drag the dot around the ring, 0.5–60 km over a 270° sweep (clockwise = out); tap the dot = Auto
   (green "A"; amber "±" = set by hand, kept until tapped or Settings → "Zoom back to Auto"). Default
   size 240 dp. Places re-read only when the view moved ~15 %.
-- **Parking** (pack layer `parking`, group 🅿️, off by default): `amenity=parking` without
-  private / permit / residents access, not roadside strips / garage boxes / under 5 places; info:
-  underground / multi-storey, campers OK / no campers, max height, free / paid, customers, places.
-  Car only (not in the web chunks). Shown when the map is ≤ 12 km across.
+- **Parking** (pack layer `parking`, group 🅿️, off by default). Owner: "add all parkings that are
+  usable, even paid private". Kept: every public / customers / unknown-access `amenity=parking`
+  (street-side too, any size) and private ones with `fee=yes`; dropped: private without a fee,
+  no / permit / residents / delivery, garage boxes / carports / sheds, bus. Portugal: 62,940 of
+  66,217. Info with context icons: ⬇️ underground · 🏢 multi storey · 🛣️ street side · 🚐 campers OK ·
+  🚫 no campers · ↕️ max height · 🆓 free · 💶 paid · 🛒 customers · 🔒 private, paid · 👮 guarded ·
+  ☂️ covered · 🚗 places. The map draws the most useful one as a badge on the icon (height first,
+  then campers, private, free/paid; any kind: 🌙 24/7). Shown when the map is ≤ 12 km across;
+  street-side ones smaller and only ≤ 4 km, and never in the lists. Car only (not in the web chunks).
 
 ## Offline POI packs (2026-11-16)
 

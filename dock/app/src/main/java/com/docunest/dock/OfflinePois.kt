@@ -31,6 +31,29 @@ object OfflinePois {
         "airport" to "Airport", "castle" to "Castle", "viewpoint" to "Viewpoint", "lighthouse" to "Lighthouse", "parking" to "Parking",
     )
 
+    /**
+     * The small context icon drawn on a place's map icon (owner 2026-11-17 "add some context icons"):
+     * for parking the thing that matters most to a camper first (height), then campers OK / no, free / paid;
+     * any kind: 🌙 open 24/7. From the pack's info text (build.py info_of).
+     */
+    fun badge(p: Poi): String? {
+        val i = p.info ?: return null
+        if (p.layer == "parking") {
+            when {
+                "underground" in i -> return "⬇️"
+                "multi storey" in i || "rooftop" in i -> return "🏢"
+                "no campers" in i -> return "🚫"
+                "campers OK" in i -> return "🚐"
+                "🔒" in i -> return "🔒"
+                "free" in i -> return "🆓"
+                "paid" in i -> return "💶"
+            }
+        }
+        if (p.layer == "fuel" && "diesel ✓" in i && "24/7" !in i) return null
+        return if ("24/7" in i) "🌙" else null
+    }
+    fun streetSide(p: Poi) = p.layer == "parking" && p.info?.contains("street side") == true
+
     /** How far off the road each kind still counts as "on the way" (MapPal ROAD_LAYERS radius). */
     val RADIUS = mapOf(
         "fuel" to 1000, "rest" to 1000, "toilets" to 300, "water" to 300, "grocery" to 1500,
@@ -100,7 +123,8 @@ object OfflinePois {
             val db = synchronized(this) { db(ctx, cc) } ?: continue
             for (layer in layers) runCatching {
                 db.rawQuery(
-                    "SELECT osm, lat, lng, name, brand, info FROM poi WHERE layer = ? AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ? LIMIT $perLayer",
+                    // Parking is dense (tens of thousands a country): a bigger cap, or only one strip of the box would show.
+                    "SELECT osm, lat, lng, name, brand, info FROM poi WHERE layer = ? AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ? LIMIT ${if (layer == "parking") perLayer * 4 else perLayer}",
                     arrayOf(layer, s.toString(), n.toString(), w.toString(), e.toString()),
                 ).use { c ->
                     while (c.moveToNext()) out += Poi(c.getString(0), layer, c.getDouble(1), c.getDouble(2), c.getString(3), c.getString(4), c.getString(5), 0.0)

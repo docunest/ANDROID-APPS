@@ -865,7 +865,7 @@ class DockActivity : Activity() {
                 list.addView(label("No trip. Start navigation in Waze (the dock reads its destination), or tap a place → Drive, or long-press the map → Drive.", 15f, Palette.MUTED))
                 return
             }
-            val ahead = Trip.ahead(p.alongM, layers) { MapFilter.matches(it) }
+            val ahead = Trip.ahead(p.alongM, layers) { MapFilter.matches(it) && !OfflinePois.streetSide(it) }
             if (ahead.isEmpty()) list.addView(label("Nothing ahead that matches the buttons above the map.", 15f, Palette.MUTED))
             ahead.take(80).forEach { rp ->
                 val sub = listOfNotNull(
@@ -882,7 +882,7 @@ class DockActivity : Activity() {
             val near = OfflinePois.inBox(this, here.latitude - box, here.latitude + box,
                 here.longitude - box / kotlin.math.cos(Math.toRadians(here.latitude)), here.longitude + box / kotlin.math.cos(Math.toRadians(here.latitude)),
                 layers, perLayer = 300)
-                .filter { MapFilter.matches(it) }
+                .filter { MapFilter.matches(it) && !OfflinePois.streetSide(it) } // street parking: map only
                 .map { it.copy(distM = OfflinePois.distM(here.latitude, here.longitude, it.lat, it.lng)) }
                 .sortedBy { it.distM }.take(80)
             runOnUiThread {

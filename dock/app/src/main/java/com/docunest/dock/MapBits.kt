@@ -82,6 +82,8 @@ class PoiOverlay(context: Context, private val onTap: (List<OfflinePois.Poi>) ->
     private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; textSize = 15 * density }
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(225, 255, 255, 255) }
     private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2.5f * density; color = Color.rgb(37, 99, 235) }
+    private val small = Paint(text).apply { textSize = 10 * density }
+    private val badgeBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(240, 17, 24, 39) }
     private val pt = Point()
     private val gp = GeoPoint(0.0, 0.0)
     private var drawn: List<Pair<OfflinePois.Poi, Point>> = emptyList()
@@ -100,12 +102,20 @@ class PoiOverlay(context: Context, private val onTap: (List<OfflinePois.Poi>) ->
             if (turn == 0f && (pt.x < -40 || pt.y < -40 || pt.x > w + 40 || pt.y > h + 40)) continue
             if (turn != 0f && (abs(pt.x - w / 2) > m || abs(pt.y - h / 2) > m)) continue
             val big = p.osm in onRoute
-            val rr = if (big) r * 1.2f else r
+            val street = OfflinePois.streetSide(p)
+            val rr = if (big) r * 1.2f else if (street) r * 0.75f else r
             val x = pt.x.toFloat(); val y = pt.y.toFloat()
             c.drawCircle(x, y, rr, bg)
             if (big) c.drawCircle(x, y, rr, ring)
             if (turn != 0f) { c.save(); c.rotate(-turn, x, y) }
-            c.drawText(OfflinePois.ICON[p.layer] ?: "📍", x, y + text.textSize / 3, text)
+            val icon = if (street) small else text
+            c.drawText(OfflinePois.ICON[p.layer] ?: "📍", x, y + icon.textSize / 3, icon)
+            // Context icon top-right: ⬇️ underground, 🚐 campers OK, 🆓 free, 💶 paid, 🌙 24/7 …
+            OfflinePois.badge(p)?.let { b ->
+                val bx = x + rr * 0.85f; val by = y - rr * 0.85f
+                c.drawCircle(bx, by, 8 * density, badgeBg)
+                c.drawText(b, bx, by + small.textSize / 3, small)
+            }
             if (turn != 0f) c.restore()
             out += p to Point(pt)
         }
@@ -210,7 +220,9 @@ class MapFeeder(private val ctx: Context, private val map: MapView, private val 
                 else -> layers
             }
             val inBox = if (boxLayers.isEmpty()) emptyList()
-            else OfflinePois.inBox(ctx, box.latSouth, box.latNorth, box.lonWest, box.lonEast, boxLayers, perLayer = 150).filter { MapFilter.matches(it) }
+            else OfflinePois.inBox(ctx, box.latSouth, box.latNorth, box.lonWest, box.lonEast, boxLayers, perLayer = 150)
+                // Street-side parking (every street has some): only when zoomed right in.
+                .filter { MapFilter.matches(it) && (spanKm <= 4 || !OfflinePois.streetSide(it)) }
             val routeLayers = if (spanKm > 12) layers - "parking" else layers
             val route = Trip.pois.filter { it.poi.layer in routeLayers && MapFilter.matches(it.poi) }
             val routeIds = route.mapTo(HashSet()) { it.poi.osm }
