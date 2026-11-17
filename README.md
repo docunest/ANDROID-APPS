@@ -47,7 +47,7 @@ Point `XTREAM_URL` at your real server to use your own library.
 
 ## Install on each device
 
-### MacBook — PWA (simplest)
+### MacBook — web app
 ```bash
 npm install && npm run build
 XTREAM_URL=http://YOUR-SERVER:PORT npm run serve      # http://localhost:8080
@@ -60,18 +60,28 @@ Open `http://localhost:8080`, then either:
 
 Alternative on Apple-silicon Macs: run the iPhone app on the Mac. In Xcode, choose the target *My Mac (Designed for iPad)*.
 
-### iPhone — native app (recommended)
-On the MacBook with Xcode installed:
-```bash
-npm run ios          # builds, syncs, opens Xcode
-```
-In Xcode: *Signing & Capabilities* → pick your Apple ID team → plug in the iPhone → Run.
-- With a **free** Apple ID the app expires after 7 days; re-run it from Xcode.
-- A paid developer account ($99/yr) lasts a year and allows TestFlight.
+### iPhone — web app (no Apple ID, free)
+Open Reelbox in **Safari**, tap **Share → Add to Home Screen**. The app shows a hint for this. It then runs full-screen with its own icon. Downloads, offline mode and the picture controls all work.
 
-**Or as a PWA:** host the proxy over **https**, then in Safari: *Share → Add to Home Screen*. For https you can use Tailscale `tailscale serve`, Caddy, or the `TLS_CERT`/`TLS_KEY` environment variables. Plain `http` on a LAN IP disables offline storage on iOS.
+It needs **https**, because iPhone only allows offline storage on secure pages. Pick one free option:
 
-> iPhone/Safari cannot decode **.mkv/.avi**. Those titles show an "Open in VLC" button. MP4 and HLS play natively.
+- **Docker + Caddy** on any always-on machine (ideally the Xtream server itself).
+  - **Domain**: a free name from duckdns.org pointing at your IP.
+  - **Router**: forward ports 80 and 443 to that machine.
+  - **Start it**:
+    ```bash
+    cd deploy && cp .env.example .env    # set DOMAIN and XTREAM_URL
+    docker compose up -d --build
+    ```
+  - Caddy gets and renews a Let's Encrypt certificate by itself. Then open `https://<your-name>.duckdns.org` on the iPhone.
+- **Tailscale**: no domain and no port forwarding. Install Tailscale (free) on the server and the iPhone.
+  - On the server run `XTREAM_URL=… npm run serve`, then `tailscale serve --bg 8080`.
+  - Open the `https://<machine>.<tailnet>.ts.net` address it prints.
+  - Downside: the iPhone must have Tailscale on.
+
+> Safari cannot decode **.mkv/.avi**. Those titles get an "Open in VLC" button (VLC for iOS is free). MP4 and HLS play in Reelbox.
+
+Optional, later: there's also a native iOS project (`npm run ios`), but building it needs a Mac with Xcode and an Apple ID.
 
 ### Android
 - **APK**: `npm run cap:sync && cd android && ./gradlew assembleDebug`, then sideload `android/app/build/outputs/apk/debug/app-debug.apk`.

@@ -18,6 +18,9 @@ export const isIOS =
   /iPad|iPhone|iPod/.test(ua) ||
   (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 export const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(ua);
+/** Running as an installed home-screen web app (iPhone "Add to Home Screen", desktop PWA). */
+export const isStandalone =
+  typeof window !== 'undefined' && ((navigator as any).standalone === true || window.matchMedia?.('(display-mode: standalone)').matches === true);
 export const isTV = isTizen || /SMART-TV|SmartTV|Web0S|AFT[A-Z]/i.test(ua);
 
 export const platformName = isTizen

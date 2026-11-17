@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useSession } from '../lib/session';
-import { exitApp, isKey } from '../lib/platform';
+import { exitApp, isIOS, isKey, isNative, isStandalone } from '../lib/platform';
+import { usePersisted } from '../lib/store';
 import { focusFirst } from '../lib/spatial';
 import { Icon } from './ui';
 
@@ -90,9 +91,27 @@ export default function Layout() {
           <Icon name="cloudOff" size={18} /> Offline — showing your saved catalog and downloads
         </div>
       )}
+      <InstallHint />
       <main className="main" id="main">
         <Outlet />
       </main>
+    </div>
+  );
+}
+
+/** iPhone without an Apple developer account = install as a web app from Safari. */
+function InstallHint() {
+  const [dismissed, setDismissed, ready] = usePersisted<boolean>('installHintDismissed', false);
+  if (!ready || dismissed || !isIOS || isStandalone || isNative) return null;
+  return (
+    <div className="install-hint" role="note">
+      <span>
+        <b>Install Reelbox:</b> tap <span aria-label="Share">Share</span> <span className="share-glyph" aria-hidden="true">⬆︎</span> then <b>Add to Home Screen</b>. It then opens
+        full-screen and keeps your downloads safe.
+      </span>
+      <button className="btn btn-icon" onClick={() => setDismissed(() => true)} aria-label="Dismiss">
+        <Icon name="close" size={16} />
+      </button>
     </div>
   );
 }

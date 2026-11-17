@@ -1335,3 +1335,44 @@ html.tv .seek:focus {
     margin-left: 0;
   }
 }
+
+/* ---------- iPhone web app ---------- */
+.install-hint {
+  position: fixed;
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: calc(4.2rem + var(--safe-b));
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #1d2130f5;
+  border: 1px solid var(--accent);
+  border-radius: 14px;
+  padding: 0.6rem 0.4rem 0.6rem 0.9rem;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  box-shadow: 0 10px 30px #000a;
+}
+.share-glyph {
+  display: inline-block;
+  border: 1px solid var(--muted);
+  border-radius: 4px;
+  padding: 0 0.2rem;
+  font-size: 0.75rem;
+}
+@media (min-width: 761px) {
+  .install-hint {
+    left: calc(var(--nav-w) + 1rem);
+    right: auto;
+    bottom: 1rem;
+    max-width: 30rem;
+  }
+}
+/* Notch / home-indicator safe areas in landscape playback */
+.player-top,
+.player-bar,
+.player-seek {
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}

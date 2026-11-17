@@ -8,7 +8,7 @@ import { fmtTime, getCachedCrop, getProgress, recallRef, rememberRef, saveProgre
 import { ASPECTS, detectFrame, frameRect, pictureSummary, significant, unionCrop, ZOOM_MAX, ZOOM_MIN, type Crop, type Fit } from '../lib/picture';
 import { PicturePanel, type DetectState } from '../components/PicturePanel';
 import { episodeRef, refKey, type Kind, type MediaRef } from '../lib/xtream';
-import { isIOS, isKey, isSafari, isTizen, nativePlatform } from '../lib/platform';
+import { isIOS, isKey, isSafari, isStandalone, isTizen, nativePlatform } from '../lib/platform';
 import { focusFirst } from '../lib/spatial';
 import { load } from '../lib/store';
 import { Icon, toast } from '../components/ui';
@@ -551,7 +551,9 @@ export default function Player() {
               <Icon name="next" />
             </button>
           )}
-          {!isTizen && (
+          {/* Installed iPhone web app is already full screen; iOS "fullscreen" would switch to Apple's
+              own player and drop the picture (aspect/zoom) controls. */}
+          {!isTizen && !(isIOS && isStandalone) && (
             <button className="btn btn-icon" onClick={toggleFullscreen} aria-label="Fullscreen" title="Fullscreen (F)">
               <Icon name="fullscreen" />
             </button>
