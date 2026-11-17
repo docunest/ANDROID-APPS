@@ -5,7 +5,10 @@
 # Ports 80 and 443 must reach this machine (router port-forward) for the certificate.
 services:
   reelbox:
-    build: ..
+    build:
+      context: ..
+      args:
+        VITE_API_URL: ${VITE_API_URL:-}
     environment:
       XTREAM_URL: ${XTREAM_URL:?set XTREAM_URL in .env}
     extra_hosts:

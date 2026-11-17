@@ -1376,3 +1376,63 @@ html.tv .seek:focus {
   padding-left: max(1rem, env(safe-area-inset-left));
   padding-right: max(1rem, env(safe-area-inset-right));
 }
+
+/* ---------- family account ---------- */
+.setup-family {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.3rem 0.8rem 0.6rem;
+  margin: 0.8rem 0 0.2rem;
+}
+.setup-family-head {
+  font: inherit;
+  color: var(--text);
+  background: none;
+  border: 0;
+  padding: 0.5rem 0;
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.5rem;
+  align-items: baseline;
+  cursor: pointer;
+}
+.family-signin {
+  display: flex;
+  flex-direction: column;
+}
+.family-signin.compact label {
+  margin-bottom: 0.55rem;
+}
+.link-btn {
+  font: inherit;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  text-align: left;
+  padding: 0.2rem 0 0.6rem;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.setup-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin: 1rem 0 0.6rem;
+}
+.setup-divider::before,
+.setup-divider::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--line);
+}
+.setup-form {
+  display: flex;
+  flex-direction: column;
+}
+.settings .panel .family-signin {
+  max-width: 26rem;
+}

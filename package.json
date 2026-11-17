@@ -15,7 +15,8 @@
     "test:e2e": "node tests/e2e.mjs",
     "build:cap": "tsc --noEmit && vite build --mode capacitor",
     "ios": "npm run cap:sync && npx cap open ios",
-    "android": "npm run cap:sync && npx cap open android"
+    "android": "npm run cap:sync && npx cap open android",
+    "test:sync": "node tests/sync.mjs"
   },
   "dependencies": {
     "@capacitor/app": "^8.1.2",

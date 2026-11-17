@@ -6,6 +6,9 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
+# Family account server baked in as the default (can still be changed at sign-in).
+ARG VITE_API_URL=
+ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build
 
 FROM node:22-alpine

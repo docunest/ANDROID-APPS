@@ -4,6 +4,7 @@ import { SessionProvider, useSession } from './lib/session';
 import { installSpatialNav } from './lib/spatial';
 import { isNative, isTV, nativePlatform, registerTvKeys } from './lib/platform';
 import { usePersisted } from './lib/store';
+import { startCloud } from './lib/cloud';
 import Layout from './components/Layout';
 import { Spinner, Toaster } from './components/ui';
 import Home from './pages/Home';
@@ -17,16 +18,18 @@ const Search = lazy(() => import('./pages/Search'));
 const Library = lazy(() => import('./pages/Library'));
 const Downloads = lazy(() => import('./pages/Downloads'));
 const Settings = lazy(() => import('./pages/Settings'));
+const MagicLogin = lazy(() => import('./pages/MagicLogin'));
 
 function Gate() {
   const { ready, account } = useSession();
   const loc = useLocation();
   if (!ready) return <Spinner label="Starting…" />;
-  if (!account && loc.pathname !== '/setup') return <Navigate to="/setup" replace />;
+  if (!account && loc.pathname !== '/setup' && loc.pathname !== '/login') return <Navigate to="/setup" replace />;
   return (
     <Suspense fallback={<Spinner />}>
       <Routes>
         <Route path="/setup" element={<Setup />} />
+        <Route path="/login" element={<MagicLogin />} />
         <Route path="/play/:kind/:id" element={<Player />} />
         <Route element={<Layout />}>
           <Route index element={<Home />} />
@@ -53,6 +56,7 @@ function Chrome() {
   }, [tvMode]);
   useEffect(() => {
     registerTvKeys();
+    startCloud();
     const off = installSpatialNav();
     let removeBack: (() => void) | undefined;
     if (isNative && nativePlatform === 'android') {

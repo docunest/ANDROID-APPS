@@ -9,6 +9,8 @@ import { isTizen, platformName } from '../lib/platform';
 import { formatExpiry, type ConnectionMode, type LoginResponse } from '../lib/xtream';
 import { Icon, toast } from '../components/ui';
 import type { EnginePref } from './Player';
+import { signOut, syncNow, useCloud } from '../lib/cloud';
+import { FamilySignIn } from '../components/FamilySignIn';
 
 export default function Settings() {
   const { account, accounts, client, via, proxy, saveAccount, removeAccount, switchAccount, online } = useSession();
@@ -42,6 +44,8 @@ export default function Settings() {
   return (
     <div className="page settings">
       <h1>Settings</h1>
+
+      <FamilyPanel />
 
       <section className="panel">
         <h2>Account</h2>
@@ -100,12 +104,12 @@ export default function Settings() {
           <button
             className="btn btn-danger"
             onClick={async () => {
-              if (!confirm(`Sign out of ${account.name}? Downloads stay on the device.`)) return;
+              if (!confirm(`Remove the server ${account.name} from this device? Downloads stay on the device.`)) return;
               await removeAccount(account.id);
               nav('/setup', { replace: true });
             }}
           >
-            Sign out
+            Remove this server
           </button>
         </div>
       </section>
@@ -219,5 +223,57 @@ export default function Settings() {
         </p>
       </section>
     </div>
+  );
+}
+
+function FamilyPanel() {
+  const c = useCloud();
+  const s = c.session;
+  const ago = c.lastSync ? Math.max(0, Math.round((Date.now() - c.lastSync) / 60000)) : null;
+  return (
+    <section className="panel" aria-label="Family account">
+      <h2>Family account</h2>
+      {!s ? (
+        <>
+          <p className="muted">Same email and password as MapPal. Keeps favorites, bookmarks, where you stopped watching, picture settings and your servers in step on every device.</p>
+          <FamilySignIn compact />
+        </>
+      ) : (
+        <>
+          <dl className="facts">
+            <dt>Signed in</dt>
+            <dd>
+              {s.user.name ? `${s.user.name} · ` : ''}
+              {s.user.email}
+            </dd>
+            <dt>Sync</dt>
+            <dd className={c.error ? 'error-text' : ''} aria-live="polite">
+              {c.syncing
+                ? 'Syncing…'
+                : c.error
+                  ? c.error
+                  : ago === null
+                    ? 'Not synced yet'
+                    : `Up to date${ago ? ` · ${ago} min ago` : ''}`}
+              {c.pending > 0 && !c.syncing ? ` · ${c.pending} change${c.pending === 1 ? '' : 's'} waiting` : ''}
+            </dd>
+          </dl>
+          {c.expired && <FamilySignIn compact />}
+          <div className="actions">
+            <button className="btn" onClick={() => syncNow()} disabled={c.syncing}>
+              <Icon name="refresh" /> Sync now
+            </button>
+            <button
+              className="btn btn-danger"
+              onClick={() => {
+                if (confirm('Sign out of the family account on this device? Everything stays on the device; it just stops syncing.')) signOut();
+              }}
+            >
+              Sign out
+            </button>
+          </div>
+        </>
+      )}
+    </section>
   );
 }

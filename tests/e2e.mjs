@@ -71,7 +71,7 @@ async function login(page, base, server) {
   await page.waitForSelector('.setup-card');
   if (server !== undefined) await page.getByLabel('Server URL').fill(server);
   await page.getByLabel('Username').fill('demo');
-  await page.getByLabel('Password').fill('demo');
+  await page.getByLabel('Server password').fill('demo');
   await page.getByRole('button', { name: 'Connect' }).click();
 }
 
@@ -93,13 +93,13 @@ await step('setup screen detects the proxy and prefills the server', async () =>
 
 await step('wrong password shows a clear error', async () => {
   await page.getByLabel('Username').fill('demo');
-  await page.getByLabel('Password').fill('nope');
+  await page.getByLabel('Server password').fill('nope');
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.getByText('Wrong username or password.').waitFor({ timeout: 5000 });
 });
 
 await step('login → home shows rows', async () => {
-  await page.getByLabel('Password').fill('demo');
+  await page.getByLabel('Server password').fill('demo');
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.getByRole('heading', { name: 'Recently added movies' }).waitFor({ timeout: 10000 });
   await page.getByRole('heading', { name: 'Recently updated series' }).waitFor();

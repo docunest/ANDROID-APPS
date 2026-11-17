@@ -18,8 +18,23 @@ export async function load<T>(key: string, fallback: T): Promise<T> {
   }
 }
 
-export async function save<T>(key: string, value: T): Promise<void> {
+/** Observers of every local write (used by cloud sync to turn edits into synced changes). */
+type SaveHook = (key: string, value: unknown, prev: unknown) => void;
+const saveHooks = new Set<SaveHook>();
+export function onSave(fn: SaveHook): () => void {
+  saveHooks.add(fn);
+  return () => saveHooks.delete(fn);
+}
+
+export interface SaveOpts {
+  /** Write without notifying save hooks — for applying changes that came from another device. */
+  quiet?: boolean;
+}
+
+export async function save<T>(key: string, value: T, opts: SaveOpts = {}): Promise<void> {
+  const prev = memory.get(key);
   memory.set(key, value);
+  if (!opts.quiet) saveHooks.forEach((fn) => fn(key, value, prev));
   listeners.get(key)?.forEach((fn) => fn(value));
   try {
     await set(key, value, db);
@@ -47,12 +62,12 @@ export function subscribe(key: string, fn: (v: unknown) => void): () => void {
 
 /** Read-modify-write that is safe against concurrent updates within this tab. */
 const chains = new Map<string, Promise<unknown>>();
-export function update<T>(key: string, fallback: T, fn: (cur: T) => T): Promise<T> {
+export function update<T>(key: string, fallback: T, fn: (cur: T) => T, opts: SaveOpts = {}): Promise<T> {
   const prev = chains.get(key) ?? Promise.resolve();
   const next = prev.then(async () => {
     const cur = await load(key, fallback);
     const out = fn(cur);
-    await save(key, out);
+    await save(key, out, opts);
     return out;
   });
   chains.set(key, next.catch(() => {}));

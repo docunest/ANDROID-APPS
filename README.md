@@ -21,6 +21,27 @@ A player for your **Xtream Codes** video server. One codebase runs on **iPhone, 
   - Pause and resume downloads; they continue from the same byte after an app restart.
   - The catalog, search and your bookmarks keep working without internet.
 
+## Family account & sync
+Signing in is optional. You use the **same email and password as MapPal**: the shared backend is `apps/api` in this monorepo, and MapPal's users were imported into it once.
+
+Once signed in, these follow you across every device:
+- favorites, bookmarks (moments) and where you stopped watching
+- picture settings (zoom, shape, black bars)
+- your Xtream server logins: a new phone just signs in and the server is there
+
+How it behaves:
+- **Offline**: changes queue up while offline and sync when back online.
+- **Conflicts**: the newest change wins.
+- **Signing out**: keeps everything on the device.
+- **Encryption**: server logins are encrypted in the database.
+
+Ways to sign in:
+- **Setup screen**: the *Family account* section.
+- **Settings**: the *Family account* panel.
+- **Without typing** (the projector): open a single-use link from `POST /admin/login-links`. It looks like `…/#/login?token=…&api=…`.
+
+Build with `VITE_API_URL=https://<api>.vercel.app` to pre-fill the server address.
+
 ## How the pieces fit
 
 ```
@@ -134,11 +155,13 @@ The proxy only forwards to `XTREAM_URL`, plus load-balancer hosts that server re
 | Browser/PWA | IndexedDB | Origin Private File System (fallback: IndexedDB chunks) |
 | Tizen | IndexedDB | IndexedDB chunks |
 
-The server password is stored on the device, unencrypted, like other Xtream players. Bookmarks are per device; use *Settings → Bookmarks backup* to move them.
+The server password is stored on the device, unencrypted, like other Xtream players. Without a family account, bookmarks stay on the device (Settings → Bookmarks backup exports them).
 
 ## Tests
 ```bash
 npm run build && npm run test:e2e
+# family sign-in + sync across 3 devices, against the real API and a throwaway Postgres (wiped):
+(cd ../api && npm run build) && TEST_DATABASE_URL=postgres://postgres:pg@localhost:5433/postgres npm run test:sync
 ```
 This runs real Chromium against the mock server (ffmpeg generates real H.264/AAC and HLS media). It covers:
 - login and error handling
@@ -173,4 +196,3 @@ scripts/               icon rendering, Tizen packaging, native project patches
 - **Samsung**: the Tizen build is tested in Chromium with a TV user agent and `file://` loading. The **AVPlay** path is written to Samsung's API spec but has not run on real hardware yet.
 - **No EPG / TV guide** for live channels yet.
 - **Native app downloads** can't be paused mid-file; they restart if interrupted. Browser downloads resume.
-- **No cross-device sync** of bookmarks yet (export/import only).
