@@ -111,7 +111,7 @@ await step('movies: categories, counts, filter', async () => {
   await page.getByRole('link', { name: 'Movies' }).click();
   await page.waitForSelector('.grid .card');
   const all = await page.locator('.grid .card').count();
-  expect(all === 28, `expected 28 movies, got ${all}`);
+  expect(all === 29, `expected 29 movies, got ${all}`);
   // All + 3 non-empty categories; the empty one is hidden
   await page.waitForFunction(() => document.querySelectorAll('.cats .cat').length === 4, null, { timeout: 5000 });
   await page.locator('.cats .cat', { hasText: 'Documentaries' }).click();
@@ -230,6 +230,86 @@ await step('redirecting stream (load balancer 302) plays through proxy', async (
   await page.keyboard.press('Escape');
 });
 
+async function frameBox(page) {
+  return page.evaluate(() => {
+    const v = document.querySelector('.player-stage video').getBoundingClientRect();
+    const s = document.querySelector('.player-stage').getBoundingClientRect();
+    return { x: v.x - s.x, y: v.y - s.y, w: v.width, h: v.height, sw: s.width, sh: s.height };
+  });
+}
+const near = (a, b, tol = 6) => Math.abs(a - b) <= tol;
+
+await step('picture: double-boxed video — black bars detected and removed', async () => {
+  await page.goto('http://localhost:8080/#/movie/200');
+  await page.getByRole('link', { name: 'Play' }).click();
+  await waitPlaying(page, 1);
+  // 640×360 frame, picture is the centre 480×270 (75 %). Stage is 1280×800.
+  // Fit (contain) the 16:9 picture → 1280×720, so the whole frame must be drawn at 1280/0.75 wide.
+  await page.waitForFunction(() => document.querySelector('.player-stage video')?.getBoundingClientRect().width > 1600, null, { timeout: 15000 });
+  await page.waitForTimeout(400); // css transition
+  const b = await frameBox(page);
+  expect(near(b.w, 1280 / 0.75) && near(b.h, 720 / 0.75), `frame ${b.w}×${b.h}`);
+  expect(near(b.x + 0.125 * b.w, 0) && near(b.y + 0.125 * b.h, 40), `picture should start at x=0,y=40 (got ${b.x + 0.125 * b.w}, ${b.y + 0.125 * b.h})`);
+  await page.mouse.move(500, 300);
+  await page.getByRole('button', { name: /Picture: aspect ratio and zoom/ }).click();
+  await page.getByText(/Removed bars: top\/bottom 1[23]%, sides 1[23]%/).waitFor();
+  await page.screenshot({ path: `${OUT}/14-picture-autocrop.png` });
+});
+
+await step('picture: turning auto-remove off shows the original small picture', async () => {
+  await page.getByRole('button', { name: /Auto-remove on/ }).click();
+  await page.waitForTimeout(400);
+  const b = await frameBox(page);
+  // 640×360 frame fitted to 1280×800 → 1280×720; picture inside is only 960×540 (the "sad" double box).
+  expect(near(b.w, 1280) && near(b.h, 720), `frame ${b.w}×${b.h}`);
+  await page.getByRole('button', { name: /Auto-remove off/ }).click();
+});
+
+await step('picture: shape, fill, zoom and move; remembered per title', async () => {
+  await page.getByRole('button', { name: '4:3', exact: true }).click();
+  await page.waitForTimeout(400);
+  let b = await frameBox(page);
+  // frame forced to 4:3, crop keeps centre 75 % → picture aspect 4:3 → fits 1066.7×800
+  expect(near(b.h * 0.75, 800) && near(b.w * 0.75, 1066.7), `4:3 frame ${b.w}×${b.h}`);
+  await page.getByRole('button', { name: 'Stretch' }).click();
+  await page.waitForTimeout(400);
+  b = await frameBox(page);
+  expect(near(b.w * 0.75, 1280) && near(b.h * 0.75, 800), `stretch ${b.w}×${b.h}`);
+  await page.getByRole('button', { name: 'Fit', exact: true }).click();
+  await page.getByRole('button', { name: 'Auto', exact: true }).click();
+  await page.getByRole('button', { name: 'Zoom in' }).click();
+  await page.getByRole('button', { name: 'Zoom in' }).click();
+  await page.locator('.seg-value', { hasText: '110%' }).waitFor();
+  await page.getByRole('button', { name: 'Move picture up' }).click();
+  await page.waitForTimeout(400);
+  b = await frameBox(page);
+  expect(near(b.w, (1280 / 0.75) * 1.1, 8), `zoomed frame ${b.w}`);
+  // keyboard: Z cycles fit, A cycles shape
+  await page.getByRole('button', { name: 'Close' }).click();
+  await page.keyboard.press('z');
+  await page.getByText('Fill', { exact: true }).first().waitFor();
+  await page.keyboard.press('z');
+  await page.keyboard.press('z'); // back to Fit
+  await page.keyboard.press('Escape');
+  // reopen: zoom remembered for this movie, crop applied straight away from cache
+  await page.getByRole('link', { name: /Resume|Play/ }).first().click();
+  await waitPlaying(page, 0.5);
+  await page.waitForTimeout(500);
+  b = await frameBox(page);
+  expect(near(b.w, (1280 / 0.75) * 1.1, 8), `remembered zoom/crop, frame ${b.w}`);
+  await page.screenshot({ path: `${OUT}/15-picture-zoomed.png` });
+  await page.keyboard.press('Escape');
+});
+
+await step('picture: a normal 16:9 video is left alone', async () => {
+  await page.goto('http://localhost:8080/#/movie/104');
+  await page.getByRole('link', { name: 'Play' }).click();
+  await waitPlaying(page, 5); // several detection samples
+  const b = await frameBox(page);
+  expect(near(b.w, 1280) && near(b.h, 720) && near(b.y, 40), `frame ${b.w}×${b.h} at y=${b.y}`);
+  await page.keyboard.press('Escape');
+});
+
 await step('search across movies, series and live', async () => {
   await page.goto('http://localhost:8080/#/search');
   await page.getByRole('searchbox', { name: 'Search' }).fill('port');
@@ -266,7 +346,7 @@ await step('offline: app shell, saved catalog, downloaded video plays', async ()
   await page.screenshot({ path: `${OUT}/11-offline-home.png` });
   await page.getByRole('link', { name: 'Movies' }).click();
   await page.waitForSelector('.grid .card');
-  expect((await page.locator('.grid .card').count()) === 28, 'saved catalog should list all movies offline');
+  expect((await page.locator('.grid .card').count()) === 29, 'saved catalog should list all movies offline');
   await page.goto('http://localhost:8080/#/movie/101');
   await page.getByRole('link', { name: 'Play' }).click();
   await waitPlaying(page, 1.5);

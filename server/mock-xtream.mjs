@@ -33,6 +33,19 @@ function ensureMedia() {
       '-c:a', 'aac', '-b:a', '64k', '-movflags', '+faststart', mp4,
     ]);
   }
+  // A "double-boxed" rip: 16:9 picture letterboxed into 4:3, then pillarboxed back into 16:9.
+  const boxed = path.join(MEDIA, 'windowbox.mp4');
+  if (!fs.existsSync(boxed)) {
+    console.log('Generating windowbox.mp4 (black bars on all four sides)…');
+    execFileSync('ffmpeg', [
+      '-loglevel', 'error', '-y',
+      '-f', 'lavfi', '-i', 'testsrc2=size=480x270:rate=25:duration=60',
+      '-f', 'lavfi', '-i', 'sine=frequency=330:duration=60',
+      '-vf', 'pad=480:360:0:45:black,pad=640:360:80:0:black',
+      '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-b:v', '500k',
+      '-c:a', 'aac', '-b:a', '64k', '-movflags', '+faststart', boxed,
+    ]);
+  }
   const hls = path.join(MEDIA, 'live');
   if (!fs.existsSync(path.join(hls, 'index.m3u8'))) {
     console.log('Generating HLS live sample…');
@@ -72,6 +85,19 @@ const movies = titles.map((name, i) => ({
   container_extension: i === 5 ? 'mkv' : 'mp4',
   year: String(2010 + (i % 15)),
 }));
+movies.push({
+  num: 200,
+  name: 'Old VHS Rip (double boxed)',
+  stream_type: 'movie',
+  stream_id: 200,
+  stream_icon: `http://localhost:${PORT}/img/m200.svg`,
+  rating: '6.0',
+  rating_5based: 3,
+  added: String(now - 400 * 86400),
+  category_id: '3',
+  container_extension: 'mp4',
+  year: '1994',
+});
 const seriesCats = [
   { category_id: '11', category_name: 'Engineering', parent_id: 0 },
   { category_id: '12', category_name: 'Kids', parent_id: 0 },
@@ -255,7 +281,8 @@ const server = http.createServer((req, res) => {
       const pl = fs.readFileSync(path.join(MEDIA, 'live', 'index.m3u8'), 'utf8').replace(/^(seg\d+\.ts)$/gm, `/hls/$1`);
       return res.end(pl);
     }
-    return sendFile(req, res, path.join(MEDIA, 'sample.mp4'), ext === 'mkv' ? 'video/x-matroska' : 'video/mp4');
+    const file = kind === 'movie' && id === '200' ? 'windowbox.mp4' : 'sample.mp4';
+    return sendFile(req, res, path.join(MEDIA, file), ext === 'mkv' ? 'video/x-matroska' : 'video/mp4');
   }
   const seg = /^\/hls\/(seg\d+\.ts)$/.exec(p);
   if (seg) return sendFile(req, res, path.join(MEDIA, 'live', seg[1]), 'video/mp2t');

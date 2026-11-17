@@ -1,6 +1,8 @@
 // Favorites, position bookmarks ("moments"), watch progress. Stored per account, on-device.
 import { load, save, update, usePersisted } from './store';
 import { refKey, type MediaRef } from './xtream';
+import { DEFAULT_PICTURE, type Crop, type Picture } from './picture';
+
 
 export type FavKind = 'movie' | 'series' | 'live';
 export interface Favorite {
@@ -142,4 +144,42 @@ export function fmtTime(sec: number): string {
   const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
   return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// ---------- Picture (aspect / zoom / crop) ----------
+
+/** Episodes share one setting per series (same source format); movies/channels are per title. */
+export const pictureScope = (r: MediaRef) => (r.kind === 'episode' && r.seriesId ? `series:${r.seriesId}` : `${r.kind}:${r.id}`);
+
+export function usePicture(acc: string, ref: MediaRef | null) {
+  const [map, mutateMap, mapReady] = usePersisted<Record<string, Picture>>(ns(acc, 'picture'), {});
+  const [def, mutateDef, defReady] = usePersisted<Picture>(ns(acc, 'pictureDefault'), DEFAULT_PICTURE);
+  const scope = ref ? pictureScope(ref) : '';
+  const own = scope ? map[scope] : undefined;
+  const picture: Picture = { ...DEFAULT_PICTURE, ...def, ...(own ?? {}) };
+  return {
+    ready: mapReady && defReady,
+    picture,
+    custom: !!own,
+    scopeLabel: ref?.kind === 'episode' ? 'this series' : ref?.kind === 'live' ? 'this channel' : 'this movie',
+    set: (p: Partial<Picture>) => mutateMap((cur) => ({ ...cur, [scope]: { ...picture, ...p } })),
+    reset: () =>
+      mutateMap((cur) => {
+        const n = { ...cur };
+        delete n[scope];
+        return n;
+      }),
+    makeDefault: async () => {
+      const { crop: _c, panX: _x, panY: _y, ...rest } = picture; // crop/pan are title-specific
+      await mutateDef(() => ({ ...DEFAULT_PICTURE, ...rest }));
+    },
+  };
+}
+
+/** Last detected black bars per title, so reopening (or playing offline) applies instantly. */
+export async function getCachedCrop(acc: string, key: string): Promise<Crop | null | undefined> {
+  return (await load<Record<string, Crop | null>>(ns(acc, 'cropCache'), {}))[key];
+}
+export function setCachedCrop(acc: string, key: string, crop: Crop | null) {
+  return update<Record<string, Crop | null>>(ns(acc, 'cropCache'), {}, (cur) => ({ ...cur, [key]: crop }));
 }

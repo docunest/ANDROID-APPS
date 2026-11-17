@@ -23,6 +23,16 @@ export interface EngineState {
   rate: number;
   /** Subtitle text for engines that don't render it themselves (AVPlay). */
   cue?: string;
+  /** Coded picture size, once known. */
+  vw: number;
+  vh: number;
+}
+
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 export interface LoadOpts {
@@ -42,6 +52,10 @@ export interface Engine {
   setAudio(id: string): void;
   setText(id: string | null): void;
   onChange(fn: (s: EngineState) => void): () => void;
+  /** Place the full video frame at this rectangle (container pixels; may extend off-screen). */
+  setFrame(r: Rect, container: { w: number; h: number }): void;
+  /** Element frames can be drawn from for black-bar detection (null if not possible). */
+  frameSource(): HTMLVideoElement | null;
   destroy(): void;
 }
 
@@ -58,6 +72,8 @@ const initial = (): EngineState => ({
   text: [],
   textSel: null,
   rate: 1,
+  vw: 0,
+  vh: 0,
 });
 
 abstract class Base {
@@ -106,9 +122,10 @@ export class HtmlEngine extends Base implements Engine {
     on('timeupdate', () => this.set({ time: v.currentTime }));
     on('durationchange', () => this.set({ duration: isFinite(v.duration) ? v.duration : 0 }));
     on('loadedmetadata', () => {
-      this.set({ duration: isFinite(v.duration) ? v.duration : 0 });
+      this.set({ duration: isFinite(v.duration) ? v.duration : 0, vw: v.videoWidth, vh: v.videoHeight });
       this.readTracks();
     });
+    on('resize', () => this.set({ vw: v.videoWidth, vh: v.videoHeight }));
     on('play', () => this.set({ paused: false, ended: false }));
     on('pause', () => this.set({ paused: true }));
     on('waiting', () => this.set({ buffering: true }));
@@ -221,6 +238,18 @@ export class HtmlEngine extends Base implements Engine {
   setRate(r: number) {
     this.video.playbackRate = r;
   }
+  setFrame(r: Rect) {
+    const st = this.video.style;
+    st.position = 'absolute';
+    st.left = `${r.x}px`;
+    st.top = `${r.y}px`;
+    st.width = `${r.w}px`;
+    st.height = `${r.h}px`;
+    st.objectFit = 'fill';
+  }
+  frameSource() {
+    return this.video;
+  }
   setAudio(id: string) {
     const v = this.video as any;
     if (this.hls) this.hls.audioTrack = Number(id);
@@ -275,7 +304,8 @@ export class AvPlayEngine extends Base implements Engine {
     av.open(url);
     av.setDisplayRect(0, 0, 1920, 1080);
     try {
-      av.setDisplayMethod('PLAYER_DISPLAY_MODE_LETTER_BOX');
+      // We compute the exact rectangle ourselves (aspect/zoom/crop), so stretch into it.
+      av.setDisplayMethod('PLAYER_DISPLAY_MODE_FULL_SCREEN');
     } catch {
       /* older firmware */
     }
@@ -297,7 +327,7 @@ export class AvPlayEngine extends Base implements Engine {
     await new Promise<void>((resolve) => {
       av.prepareAsync(
         () => {
-          this.set({ duration: (av.getDuration() || 0) / 1000 });
+          this.set({ duration: (av.getDuration() || 0) / 1000, ...this.videoSize() });
           this.readTracks();
           if (startAt > 0) av.seekTo(Math.floor(startAt * 1000));
           av.play();
@@ -318,6 +348,39 @@ export class AvPlayEngine extends Base implements Engine {
         /* closed */
       }
     }, 1000);
+  }
+
+  private videoSize(): { vw: number; vh: number } {
+    try {
+      const info = (this.av.getCurrentStreamInfo() as any[]).find((t) => t.type === 'VIDEO');
+      const x = JSON.parse(info?.extra_info || '{}');
+      return { vw: Number(x.Width) || 0, vh: Number(x.Height) || 0 };
+    } catch {
+      return { vw: 0, vh: 0 };
+    }
+  }
+
+  setFrame(r: Rect, container: { w: number; h: number }) {
+    // AVPlay coordinates are on a 1920×1080 canvas regardless of the panel resolution.
+    const sx = 1920 / (container.w || 1920);
+    const sy = 1080 / (container.h || 1080);
+    const rect = [Math.round(r.x * sx), Math.round(r.y * sy), Math.round(r.w * sx), Math.round(r.h * sy)];
+    try {
+      this.av.setDisplayRect(...rect);
+    } catch {
+      // Some firmware rejects off-screen rectangles: clamp (loses crop/zoom beyond the edges).
+      const x = Math.max(0, rect[0]);
+      const y = Math.max(0, rect[1]);
+      try {
+        this.av.setDisplayRect(x, y, Math.min(1920 - x, rect[2]), Math.min(1080 - y, rect[3]));
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  frameSource() {
+    return null; // AVPlay renders on a hardware plane; frames are not readable from JS
   }
 
   private readTracks() {

@@ -4,7 +4,9 @@ import { useSession } from '../lib/session';
 import { AvPlayEngine, HtmlEngine, type Engine, type EngineState } from '../lib/engines';
 import { downloads } from '../lib/downloads';
 import { getSeriesInfo } from '../lib/catalog';
-import { fmtTime, getProgress, recallRef, rememberRef, saveProgress, useFavorites, useMoments } from '../lib/userdata';
+import { fmtTime, getCachedCrop, getProgress, recallRef, rememberRef, saveProgress, setCachedCrop, useFavorites, useMoments, usePicture } from '../lib/userdata';
+import { ASPECTS, detectFrame, frameRect, pictureSummary, significant, unionCrop, ZOOM_MAX, ZOOM_MIN, type Crop, type Fit } from '../lib/picture';
+import { PicturePanel, type DetectState } from '../components/PicturePanel';
 import { episodeRef, refKey, type Kind, type MediaRef } from '../lib/xtream';
 import { isIOS, isKey, isSafari, isTizen, nativePlatform } from '../lib/platform';
 import { focusFirst } from '../lib/spatial';
@@ -33,7 +35,7 @@ export default function Player() {
   const [offline, setOffline] = useState(false);
   const [engineName, setEngineName] = useState<'html' | 'avplay' | null>(null);
   const [controls, setControls] = useState(true);
-  const [panel, setPanel] = useState<null | 'audio' | 'text' | 'speed'>(null);
+  const [panel, setPanel] = useState<null | 'audio' | 'text' | 'speed' | 'picture'>(null);
   const [resumedAt, setResumedAt] = useState(0);
   const [next, setNext] = useState<MediaRef | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -49,6 +51,19 @@ export default function Player() {
 
   const moments = useMoments(acc);
   const fav = useFavorites(acc);
+
+  // ---- picture: aspect / zoom / black-bar crop ----
+  const pic = usePicture(acc, ref);
+  const [pinchZoom, setPinchZoom] = useState<number | null>(null);
+  const picture = pinchZoom ? { ...pic.picture, zoom: pinchZoom } : pic.picture;
+  const picKey = JSON.stringify(picture);
+  const [stageSize, setStageSize] = useState({ w: 0, h: 0 });
+  const [detected, setDetected] = useState<Crop | null>(null);
+  const [detectState, setDetectState] = useState<DetectState>('off');
+  const [detectNonce, setDetectNonce] = useState(0);
+  const unionRef = useRef<{ crop: Crop | null; informative: number; seeded: boolean }>({ crop: null, informative: 0, seeded: false });
+  const activeCrop = picture.crop ?? (picture.autoCrop ? detected : null);
+  const cropKey = JSON.stringify(activeCrop);
 
   // 1. Resolve what to play (state → saved refs).
   useEffect(() => {
@@ -124,6 +139,92 @@ export default function Player() {
       revoke?.();
     };
   }, [ref, client, reloadNonce]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Stage size → layout.
+  useEffect(() => {
+    const el = stage.current;
+    if (!el) return;
+    const upd = () => setStageSize({ w: el.clientWidth, h: el.clientHeight });
+    upd();
+    const ro = new ResizeObserver(upd);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const en = engine.current;
+    if (!en || !stageSize.w || !st) return;
+    en.setFrame(frameRect(stageSize, { w: st.vw, h: st.vh }, picture, activeCrop), stageSize);
+  }, [stageSize.w, stageSize.h, st?.vw, st?.vh, picKey, cropKey, engineName, reloadNonce]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Black bars: start from what we found last time for this title, then keep refining.
+  useEffect(() => {
+    setDetected(null);
+    setDetectState('off');
+    unionRef.current = { crop: null, informative: 0, seeded: false };
+    getCachedCrop(acc, key).then((c) => {
+      if (c === undefined) return;
+      unionRef.current = { crop: c, informative: 0, seeded: true };
+      setDetected(c);
+    });
+  }, [key, acc]);
+
+  const playingNow = !!st && !st.paused && !st.buffering;
+  useEffect(() => {
+    if (!picture.autoCrop || picture.crop || !playingNow) return;
+    const en = engine.current;
+    const v = en?.frameSource();
+    if (!v) {
+      if (en) setDetectState('unavailable');
+      return;
+    }
+    const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+    setDetectState('scanning');
+    let ticks = 0;
+    const MAX_TICKS = 40; // ~1 minute of playback
+    const iv = setInterval(() => {
+      if (v.paused || v.readyState < 2 || !v.videoWidth) return;
+      ticks++;
+      let c: Crop | null;
+      try {
+        c = detectFrame(v, v.videoWidth, v.videoHeight, ctx);
+      } catch {
+        clearInterval(iv); // cross-origin video without CORS: pixels unreadable
+        setDetectState('unavailable');
+        return;
+      }
+      const u = unionRef.current;
+      if (c) {
+        u.informative++;
+        u.crop = unionCrop(u.crop, c);
+      }
+      if (u.informative >= 3 || u.seeded) {
+        const sig = significant(u.crop);
+        setDetected((prev) => (JSON.stringify(prev) === JSON.stringify(sig) ? prev : sig));
+        if (u.informative >= 3) setCachedCrop(acc, key, sig);
+      }
+      if (ticks >= MAX_TICKS) {
+        clearInterval(iv);
+        setDetectState('done');
+      }
+    }, 1500);
+    return () => clearInterval(iv);
+  }, [picture.autoCrop, !!picture.crop, playingNow, engineName, reloadNonce, detectNonce, key]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const rescan = () => {
+    unionRef.current = { crop: null, informative: 0, seeded: false };
+    setDetected(null);
+    setDetectNonce((n) => n + 1);
+  };
+
+  // Pinch to zoom (phones/tablets).
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ d: number; z: number } | null>(null);
+  const dist = () => {
+    const [a, b] = [...pointers.current.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  };
 
   // 3. Persist progress every 5 s while playing.
   useEffect(() => {
@@ -255,6 +356,25 @@ export default function Player() {
       const onControl = tgt && tgt !== document.body && root.current?.contains(tgt) && tgt.matches('button, a, [role="slider"]');
       if (ev.key === ' ' && !onControl) return consume(), e.toggle(), poke();
       if (ev.key === 'f' || ev.key === 'F') return consume(), toggleFullscreen();
+      if (!onControl || !panel) {
+        // Picture shortcuts: + / − zoom, A aspect, Z fit, 0 reset zoom
+        const z = pic.picture.zoom;
+        if (ev.key === '+' || ev.key === '=') return consume(), pic.set({ zoom: Math.min(ZOOM_MAX, Math.round((z + 0.05) * 100) / 100) });
+        if (ev.key === '-' || ev.key === '_') return consume(), pic.set({ zoom: Math.max(ZOOM_MIN, Math.round((z - 0.05) * 100) / 100) });
+        if (ev.key === '0') return consume(), pic.set({ zoom: 1, panX: 0, panY: 0 });
+        if (ev.key === 'a' || ev.key === 'A') {
+          const i = ASPECTS.findIndex((a) => (a.value === null ? pic.picture.aspect === null : pic.picture.aspect !== null && Math.abs(a.value - pic.picture.aspect) < 0.01));
+          const next = ASPECTS[(i + 1) % ASPECTS.length];
+          toast(`Shape: ${next.label}`);
+          return consume(), pic.set({ aspect: next.value });
+        }
+        if (ev.key === 'z' || ev.key === 'Z') {
+          const order: Fit[] = ['contain', 'cover', 'fill'];
+          const next = order[(order.indexOf(pic.picture.fit) + 1) % order.length];
+          toast(next === 'contain' ? 'Fit' : next === 'cover' ? 'Fill' : 'Stretch');
+          return consume(), pic.set({ fit: next });
+        }
+      }
       if (!controls) {
         // Controls hidden: arrows/enter act on playback directly, like a TV.
         if (isKey(ev, 'enter')) return consume(), e.toggle(), poke();
@@ -272,7 +392,7 @@ export default function Player() {
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [controls, panel, exit, poke, ref]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [controls, panel, exit, poke, ref, picKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (controls) setTimeout(() => root.current && !root.current.contains(document.activeElement) && focusFirst(root.current), 0);
@@ -304,13 +424,46 @@ export default function Player() {
     <div
       ref={root}
       className={`player ${controls ? 'show' : 'hide'}`}
-      onPointerMove={poke}
-      onPointerDown={(ev) => {
-        if (ev.target === ev.currentTarget || (ev.target as HTMLElement).classList.contains('player-tap')) {
-          if (!controls) poke();
-          else if (ev.pointerType === 'mouse') (e?.toggle(), poke());
-          else setControls(false);
+      onPointerMove={(ev) => {
+        if (pointers.current.has(ev.pointerId)) {
+          pointers.current.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+          if (pinch.current && pointers.current.size === 2) {
+            const z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, (pinch.current.z * dist()) / pinch.current.d));
+            setPinchZoom(Math.round(z * 100) / 100);
+            return;
+          }
         }
+        poke();
+      }}
+      onPointerDown={(ev) => {
+        const onSurface = ev.target === ev.currentTarget || (ev.target as HTMLElement).classList.contains('player-tap');
+        if (!onSurface) return;
+        if (ev.pointerType === 'touch') {
+          pointers.current.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+          if (pointers.current.size === 2) {
+            pinch.current = { d: dist() || 1, z: pic.picture.zoom };
+            return;
+          }
+        }
+        if (!controls) poke();
+        else if (ev.pointerType === 'mouse') (e?.toggle(), poke());
+        else setControls(false);
+      }}
+      onPointerUp={(ev) => {
+        pointers.current.delete(ev.pointerId);
+        if (pinch.current && pointers.current.size < 2) {
+          pinch.current = null;
+          if (pinchZoom) {
+            pic.set({ zoom: pinchZoom });
+            toast(`Zoom ${Math.round(pinchZoom * 100)}%`);
+          }
+          setPinchZoom(null);
+        }
+      }}
+      onPointerCancel={(ev) => {
+        pointers.current.delete(ev.pointerId);
+        pinch.current = null;
+        setPinchZoom(null);
       }}
     >
       <div className="player-stage" ref={stage} />
@@ -373,6 +526,10 @@ export default function Player() {
               <Icon name={fav.isFav('live', ref.id) ? 'star' : 'starOutline'} />
             </button>
           )}
+          <button className={`btn btn-icon ${pictureSummary(picture) ? 'on' : ''}`} onClick={() => setPanel(panel === 'picture' ? null : 'picture')} aria-label="Picture: aspect ratio and zoom" title="Picture: aspect & zoom (A / Z / + −)">
+            <Icon name="aspect" />
+            {pictureSummary(picture) && <small>{pictureSummary(picture)}</small>}
+          </button>
           {st && st.audio.length > 1 && (
             <button className="btn btn-icon" onClick={() => setPanel(panel === 'audio' ? null : 'audio')} aria-label="Audio track" title="Audio">
               <Icon name="audio" />
@@ -402,7 +559,24 @@ export default function Player() {
         </div>
       </div>
 
-      {panel && st && (
+      {panel === 'picture' && (
+        <PicturePanel
+          picture={pic.picture}
+          custom={pic.custom}
+          scopeLabel={pic.scopeLabel}
+          detected={detected}
+          detectState={engine.current && !engine.current.frameSource() ? 'unavailable' : detectState}
+          onChange={(p) => {
+            pic.set(p);
+            poke();
+          }}
+          onDetectNow={rescan}
+          onReset={() => pic.reset()}
+          onMakeDefault={() => pic.makeDefault().then(() => toast('Used as default for all videos'))}
+          onClose={() => setPanel(null)}
+        />
+      )}
+      {panel && panel !== 'picture' && st && (
         <div className="player-panel" data-nav-scope="">
           <h3>{panel === 'audio' ? 'Audio' : panel === 'text' ? 'Subtitles' : 'Speed'}</h3>
           {panel === 'audio' &&
