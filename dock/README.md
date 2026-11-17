@@ -119,6 +119,21 @@ catch eyes if focused on road. I need something flashy! But don't cover maps".
   too; 🚓 on both maps. Settings → Police ahead: on/off, "Test the flash (6 s)".
 - The first 3 raw police blocks go to the dock's debug log (POLICE), to check the format on a drive.
 
+## Mini-map after the first drive (2026-11-17, evening)
+
+Seen on the unit (build 72, Foz do Arelho → Caldas): the screen is **1280×480 at 160 dpi** (1 dp = 1 px), not 1920×720.
+
+- **Modes** (`MiniModes.kt`): 🏙 City (every place, 2 km across, no diesel label), 🛣 Autobahn (places along the route plus diesel / rest / aires around, 15 km, "⛽ 23 km" in whole km, 100 m steps in the last 2 km, refreshed every 15 s), 🧭 Explore (1 km, every place, no route line). Auto switches City ↔ Autobahn on the speed averaged over ~2.5 min (85 / 70 km/h). Waze road types aren't used yet: seen so far 15, 7, 2, 5; no motorway drive logged.
+- **Smooth**: drawn ~15×/s (`FRAME_MS`), and between GPS fixes the van moves on along its course (`MiniModes.predict`). Heading and zoom glide. It used to redraw every 500 ms, jumping on every fix.
+- **Route line only while on course** (`OnCourse`: shows after 8 s within 120 m, hides after 10 s beyond 250 m). The dock's route is OSRM's, not Waze's.
+- **30 % smaller** by default (168 dp, new pref key) and the zoom dot is faint grey until touched.
+- **Tap or hold the middle** opens the big view (2× the old size, square, over Waze; the dock map no longer opens). Pinch and pan; tap a place to get a card with Waze and ✕. Buttons: ✕ · ◎ follow · Auto · City · Autobahn · Explore · Hide. A tap outside or 60 s idle closes it.
+- **Hide** switches the mini-map off. The **"Mini-map" icon** in the app list (`MiniMapLauncher`) brings it back.
+
+## Waze ignoring a sent link (2026-11-17)
+
+Three links sent to a running Waze were taken (`Sending to native`) but never run. After the owner killed Waze, the same link worked at once. Waze's log of a working cold start: `Url is not valid` → `Falling back to init` → `Executing query` after startup. The warm failures' log was lost (the file starts over when Waze restarts), so the cause is a strong guess. `WazeLinkCheck.kt`: after a link, if Waze logs lines but no `Executing query` / `startNavigationFlow caller=DeepLink` within 12 s, it restarts Waze (root) and sends the link again, once. If the Waze log isn't readable, it leaves Waze alone. Lines tagged `NAV` in the debug log.
+
 ## Dock map + mini-map, round 2 (2026-11-17)
 
 Owner after the first drive with v68: "much better … the UI became very crowded … buttons still have

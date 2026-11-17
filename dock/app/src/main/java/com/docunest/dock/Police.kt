@@ -107,6 +107,7 @@ object Police {
         for (i in 0 until lines.size - 1) {
             val inReport = depth > 0 || lines[i].contains("add_alert_action {")
             line(lines[i])
+            runCatching { WazeLinkCheck.line(lines[i]) }
             if (!inReport) runCatching { WazeTap.line(lines[i]) }
         }
     }
