@@ -266,8 +266,9 @@ class DockActivity : Activity() {
             setPadding(dp(12), dp(8), dp(8), dp(8))
             visibility = View.GONE
         }
+        // Ends left of the right-hand button column (seen on the unit 2026-11-17: it covered ⤢ and Mini).
         mapFrame.addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM).apply {
-            setMargins(dp(8), dp(8), dp(8), dp(8))
+            setMargins(dp(8), dp(8), dp(84), dp(8))
         })
         // GPS and Wi-Fi state at a glance; tap = the doctor screens (diagnose + fix).
         fun chip(text: String, target: Class<*>) = label(text, 12f, bold = true).apply {
