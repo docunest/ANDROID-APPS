@@ -144,7 +144,7 @@ class SettingsActivity : Activity() {
             "(clockwise = further out); tap the dot = Auto (close-up near the trip's start and end, far out mid-trip). " +
             "Tap the middle = the dock map, drag the middle = move it. Hidden while the dock map is open.", 13f, Palette.MUTED))
         switch("Show the mini-map", prefs.miniMap) { prefs.miniMap = it; DockService.start(this, DockService.ACTION_MINIMAP) }
-        slider("Mini-map size", prefs.miniSizeDp, 140, 360, " dp") { prefs.miniSizeDp = it; DockService.start(this, DockService.ACTION_MINIMAP) }
+        slider("Mini-map size", prefs.miniSizeDp, 110, 300, " dp") { prefs.miniSizeDp = it; DockService.start(this, DockService.ACTION_MINIMAP) }
         row(bigButton("Put it back bottom-left", Palette.CARD_HI, 14f) {
             prefs.miniX = -1; prefs.miniY = -1; DockService.start(this, DockService.ACTION_MINIMAP)
         })

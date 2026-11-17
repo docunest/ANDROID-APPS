@@ -86,9 +86,14 @@ class Prefs(context: Context) {
     var miniMap: Boolean
         get() = sp.getBoolean("miniMap", true)
         set(value) = sp.edit().putBoolean("miniMap", value).apply()
+    /** Owner 2026-11-17: "shrink the bubble by 30 %" (was 240; new key so it applies once). */
     var miniSizeDp: Int
-        get() = sp.getInt("miniSizeDp", 240)
-        set(value) = sp.edit().putInt("miniSizeDp", value).apply()
+        get() = sp.getInt("miniSizeDp2", 168)
+        set(value) = sp.edit().putInt("miniSizeDp2", value).apply()
+    /** Mini-map mode: "auto" or a MiniModes.Mode name. */
+    var miniMode: String
+        get() = sp.getString("miniMode", MiniModes.AUTO) ?: MiniModes.AUTO
+        set(value) = sp.edit().putString("miniMode", value).apply()
     var miniX: Int
         get() = sp.getInt("miniX", -1)
         set(value) = sp.edit().putInt("miniX", value).apply()

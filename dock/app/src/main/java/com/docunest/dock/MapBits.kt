@@ -152,11 +152,13 @@ class TripOverlay(context: Context, private val drawVan: Boolean) : Overlay() {
     @Volatile var here: Location? = null
     /** Direction the van points (degrees, 0 = north); the mini-map passes its smoothed heading. */
     @Volatile var heading: Float? = null
+    /** Draw the route line (the mini-map hides it while we're off the dock's route). */
+    @Volatile var showRoute = true
 
     override fun draw(c: Canvas, map: MapView, shadow: Boolean) {
         if (shadow) return
         val proj = map.projection
-        Trip.route?.let { r ->
+        Trip.route?.takeIf { showRoute }?.let { r ->
             path.reset()
             for (i in r.lat.indices) {
                 gp.setCoords(r.lat[i], r.lng[i]); proj.toPixels(gp, pt)
@@ -208,6 +210,8 @@ class MapFeeder(private val ctx: Context, private val map: MapView, private val 
     private val main = Handler(Looper.getMainLooper())
     @Volatile private var gen = 0
     private val run = Runnable { query() }
+    /** Autobahn: the places along the route, plus only diesel / rest areas / aires around the van. */
+    @Volatile var corridor = false
 
     init {
         if (autoListen) map.addMapListener(DelayedMapListener(object : MapListener {
@@ -226,6 +230,7 @@ class MapFeeder(private val ctx: Context, private val map: MapView, private val 
             val layers = MapFilter.layers(ctx)
             val spanKm = RouteGeo.distM(box.latSouth, box.lonWest, box.latSouth, box.lonEast) / 1000
             val boxLayers = when {
+                corridor -> layers intersect setOf("fuel", "rest", "aire")
                 spanKm > 150 -> emptySet()
                 spanKm > 50 -> layers intersect setOf("fuel", "rest", "aire", "dump")
                 spanKm > 12 -> layers - "parking" // parking only when zoomed in (there are thousands)

@@ -48,6 +48,20 @@
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.Dock">
 
+        <!-- "Mini-map" in the app list: shows the mini-map again after Hide. -->
+        <activity
+            android:name=".MiniMapLauncher"
+            android:exported="true"
+            android:label="Mini-map"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity="com.docunest.dock.minimap"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
         <activity
             android:name=".DockActivity"
             android:exported="true"
