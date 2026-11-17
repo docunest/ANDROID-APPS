@@ -1,0 +1,8 @@
+node_modules
+dist
+dist-tizen
+build
+server/.mock-media
+tests/out
+*.wgt
+.DS_Store

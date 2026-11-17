@@ -1,0 +1,83 @@
+// Tiny persistent key/value store on IndexedDB with cross-component change notifications.
+import { createStore, get, set, del, keys } from 'idb-keyval';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+const db = createStore('reelbox', 'kv');
+const listeners = new Map<string, Set<(v: unknown) => void>>();
+const memory = new Map<string, unknown>();
+
+export async function load<T>(key: string, fallback: T): Promise<T> {
+  if (memory.has(key)) return memory.get(key) as T;
+  try {
+    const v = await get<T>(key, db);
+    const out = v === undefined ? fallback : v;
+    memory.set(key, out);
+    return out;
+  } catch {
+    return fallback;
+  }
+}
+
+export async function save<T>(key: string, value: T): Promise<void> {
+  memory.set(key, value);
+  listeners.get(key)?.forEach((fn) => fn(value));
+  try {
+    await set(key, value, db);
+  } catch (e) {
+    console.warn('store: save failed', key, e);
+  }
+}
+
+export async function remove(key: string): Promise<void> {
+  memory.delete(key);
+  listeners.get(key)?.forEach((fn) => fn(undefined));
+  await del(key, db).catch(() => {});
+}
+
+export async function allKeys(): Promise<string[]> {
+  return (await keys(db).catch(() => [])) as string[];
+}
+
+export function subscribe(key: string, fn: (v: unknown) => void): () => void {
+  let s = listeners.get(key);
+  if (!s) listeners.set(key, (s = new Set()));
+  s.add(fn);
+  return () => s!.delete(fn);
+}
+
+/** Read-modify-write that is safe against concurrent updates within this tab. */
+const chains = new Map<string, Promise<unknown>>();
+export function update<T>(key: string, fallback: T, fn: (cur: T) => T): Promise<T> {
+  const prev = chains.get(key) ?? Promise.resolve();
+  const next = prev.then(async () => {
+    const cur = await load(key, fallback);
+    const out = fn(cur);
+    await save(key, out);
+    return out;
+  });
+  chains.set(key, next.catch(() => {}));
+  return next;
+}
+
+/** React hook: value persisted under `key`, shared by every component using the same key. */
+export function usePersisted<T>(key: string, fallback: T): [T, (fn: (cur: T) => T) => Promise<T>, boolean] {
+  const fb = useRef(fallback);
+  const [value, setValue] = useState<T>(() => (memory.has(key) ? (memory.get(key) as T) : fallback));
+  const [ready, setReady] = useState(memory.has(key));
+  useEffect(() => {
+    let alive = true;
+    load(key, fb.current).then((v) => {
+      if (alive) {
+        setValue(v);
+        setReady(true);
+      }
+    });
+    const off = subscribe(key, (v) => setValue((v === undefined ? fb.current : v) as T));
+    return () => {
+      alive = false;
+      off();
+    };
+  }, [key]);
+  const mutate = useCallback((fn: (cur: T) => T) => update(key, fb.current, fn), [key]);
+  return [value, mutate, ready];
+}

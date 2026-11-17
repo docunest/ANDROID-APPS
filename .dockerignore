@@ -1,0 +1,8 @@
+node_modules
+dist
+dist-tizen
+build
+android
+ios
+tests/out
+server/.mock-media
