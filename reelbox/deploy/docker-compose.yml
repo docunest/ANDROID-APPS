@@ -1,0 +1,33 @@
+# Reelbox web app + proxy behind Caddy with automatic free https (Let's Encrypt).
+# Run on any always-on box that can reach your Xtream server (ideally the same machine):
+#   cp .env.example .env   # fill in DOMAIN and XTREAM_URL
+#   docker compose up -d --build
+# Ports 80 and 443 must reach this machine (router port-forward) for the certificate.
+services:
+  reelbox:
+    build:
+      context: ..
+      args:
+        VITE_API_URL: ${VITE_API_URL:-}
+    environment:
+      XTREAM_URL: ${XTREAM_URL:?set XTREAM_URL in .env}
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # lets XTREAM_URL point at the host machine
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - reelbox
+    restart: unless-stopped
+
+volumes:
+  caddy_data: {}

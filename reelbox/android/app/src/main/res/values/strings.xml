@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Reelbox</string>
+    <string name="title_activity_main">Reelbox</string>
+    <string name="package_name">app.reelbox.player</string>
+    <string name="custom_url_scheme">app.reelbox.player</string>
+</resources>

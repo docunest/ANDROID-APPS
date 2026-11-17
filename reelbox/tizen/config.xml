@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Samsung Tizen (TV / projector profile) widget config for Reelbox. -->
+<widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets" id="http://reelbox.app/player" version="0.1.0" viewmodes="maximized">
+    <tizen:application id="RlBx0Playr.Reelbox" package="RlBx0Playr" required_version="3.0"/>
+    <tizen:profile name="tv-samsung"/>
+    <content src="index.html"/>
+    <icon src="icon.png"/>
+    <name>Reelbox</name>
+    <description>Player for your Xtream video library.</description>
+    <feature name="http://tizen.org/feature/screen.size.all"/>
+    <!-- Allow requests to any Xtream server (http included). Tizen apps are not subject to browser CORS for allowed origins. -->
+    <access origin="*" subdomains="true"/>
+    <tizen:allow-navigation>*</tizen:allow-navigation>
+    <tizen:content-security-policy>default-src * 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; media-src * blob: data:; img-src * data: blob:</tizen:content-security-policy>
+    <tizen:privilege name="http://tizen.org/privilege/internet"/>
+    <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
+    <tizen:setting screen-orientation="landscape" context-menu="disable" background-support="disable" encryption="disable" install-location="auto" hwkey-event="enable"/>
+    <tizen:metadata key="http://tizen.org/metadata/app_ui_type/base_screen_resolution" value="extensive"/>
+</widget>
