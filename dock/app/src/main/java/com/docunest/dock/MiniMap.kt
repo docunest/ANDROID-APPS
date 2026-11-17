@@ -74,6 +74,8 @@ class MiniMap(private val ctx: Context, private val wm: WindowManager) {
     private var smallPx = 0
     private var bigPx = 0
     private var screenW = 0; private var screenH = 0
+    /** Overlays start below the status bar on the unit (seen 2026-11-17: 52 px), so the big view must fit under it. */
+    private var topPx = 0
 
     // Expanded view state.
     private var expanded = false
@@ -131,9 +133,11 @@ class MiniMap(private val ctx: Context, private val wm: WindowManager) {
         MapFilter.load(ctx)
         val dm = DisplayMetrics().also { @Suppress("DEPRECATION") wm.defaultDisplay.getRealMetrics(it) }
         screenW = dm.widthPixels; screenH = dm.heightPixels
+        topPx = ctx.resources.getIdentifier("status_bar_height", "dimen", "android").takeIf { it > 0 }
+            ?.let { ctx.resources.getDimensionPixelSize(it) } ?: dp(24)
         smallPx = dp(prefs.miniSizeDp.coerceIn(110, 300))
         // "Twice as big as it's right now" (240 dp then), as much as the screen allows.
-        bigPx = minOf(dp(480), screenH - dp(16), screenW / 2)
+        bigPx = minOf(dp(480), screenH - topPx - dp(4), screenW / 2)
         expanded = false; free = false
         mode = chosenMode() ?: Mode.CITY
 
@@ -316,7 +320,7 @@ class MiniMap(private val ctx: Context, private val wm: WindowManager) {
         // Grow from where the circle is, kept on screen.
         params.width = bigPx; params.height = bigPx
         params.x = (params.x - (bigPx - smallPx) / 2).coerceIn(0, (screenW - bigPx).coerceAtLeast(0))
-        params.y = (params.y - (bigPx - smallPx) / 2).coerceIn(0, (screenH - bigPx).coerceAtLeast(0))
+        params.y = (params.y - (bigPx - smallPx) / 2).coerceIn(0, (screenH - topPx - bigPx).coerceAtLeast(0))
         setDiscShape(round = false)
         dial.visibility = View.GONE
         label.visibility = View.GONE
