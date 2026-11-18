@@ -1,15 +1,15 @@
 // Tiny persistent key/value store on IndexedDB with cross-component change notifications.
-import { createStore, get, set, del, keys } from 'idb-keyval';
+import { kvStore } from './kv';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-const db = createStore('reelbox', 'kv');
+const db = kvStore('reelbox', 'kv');
 const listeners = new Map<string, Set<(v: unknown) => void>>();
 const memory = new Map<string, unknown>();
 
 export async function load<T>(key: string, fallback: T): Promise<T> {
   if (memory.has(key)) return memory.get(key) as T;
   try {
-    const v = await get<T>(key, db);
+    const v = await db.get<T>(key);
     const out = v === undefined ? fallback : v;
     memory.set(key, out);
     return out;
@@ -37,7 +37,7 @@ export async function save<T>(key: string, value: T, opts: SaveOpts = {}): Promi
   if (!opts.quiet) saveHooks.forEach((fn) => fn(key, value, prev));
   listeners.get(key)?.forEach((fn) => fn(value));
   try {
-    await set(key, value, db);
+    await db.set(key, value);
   } catch (e) {
     console.warn('store: save failed', key, e);
   }
@@ -46,11 +46,11 @@ export async function save<T>(key: string, value: T, opts: SaveOpts = {}): Promi
 export async function remove(key: string): Promise<void> {
   memory.delete(key);
   listeners.get(key)?.forEach((fn) => fn(undefined));
-  await del(key, db).catch(() => {});
+  await db.del(key).catch(() => {});
 }
 
 export async function allKeys(): Promise<string[]> {
-  return (await keys(db).catch(() => [])) as string[];
+  return await db.keys().catch(() => [] as string[]);
 }
 
 export function subscribe(key: string, fn: (v: unknown) => void): () => void {

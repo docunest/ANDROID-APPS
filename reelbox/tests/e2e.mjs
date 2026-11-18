@@ -462,7 +462,7 @@ await step('GitHub Pages layout: app works from /ANDROID-APPS/reelbox/ with a CO
   expect(sw.endsWith('/ANDROID-APPS/reelbox/'), `service worker scope ${sw}`);
   await p.goto('http://localhost:8083/ANDROID-APPS/reelbox/#/install');
   await p.locator('.qr svg').waitFor();
-  await p.getByText('iPhone · no Apple ID needed').waitFor();
+  await p.getByText('iPhone app (Expo Go) · works with every server').waitFor();
   await p.screenshot({ path: `${OUT}/16-install-page.png`, fullPage: true });
   await c.close();
 });

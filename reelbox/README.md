@@ -83,7 +83,31 @@ Open `http://localhost:8080`, then either:
 
 Alternative on Apple-silicon Macs: run the iPhone app on the Mac. In Xcode, choose the target *My Mac (Designed for iPad)*.
 
-### iPhone — web app (no Apple ID, free)
+### iPhone & Android — native app in Expo Go (recommended; works with every server)
+The real app (React Native, in `native/`). It runs inside **Expo Go**, a free App Store / Play Store app, so no Apple developer account, no sideloading and no Expo account are needed.
+1. **Install Expo Go**: [App Store](https://apps.apple.com/app/expo-go/id982107779) · [Google Play](https://play.google.com/store/apps/details?id=host.exp.exponent).
+2. **Open the app**: on the phone, go to **https://docunest.github.io/ANDROID-APPS/reelbox/app/** and tap *Open Reelbox in Expo Go*. Or scan the QR code on that page from a computer. After the first time it is listed on Expo Go's home screen.
+3. **Sign in**: use the family account, or type the Xtream server details exactly like in your IPTV app. An address without `https://` is tried as https first, then http.
+
+Why this instead of the web app:
+- **No CORS / mixed-content limits.** Apps call the server directly, like any IPTV app, so servers that block web apps work.
+- **Player**: iPhone's own player (AVPlayer); ExoPlayer on Android.
+  - Picture in picture, AirPlay, background audio and lock-screen controls.
+  - The same picture fixes as the web app: Fit/Fill/Stretch, shape, zoom (also by pinching), move (by dragging) and cutting baked-in black bars, with presets for "double boxed" rips. Settings sync with the other devices.
+  - Automatic black-bar *detection* is web-only. A crop detected on the Mac or web app does not apply here; set one with the presets, which then sync.
+- **Downloads**: kept in the app's storage, resumable, and playable offline.
+- **Shared code**: `native/` uses the web app's Xtream client, bookmarks, picture math and family sync (`src/lib`, plus `*.native.ts` twins for storage and network).
+
+How it's published:
+- On every push to `main`, `ponas-pages.yml` runs `expo export`, then `native/scripts/publish-pages.mjs`.
+- The script writes `ios.json` / `android.json`: Expo Updates manifests pointing at the exported bundle, plus an install page under `/reelbox/app/`.
+- Expo Go checks for a newer version when the app starts.
+
+Limits:
+- **Expo Go supports only the newest Expo SDK.** When Expo Go updates to a new SDK, bump `expo` in `native/` (`npx expo install expo@latest --fix`) and push.
+- **MKV/AVI on iPhone**: AVPlayer can't decode them. Those titles show *Open in VLC* / *Open in Infuse*. Android plays them.
+
+### iPhone — web app (no install at all)
 1. **Open the app**: on the iPhone, go to **https://docunest.github.io/ANDROID-APPS/reelbox/** in Safari.
 2. **Install it**: tap **Share → Add to Home Screen**. It then runs full-screen with its own icon.
 3. **Sign in**: use the family account (MapPal login), or connect your Xtream server directly.
@@ -194,6 +218,8 @@ src/lib/downloads.ts   download manager: native / OPFS / IndexedDB drivers, resu
 src/lib/engines.ts     <video>+hls.js engine and Samsung AVPlay engine
 src/lib/spatial.ts     D-pad focus navigation for remotes
 src/pages/             Home, Browse, Movie, Show, Player, Search, Library, Downloads, Settings
+src/lib/*.native.ts(x) native-app versions of storage (kv), env and session
+native/                the native app (Expo / React Native, runs in Expo Go); shares src/lib
 server/proxy.mjs       static server + Xtream proxy (no deps)
 server/mock-xtream.mjs fake server for dev/tests
 tizen/config.xml       Tizen widget manifest

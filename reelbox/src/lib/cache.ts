@@ -1,10 +1,11 @@
 // Offline-first catalog cache: show the saved copy instantly, refresh in the background
 // when it's older than maxAge and we're online. Everything lives in IndexedDB, so the
 // catalog stays browsable with no network.
-import { createStore, get, set, del, keys } from 'idb-keyval';
+import { kvStore } from './kv';
+import { isOnline } from './env';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-const cacheDb = createStore('reelbox-cache', 'responses');
+const cacheDb = kvStore('reelbox-cache', 'responses');
 
 interface Entry<T> {
   at: number;
@@ -20,7 +21,7 @@ export const HOUR = 3600_000;
 async function readEntry<T>(key: string): Promise<Entry<T> | undefined> {
   const m = mem.get(key) as Entry<T> | undefined;
   if (m) return m;
-  const v = await get<Entry<T>>(key, cacheDb).catch(() => undefined);
+  const v = await cacheDb.get<Entry<T>>(key).catch(() => undefined);
   if (v) mem.set(key, v);
   return v;
 }
@@ -32,7 +33,7 @@ export async function fetchAndStore<T>(key: string, fetcher: () => Promise<T>): 
     const data = await fetcher();
     const entry = { at: Date.now(), data };
     mem.set(key, entry);
-    await set(key, entry, cacheDb).catch((e) => console.warn('cache write failed', key, e));
+    await cacheDb.set(key, entry).catch((e) => console.warn('cache write failed', key, e));
     listeners.get(key)?.forEach((fn) => fn());
     return entry;
   })();
@@ -47,7 +48,7 @@ export async function fetchAndStore<T>(key: string, fetcher: () => Promise<T>): 
 /** Non-hook access (used by search, player, prefetch). */
 export async function cached<T>(key: string, fetcher: () => Promise<T>, maxAge: number): Promise<T> {
   const e = await readEntry<T>(key);
-  if (e && (Date.now() - e.at < maxAge || !navigator.onLine)) return e.data;
+  if (e && (Date.now() - e.at < maxAge || !isOnline())) return e.data;
   try {
     return (await fetchAndStore(key, fetcher)).data;
   } catch (err) {
@@ -61,8 +62,8 @@ export async function peek<T>(key: string): Promise<T | undefined> {
 }
 
 export async function clearCache(prefix = ''): Promise<void> {
-  const all = (await keys(cacheDb).catch(() => [])) as string[];
-  for (const k of all) if (String(k).startsWith(prefix)) await del(k, cacheDb).catch(() => {});
+  const all = await cacheDb.keys().catch(() => [] as string[]);
+  for (const k of all) if (String(k).startsWith(prefix)) await cacheDb.del(k).catch(() => {});
   for (const k of [...mem.keys()]) if (k.startsWith(prefix)) mem.delete(k);
 }
 
@@ -101,7 +102,7 @@ export function useCachedQuery<T>(key: string | null, fetcher: () => Promise<T>,
       else setState((s) => ({ ...s, data: undefined, at: null, loading: true, error: null }));
       const fresh = e && Date.now() - e.at < maxAge;
       if (fresh && !force) return;
-      if (!navigator.onLine) {
+      if (!isOnline()) {
         if (alive) setState((s) => ({ ...s, loading: false, stale: !!e, error: e ? null : new Error('You are offline and this has not been saved yet.') }));
         return;
       }

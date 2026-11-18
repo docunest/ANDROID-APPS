@@ -6,6 +6,8 @@ import { Icon } from '../components/ui';
 /** Public home of the iPhone/browser web app, and of the Android / Samsung downloads. */
 export const WEB_APP_URL = 'https://docunest.github.io/ANDROID-APPS/reelbox/';
 const BUILDS_URL = 'https://github.com/docunest/ANDROID-APPS/releases?q=reelbox';
+/** The native app for Expo Go (works with servers that block web apps). */
+export const NATIVE_APP_URL = 'https://docunest.github.io/ANDROID-APPS/reelbox/app/';
 
 function Qr({ text }: { text: string }) {
   const svg = useMemo(() => {
@@ -47,7 +49,31 @@ export default function Install() {
       </section>
 
       <section className="panel">
-        <h2>iPhone · no Apple ID needed</h2>
+        <h2>iPhone app (Expo Go) · works with every server</h2>
+        <p>
+          The real app, not a web page: it can talk to Xtream servers that block web apps (“CORS”), plays in the background and in picture in
+          picture, and keeps downloads on the phone.
+        </p>
+        <ol>
+          <li>
+            Install <b>Expo Go</b> from the{' '}
+            <a href="https://apps.apple.com/app/expo-go/id982107779" target="_blank" rel="noreferrer">
+              App Store
+            </a>{' '}
+            (free).
+          </li>
+          <li>
+            Open{' '}
+            <a href={NATIVE_APP_URL} target="_blank" rel="noreferrer">
+              {NATIVE_APP_URL}
+            </a>{' '}
+            on the iPhone and tap <b>Open Reelbox in Expo Go</b>.
+          </li>
+        </ol>
+      </section>
+
+      <section className="panel">
+        <h2>iPhone web app · no install at all</h2>
         <ol>
           <li>
             Open <b>{url}</b> in <b>Safari</b> (scan the QR code above with the camera).

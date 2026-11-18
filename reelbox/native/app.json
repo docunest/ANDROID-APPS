@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "Reelbox",
+    "slug": "reelbox",
+    "version": "1.0.0",
+    "scheme": "reelbox",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0d0f14",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "io.github.docunest.reelbox",
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "audio"
+        ],
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
+      }
+    },
+    "android": {
+      "package": "io.github.docunest.reelbox",
+      "adaptiveIcon": {
+        "backgroundColor": "#0d0f14",
+        "foregroundImage": "./assets/android-icon-foreground.png"
+      },
+      "usesCleartextTraffic": true
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-video",
+        {
+          "supportsBackgroundPlayback": true,
+          "supportsPictureInPicture": true
+        }
+      ],
+      "expo-image"
+    ],
+    "experiments": {
+      "typedRoutes": false,
+      "tsconfigPaths": true
+    }
+  }
+}

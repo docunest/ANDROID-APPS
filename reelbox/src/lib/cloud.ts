@@ -8,6 +8,8 @@
 import { useEffect, useState } from 'react';
 import { allKeys, load, onSave, save, update } from './store';
 import { DEFAULT_PICTURE } from './picture';
+import { DEFAULT_API, deviceLabel, isOnline, isVisible, onWake } from './env';
+export { DEFAULT_API };
 
 export interface CloudUser {
   id: string;
@@ -37,8 +39,6 @@ interface Change {
   at: number;
 }
 
-/** Build-time default for the backend URL (VITE_API_URL); can be changed at sign-in. */
-export const DEFAULT_API = ((import.meta.env.VITE_API_URL as string | undefined) || '').replace(/\/+$/, '');
 
 // ---------------- which local keys sync, and how ----------------
 
@@ -238,7 +238,7 @@ export function syncNow(): Promise<void> {
 
 async function syncOnce() {
   const s = session;
-  if (!s || !navigator.onLine) return;
+  if (!s || !isOnline()) return;
   status = { ...status, syncing: true, error: null };
   emit();
   try {
@@ -334,13 +334,12 @@ export function startCloud(): Promise<void> {
     outbox = new Map([...(await load<Change[]>('cloud:outbox', [])).map((c) => [itemId(c), c] as const), ...outbox]);
     device = await load<string>('cloud:device', '');
     if (!device) {
-      device = `${navigator.platform || 'device'}-${Math.random().toString(36).slice(2, 8)}`.slice(0, 80);
+      device = `${deviceLabel()}-${Math.random().toString(36).slice(2, 8)}`.slice(0, 80);
       await save('cloud:device', device, { quiet: true });
     }
     emit();
-    window.addEventListener('online', () => syncNow());
-    document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && syncNow());
-    setInterval(() => document.visibilityState === 'visible' && syncNow(), 60_000);
+    onWake(() => syncNow());
+    setInterval(() => isVisible() && syncNow(), 60_000);
     syncNow();
   })();
   return started;

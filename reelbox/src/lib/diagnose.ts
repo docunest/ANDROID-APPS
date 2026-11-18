@@ -138,7 +138,7 @@ export async function diagnose(input: string, username: string, password: string
       [
         'If you run the server (Xtream UI / XUI panel, nginx): add the header  Access-Control-Allow-Origin: *  to player_api.php and the stream paths.',
         'Or run the Reelbox proxy on an https address and open the app from there (README → “Proxy, only if needed”).',
-        'Or use a native build (Android APK now; iPhone via Expo Go — ask for it).',
+        'Easiest: use the Reelbox app in Expo Go (iPhone and Android) — apps aren’t affected by this. Install: https://docunest.github.io/ANDROID-APPS/reelbox/app/',
       ],
       checks,
       input,

@@ -2,6 +2,18 @@ import { useState } from 'react';
 import type { Diagnosis } from '../lib/diagnose';
 import { toast } from './ui';
 
+/** Make https links in a fix clickable. */
+const linkify = (text: string) =>
+  text.split(/(https:\/\/\S+)/).map((part, i) =>
+    part.startsWith('https://') ? (
+      <a key={i} href={part} target="_blank" rel="noreferrer">
+        {part}
+      </a>
+    ) : (
+      part
+    ),
+  );
+
 export function ConnectionDebug({ d }: { d: Diagnosis }) {
   const [open, setOpen] = useState(d.verdict !== 'ok');
   const copy = () =>
@@ -17,7 +29,7 @@ export function ConnectionDebug({ d }: { d: Diagnosis }) {
       {d.fixes.length > 0 && (
         <ul className="debug-fixes">
           {d.fixes.map((f) => (
-            <li key={f}>{f}</li>
+            <li key={f}>{linkify(f)}</li>
           ))}
         </ul>
       )}
