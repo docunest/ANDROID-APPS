@@ -11,6 +11,8 @@ import {
 } from "../lib/xtream";
 import { Icon } from "../components/ui";
 import { FamilySignIn } from "../components/FamilySignIn";
+import { ConnectionDebug } from "../components/ConnectionDebug";
+import { diagnose, type Diagnosis } from "../lib/diagnose";
 import { DEFAULT_API, useCloud } from "../lib/cloud";
 
 export default function Setup() {
@@ -37,12 +39,32 @@ export default function Setup() {
     if (proxy && !server) setServer(proxy.server);
   }, [proxy]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [diag, setDiag] = useState<Diagnosis | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  async function runCheck() {
+    setChecking(true);
+    setDiag(null);
+    try {
+      setDiag(await diagnose(server, username.trim(), password));
+    } finally {
+      setChecking(false);
+    }
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    setDiag(null);
     const srv = normalizeServer(server);
     if (!srv || !username || !password) {
       setError("Fill in server, username and password.");
+      return;
+    }
+    try {
+      new URL(srv);
+    } catch {
+      setError("That server address doesn't look right — use the same one as in your IPTV app.");
       return;
     }
     const acc: Account = {
@@ -55,8 +77,8 @@ export default function Setup() {
       mode,
     };
     setBusy(true);
+    const { base, via } = resolveBase(acc, proxy);
     try {
-      const { base } = resolveBase(acc, proxy);
       const r = await new Xtream(acc, base).login();
       if (r.user_info.status && r.user_info.status !== "Active")
         throw new XtreamError(`Account status: ${r.user_info.status}`, "auth");
@@ -68,6 +90,13 @@ export default function Setup() {
           ? err.message
           : String((err as Error)?.message ?? err),
       );
+      // Find out exactly why (direct connections only; the proxy reports its own errors).
+      if (via === "direct") {
+        setChecking(true);
+        diagnose(server, username.trim(), password)
+          .then(setDiag)
+          .finally(() => setChecking(false));
+      }
     } finally {
       setBusy(false);
     }
@@ -183,8 +212,13 @@ export default function Setup() {
               {error}
             </p>
           )}
+          {checking && <p className="muted small">Checking the connection step by step…</p>}
+          {diag && <ConnectionDebug d={diag} />}
           <button className="btn btn-primary" type="submit" disabled={busy}>
             {busy ? "Connecting…" : "Connect"}
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={runCheck} disabled={checking || !server}>
+            {checking ? "Checking…" : "Check server (debug)"}
           </button>
           {accounts.length > 0 && (
             <button

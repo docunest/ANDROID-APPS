@@ -1483,3 +1483,64 @@ html.tv .seek:focus {
   color: var(--muted);
   margin-top: 0.4rem;
 }
+
+/* ---------- connection debug ---------- */
+.debug {
+  border: 1px solid #ff5d5d55;
+  background: #ff5d5d10;
+  border-radius: 12px;
+  padding: 0.8rem 0.9rem;
+  margin: 0.2rem 0 0.8rem;
+  font-size: 0.88rem;
+}
+.debug-ok {
+  border-color: #49d17d66;
+  background: #49d17d12;
+}
+.debug-summary {
+  margin: 0 0 0.4rem;
+}
+.debug-fixes {
+  margin: 0.2rem 0 0.6rem;
+  padding-left: 1.2rem;
+}
+.debug-fixes li {
+  margin-bottom: 0.3rem;
+}
+.debug-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.btn-small {
+  min-height: 2.1rem;
+  padding: 0.25rem 0.8rem;
+  font-size: 0.85rem;
+}
+.debug-checks {
+  list-style: none;
+  padding: 0;
+  margin: 0.7rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.debug-checks li {
+  display: flex;
+  gap: 0.5rem;
+}
+.debug-checks code {
+  font-size: 0.78rem;
+  color: var(--muted);
+  word-break: break-all;
+}
+.debug-mark {
+  flex: 0 0 1rem;
+  font-weight: 700;
+}
+.debug-checks .pass .debug-mark {
+  color: var(--ok);
+}
+.debug-checks .fail .debug-mark {
+  color: var(--danger);
+}

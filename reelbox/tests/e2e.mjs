@@ -448,7 +448,7 @@ await step('server WITHOUT CORS gives an actionable message', async () => {
   const c = await browser.newContext();
   const p = await c.newPage();
   await login(p, 'http://localhost:8081/', 'http://localhost:9090');
-  await p.getByText(/CORS/).waitFor({ timeout: 10000 });
+  await p.locator('.debug-cors').waitFor({ timeout: 30000 });
   await p.screenshot({ path: `${OUT}/13-cors-error.png` });
   await c.close();
 });

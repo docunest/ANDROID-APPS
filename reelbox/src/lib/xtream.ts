@@ -195,7 +195,10 @@ export function accountId(server: string, username: string): string {
 export function normalizeServer(input: string): string {
   let s = input.trim();
   if (!s) return s;
-  if (!/^https?:\/\//i.test(s)) s = 'http://' + s;
+  // No scheme typed: on an https page (the web app) assume https — an http address would be
+  // blocked by the browser anyway (mixed content). Elsewhere keep the Xtream default, http.
+  const pageIsHttps = typeof location !== 'undefined' && location.protocol === 'https:';
+  if (!/^https?:\/\//i.test(s)) s = (pageIsHttps ? 'https://' : 'http://') + s;
   try {
     const u = new URL(s);
     // People often paste a full player_api / get.php URL — keep only origin + base path.
@@ -231,7 +234,7 @@ export class Xtream {
       throw new XtreamError(
         aborted
           ? 'The server took too long to answer.'
-          : 'Could not reach the server. If it is up, the browser may be blocking it (CORS / http on an https page) — use the bundled proxy, or the native app.',
+          : 'Could not connect to the server.',
         aborted ? 'network' : 'cors',
       );
     } finally {
