@@ -69,7 +69,8 @@ jobs:
           PUBLIC_URL: https://docunest.github.io/ANDROID-APPS/reelbox/app
           CI: "1"
         run: |
-          npm ci
+          # npm downloads on the runner time out now and then; retry before failing the deploy.
+          for i in 1 2 3; do npm ci --fetch-retries=5 --fetch-retry-maxtimeout=120000 && break; [ $i = 3 ] && exit 1; sleep 20; done
           npx tsc --noEmit
           npx expo export --platform ios --platform android --output-dir ../../_site/reelbox/app
           node scripts/publish-pages.mjs ../../_site/reelbox/app
