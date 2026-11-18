@@ -309,6 +309,61 @@ export default function Player() {
     setRef(next);
   }, [next, nav]);
 
+  // Lock screen, Control Center, headphones and car buttons (Media Session API).
+  useEffect(() => {
+    const ms = (navigator as any).mediaSession;
+    if (!ms || !ref) return;
+    try {
+      ms.metadata = new (window as any).MediaMetadata({
+        title: ref.seriesName ? `S${ref.season}·E${ref.episode} ${ref.name}` : ref.name,
+        artist: ref.seriesName ?? (ref.kind === 'live' ? 'Live' : 'Reelbox'),
+        album: 'Reelbox',
+        artwork: ref.poster ? [{ src: ref.poster, sizes: '512x512' }] : [],
+      });
+    } catch {
+      /* MediaMetadata unsupported */
+    }
+    const actions: [string, ((d: any) => void) | null][] = [
+      ['play', () => engine.current?.play()],
+      ['pause', () => engine.current?.pause()],
+      ['seekbackward', ref.kind === 'live' ? null : (d) => engine.current && engine.current.seek(engine.current.state.time - (d?.seekOffset || 10))],
+      ['seekforward', ref.kind === 'live' ? null : (d) => engine.current && engine.current.seek(engine.current.state.time + (d?.seekOffset || 30))],
+      ['seekto', ref.kind === 'live' ? null : (d) => d?.seekTime != null && engine.current?.seek(d.seekTime)],
+      ['nexttrack', next ? () => goNext() : null],
+    ];
+    for (const [a, fn] of actions) {
+      try {
+        ms.setActionHandler(a, fn);
+      } catch {
+        /* action unsupported here */
+      }
+    }
+    return () => {
+      for (const [a] of actions) {
+        try {
+          ms.setActionHandler(a, null);
+        } catch {
+          /* ignore */
+        }
+      }
+      ms.metadata = null;
+    };
+  }, [ref, next, goNext]);
+
+  const fiveSec = Math.floor((st?.time ?? 0) / 5);
+  useEffect(() => {
+    const ms = (navigator as any).mediaSession;
+    if (!ms || !st) return;
+    ms.playbackState = st.paused ? 'paused' : 'playing';
+    if (ref?.kind !== 'live' && st.duration > 0 && typeof ms.setPositionState === 'function') {
+      try {
+        ms.setPositionState({ duration: st.duration, position: Math.min(st.time, st.duration), playbackRate: st.rate || 1 });
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [st?.paused, st?.duration, st?.rate, fiveSec]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const exit = useCallback(() => {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     if (loc.key === 'default') nav('/', { replace: true });
@@ -356,6 +411,7 @@ export default function Player() {
       const onControl = tgt && tgt !== document.body && root.current?.contains(tgt) && tgt.matches('button, a, [role="slider"]');
       if (ev.key === ' ' && !onControl) return consume(), e.toggle(), poke();
       if (ev.key === 'f' || ev.key === 'F') return consume(), toggleFullscreen();
+      if ((ev.key === 'p' || ev.key === 'P') && e.state.pipAvailable) return consume(), e.togglePip?.();
       if (!onControl || !panel) {
         // Picture shortcuts: + / − zoom, A aspect, Z fit, 0 reset zoom
         const z = pic.picture.zoom;
@@ -549,6 +605,16 @@ export default function Player() {
           {next && (
             <button className="btn btn-icon" onClick={goNext} aria-label="Next episode" title="Next episode">
               <Icon name="next" />
+            </button>
+          )}
+          {st?.airplayAvailable && (
+            <button className="btn btn-icon" onClick={() => e?.showAirplay?.()} aria-label="AirPlay" title="AirPlay to a TV or speaker">
+              <Icon name="airplay" />
+            </button>
+          )}
+          {st?.pipAvailable && (
+            <button className={`btn btn-icon ${st.inPip ? 'on' : ''}`} onClick={() => e?.togglePip?.()} aria-label="Picture in picture" title="Picture in picture (P)">
+              <Icon name="pip" />
             </button>
           )}
           {/* Installed iPhone web app is already full screen; iOS "fullscreen" would switch to Apple's

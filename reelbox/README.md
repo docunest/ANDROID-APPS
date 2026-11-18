@@ -14,6 +14,8 @@ A player for your **Xtream Codes** video server. One codebase runs on **iPhone, 
   - Audio-track, subtitle and speed menus.
   - Next-episode countdown.
   - Keyboard, TV-remote and media-key support.
+  - Picture-in-picture, AirPlay, lock-screen / Control Center controls.
+  - Picture fixes for old videos: Fit/Fill/Stretch, forced shape, zoom, automatic black-bar removal.
   - Screen stays awake while playing.
   - "Open in VLC" when a format can't be played.
 - **Offline**:
@@ -22,7 +24,7 @@ A player for your **Xtream Codes** video server. One codebase runs on **iPhone, 
   - The catalog, search and your bookmarks keep working without internet.
 
 ## Family account & sync
-Signing in is optional. You use the **same email and password as MapPal**: the shared backend is `apps/api` in this monorepo, and MapPal's users were imported into it once.
+Signing in is optional. You use the **same email and password as MapPal**: the shared backend is `apps/api` in `docunest/monorepo`, and MapPal's users were imported into it once.
 
 Once signed in, these follow you across every device:
 - favorites, bookmarks (moments) and where you stopped watching
@@ -82,30 +84,36 @@ Open `http://localhost:8080`, then either:
 Alternative on Apple-silicon Macs: run the iPhone app on the Mac. In Xcode, choose the target *My Mac (Designed for iPad)*.
 
 ### iPhone — web app (no Apple ID, free)
-Open Reelbox in **Safari**, tap **Share → Add to Home Screen**. The app shows a hint for this. It then runs full-screen with its own icon. Downloads, offline mode and the picture controls all work.
+1. **Open the app**: on the iPhone, go to **https://docunest.github.io/ANDROID-APPS/reelbox/** in Safari.
+2. **Install it**: tap **Share → Add to Home Screen**. It then runs full-screen with its own icon.
+3. **Sign in**: use the family account (MapPal login), or connect your Xtream server directly.
 
-It needs **https**, because iPhone only allows offline storage on secure pages. Pick one free option:
+Works on iPhone:
+- downloads and offline playback
+- picture-in-picture (it also starts by itself when you leave the app mid-video)
+- AirPlay
+- lock-screen / Control Center controls
+- the zoom/aspect fixes
 
-- **Docker + Caddy** on any always-on machine (ideally the Xtream server itself).
-  - **Domain**: a free name from duckdns.org pointing at your IP.
-  - **Router**: forward ports 80 and 443 to that machine.
-  - **Start it**:
-    ```bash
-    cd deploy && cp .env.example .env    # set DOMAIN and XTREAM_URL
-    docker compose up -d --build
-    ```
-  - Caddy gets and renews a Let's Encrypt certificate by itself. Then open `https://<your-name>.duckdns.org` on the iPhone.
-- **Tailscale**: no domain and no port forwarding. Install Tailscale (free) on the server and the iPhone.
-  - On the server run `XTREAM_URL=… npm run serve`, then `tailscale serve --bg 8080`.
-  - Open the `https://<machine>.<tailnet>.ts.net` address it prints.
-  - Downside: the iPhone must have Tailscale on.
+Things to know:
+- **Your server must allow browser access.** If it is https *and* sends CORS headers, nothing else is needed. The setup screen says clearly when it doesn't.
+- **If it doesn't**, the fix is one header on the server: `Access-Control-Allow-Origin: *`. Otherwise run the bundled proxy (below) on an https address.
+- **Plain-http servers** always need the proxy: an https page can't call an http server.
+- **MKV/AVI**: Safari can't decode them. Those titles get an "Open in VLC" button (VLC for iOS is free). MP4 and HLS play in Reelbox.
 
-> Safari cannot decode **.mkv/.avi**. Those titles get an "Open in VLC" button (VLC for iOS is free). MP4 and HLS play in Reelbox.
-
-Optional, later: there's also a native iOS project (`npm run ios`), but building it needs a Mac with Xcode and an Apple ID.
+**Proxy, only if needed (Docker + Caddy, free https):**
+1. **Domain**: point a free duckdns.org name at the machine.
+2. **Router**: forward ports 80 and 443 to it.
+3. **Start it**:
+   ```bash
+   cd deploy && cp .env.example .env    # set DOMAIN and XTREAM_URL
+   docker compose up -d --build
+   ```
+   Or use Tailscale: `tailscale serve --bg 8080` next to `npm run serve`.
 
 ### Android
-- **APK**: `npm run cap:sync && cd android && ./gradlew assembleDebug`, then sideload `android/app/build/outputs/apk/debug/app-debug.apk`.
+- **APK**: download `reelbox.apk` from the newest `reelbox-v*` release of this repo, open it on the phone. Every build is signed with the same key (`android/app/reelbox.keystore`), so updates install over the old app and keep its data.
+- Build it yourself: `npm run cap:sync && cd android && ./gradlew assembleRelease`.
 - **Android Studio**: `npm run android` opens the project; Run.
 
 ### Samsung projector / TV (Tizen)
@@ -161,7 +169,7 @@ The server password is stored on the device, unencrypted, like other Xtream play
 ```bash
 npm run build && npm run test:e2e
 # family sign-in + sync across 3 devices, against the real API and a throwaway Postgres (wiped):
-(cd ../api && npm run build) && TEST_DATABASE_URL=postgres://postgres:pg@localhost:5433/postgres npm run test:sync
+API_DIR=<monorepo>/apps/api TEST_DATABASE_URL=postgres://postgres:pg@localhost:5433/postgres npm run test:sync
 ```
 This runs real Chromium against the mock server (ffmpeg generates real H.264/AAC and HLS media). It covers:
 - login and error handling

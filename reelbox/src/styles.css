@@ -1436,3 +1436,50 @@ html.tv .seek:focus {
 .settings .panel .family-signin {
   max-width: 26rem;
 }
+
+/* ---------- install page ---------- */
+.install-link {
+  margin-bottom: 1.2rem;
+}
+.install .panel {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 1.1rem 1.3rem;
+  margin-bottom: 1rem;
+  max-width: 52rem;
+}
+.install ol {
+  margin: 0;
+  padding-left: 1.3rem;
+  line-height: 1.6;
+}
+.install a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.install-qr {
+  display: flex;
+  gap: 1.2rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.qr {
+  width: 11rem;
+  height: 11rem;
+  background: #fff;
+  border-radius: 10px;
+  flex: none;
+}
+.qr svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.install-qr .url {
+  display: block;
+  word-break: break-all;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: 0.4rem;
+}

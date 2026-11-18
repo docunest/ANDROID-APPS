@@ -3,6 +3,8 @@
 One folder per app; each has its own README (and rules where needed):
 
 - `dock/`: car head-unit dock app.
+- `reelbox/`: Xtream video player (web app first: iPhone via GitHub Pages; Capacitor Android,
+  Samsung Tizen). Its backend is `apps/api` in `docunest/monorepo`. See `reelbox/README.md`.
 - `ponas/`: kid-tablet launcher plus HTML/JS games. **Before touching anything in `ponas/`,
   read `ponas/CLAUDE.md`.** To add or change a game, use the `ponas-game` skill
   (`.claude/skills/ponas-game/`). Game changes only touch `ponas/games/<id>/` and never need a

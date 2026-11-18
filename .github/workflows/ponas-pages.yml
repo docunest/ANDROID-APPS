@@ -2,6 +2,8 @@ name: Ponas games
 
 # Validates every game and publishes https://docunest.github.io/ANDROID-APPS/ponas/ :
 # the iPhone/browser web app and manifest.json, which the tablet syncs from.
+# Also publishes the Reelbox web app at /reelbox/ (GitHub Pages is one site per repo,
+# so every app's pages are built here together).
 on:
   push:
     branches: [main]
@@ -10,6 +12,11 @@ on:
       - "ponas/sdk/**"
       - "ponas/tools/**"
       - "ponas/web/**"
+      - "reelbox/src/**"
+      - "reelbox/public/**"
+      - "reelbox/index.html"
+      - "reelbox/package*.json"
+      - "reelbox/vite.config.ts"
       - ".github/workflows/ponas-pages.yml"
   workflow_dispatch:
 
@@ -41,6 +48,16 @@ jobs:
           printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=ponas/"><a href="ponas/">Ponas</a>\n' > _site/index.html
           touch _site/.nojekyll
           find _site -type f | sort
+
+      - name: Build Reelbox web app (iPhone / Mac / browser)
+        working-directory: reelbox
+        env:
+          VITE_API_URL: ${{ vars.REELBOX_API_URL }}
+        run: |
+          npm ci
+          npm run build
+          mkdir -p ../_site/reelbox
+          cp -r dist/. ../_site/reelbox/
 
       - uses: actions/configure-pages@v5
 

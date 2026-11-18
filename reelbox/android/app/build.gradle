@@ -7,8 +7,9 @@ android {
         applicationId "app.reelbox.player"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // CI passes its run number so every build installs over the previous one.
+        versionCode Integer.parseInt(System.getenv('REELBOX_BUILD') ?: '1')
+        versionName "0.1." + (System.getenv('REELBOX_BUILD') ?: '0')
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +17,23 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Fixed key for sideloading (family app, not on Play Store): every build — CI or local — is
+    // signed the same, so updates install over the old app and keep its downloads and settings.
+    // For a Play Store release, use a private key from CI secrets instead.
+    signingConfigs {
+        sideload {
+            storeFile file('reelbox.keystore')
+            storePassword 'reelbox-sideload'
+            keyAlias 'reelbox'
+            keyPassword 'reelbox-sideload'
+        }
+    }
     buildTypes {
+        debug {
+            signingConfig signingConfigs.sideload
+        }
         release {
+            signingConfig signingConfigs.sideload
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

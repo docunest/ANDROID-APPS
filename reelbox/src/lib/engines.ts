@@ -23,6 +23,10 @@ export interface EngineState {
   rate: number;
   /** Subtitle text for engines that don't render it themselves (AVPlay). */
   cue?: string;
+  /** Picture-in-picture / AirPlay (Safari, Chrome) — false where unsupported (e.g. Samsung AVPlay). */
+  pipAvailable?: boolean;
+  inPip?: boolean;
+  airplayAvailable?: boolean;
   /** Coded picture size, once known. */
   vw: number;
   vh: number;
@@ -56,6 +60,8 @@ export interface Engine {
   setFrame(r: Rect, container: { w: number; h: number }): void;
   /** Element frames can be drawn from for black-bar detection (null if not possible). */
   frameSource(): HTMLVideoElement | null;
+  togglePip?(): void;
+  showAirplay?(): void;
   destroy(): void;
 }
 
@@ -112,6 +118,9 @@ export class HtmlEngine extends Base implements Engine {
     v.playsInline = true;
     v.setAttribute('playsinline', '');
     v.setAttribute('webkit-playsinline', '');
+    // iPhone/Mac: allow AirPlay and slip into picture-in-picture when you leave the app mid-video.
+    v.setAttribute('x-webkit-airplay', 'allow');
+    v.setAttribute('autopictureinpicture', '');
     v.preload = 'auto';
     container.appendChild(v);
     this.video = v;
@@ -134,6 +143,18 @@ export class HtmlEngine extends Base implements Engine {
     on('seeked', () => this.set({ time: v.currentTime }));
     on('ended', () => this.set({ ended: true, paused: true }));
     on('ratechange', () => this.set({ rate: v.playbackRate }));
+    const vx = v as any;
+    const pipOk = () =>
+      (!!(document as any).pictureInPictureEnabled && typeof vx.requestPictureInPicture === 'function' && !vx.disablePictureInPicture) ||
+      (typeof vx.webkitSupportsPresentationMode === 'function' && vx.webkitSupportsPresentationMode('picture-in-picture'));
+    this.set({ pipAvailable: pipOk() });
+    on('loadedmetadata', () => this.set({ pipAvailable: pipOk() }));
+    on('enterpictureinpicture', () => this.set({ inPip: true }));
+    on('leavepictureinpicture', () => this.set({ inPip: false }));
+    on('webkitpresentationmodechanged', () => this.set({ inPip: vx.webkitPresentationMode === 'picture-in-picture' }));
+    const air = (e: any) => this.set({ airplayAvailable: e.availability === 'available' });
+    v.addEventListener('webkitplaybacktargetavailabilitychanged', air);
+    this.offs.push(() => v.removeEventListener('webkitplaybacktargetavailabilitychanged', air));
     on('error', () => {
       const code = v.error?.code;
       // 4 = MEDIA_ERR_SRC_NOT_SUPPORTED, 3 = DECODE, 2 = NETWORK
@@ -249,6 +270,22 @@ export class HtmlEngine extends Base implements Engine {
   }
   frameSource() {
     return this.video;
+  }
+  togglePip() {
+    const v = this.video as any;
+    const d = document as any;
+    if (d.pictureInPictureElement === v) d.exitPictureInPicture?.().catch(() => {});
+    else if (typeof v.requestPictureInPicture === 'function' && d.pictureInPictureEnabled) v.requestPictureInPicture().catch(() => this.webkitPip());
+    else this.webkitPip();
+  }
+  private webkitPip() {
+    const v = this.video as any;
+    if (typeof v.webkitSetPresentationMode === 'function') {
+      v.webkitSetPresentationMode(v.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture');
+    }
+  }
+  showAirplay() {
+    (this.video as any).webkitShowPlaybackTargetPicker?.();
   }
   setAudio(id: string) {
     const v = this.video as any;

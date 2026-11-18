@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useSession } from '../lib/session';
 import { saveCatalogOffline } from '../lib/catalog';
 import { clearCache } from '../lib/cache';
@@ -44,6 +44,10 @@ export default function Settings() {
   return (
     <div className="page settings">
       <h1>Settings</h1>
+
+      <Link className="btn install-link" to="/install">
+        <Icon name="download" /> Install on your other devices (iPhone, Mac, projector)
+      </Link>
 
       <FamilyPanel />
 

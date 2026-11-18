@@ -19,6 +19,7 @@ const Library = lazy(() => import('./pages/Library'));
 const Downloads = lazy(() => import('./pages/Downloads'));
 const Settings = lazy(() => import('./pages/Settings'));
 const MagicLogin = lazy(() => import('./pages/MagicLogin'));
+const Install = lazy(() => import('./pages/Install'));
 
 function Gate() {
   const { ready, account } = useSession();
@@ -42,6 +43,7 @@ function Gate() {
           <Route path="/library" element={<Library />} />
           <Route path="/downloads" element={<Downloads />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/install" element={<Install />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

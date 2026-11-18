@@ -63,6 +63,12 @@ await start('node', ['server/proxy.mjs'], { PORT: '8080', XTREAM_URL: 'http://lo
 await start('node', ['server/proxy.mjs'], { PORT: '8082', XTREAM_URL: 'http://localhost:9092' }, 'Reelbox on');
 // plain static hosting (no proxy) for direct-mode tests
 await start('python3', ['-m', 'http.server', '8081', '-d', 'dist'], {}, 'Serving HTTP');
+// GitHub Pages layout: https://docunest.github.io/ANDROID-APPS/reelbox/
+const pagesRoot = path.join(OUT, 'pages-site');
+fs.rmSync(pagesRoot, { recursive: true, force: true });
+fs.mkdirSync(path.join(pagesRoot, 'ANDROID-APPS'), { recursive: true });
+fs.cpSync(path.join(root, 'dist'), path.join(pagesRoot, 'ANDROID-APPS', 'reelbox'), { recursive: true });
+await start('python3', ['-m', 'http.server', '8083', '-d', pagesRoot], {}, 'Serving HTTP');
 
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
 
@@ -164,6 +170,25 @@ await step('movie detail: info, favorite, play, bookmark, resume', async () => {
   await page.keyboard.press('Escape');
   await page.getByRole('link', { name: /Resume \d+:\d\d/ }).waitFor({ timeout: 5000 });
   await page.getByText('Your bookmarks').waitFor();
+});
+
+await step('player: lock-screen controls and picture-in-picture', async () => {
+  await page.goto('http://localhost:8080/#/movie/100');
+  await page.getByRole('link', { name: /Resume|Play/ }).first().click();
+  await waitPlaying(page, 1);
+  const ms = await page.evaluate(() => ({ title: navigator.mediaSession.metadata?.title, state: navigator.mediaSession.playbackState }));
+  expect(ms.title === 'Steel Valley' && ms.state === 'playing', `media session ${JSON.stringify(ms)}`);
+  await page.mouse.move(300, 300);
+  const pipBtn = page.getByRole('button', { name: 'Picture in picture' });
+  if (await page.evaluate(() => document.pictureInPictureEnabled)) {
+    await pipBtn.click();
+    await page.waitForFunction(() => !!document.pictureInPictureElement, null, { timeout: 5000 });
+    await pipBtn.click();
+    await page.waitForFunction(() => !document.pictureInPictureElement, null, { timeout: 5000 });
+  } else {
+    expect((await pipBtn.count()) === 0, 'PiP button must hide when the browser has no PiP');
+  }
+  await page.keyboard.press('Escape');
 });
 
 await step('resume starts where we left off', async () => {
@@ -425,6 +450,20 @@ await step('server WITHOUT CORS gives an actionable message', async () => {
   await login(p, 'http://localhost:8081/', 'http://localhost:9090');
   await p.getByText(/CORS/).waitFor({ timeout: 10000 });
   await p.screenshot({ path: `${OUT}/13-cors-error.png` });
+  await c.close();
+});
+
+await step('GitHub Pages layout: app works from /ANDROID-APPS/reelbox/ with a CORS server', async () => {
+  const c = await browser.newContext();
+  const p = await c.newPage();
+  await login(p, 'http://localhost:8083/ANDROID-APPS/reelbox/', 'localhost:9091');
+  await p.getByRole('heading', { name: 'Recently added movies' }).waitFor({ timeout: 10000 });
+  const sw = await p.evaluate(() => navigator.serviceWorker.ready.then((r) => r.scope));
+  expect(sw.endsWith('/ANDROID-APPS/reelbox/'), `service worker scope ${sw}`);
+  await p.goto('http://localhost:8083/ANDROID-APPS/reelbox/#/install');
+  await p.locator('.qr svg').waitFor();
+  await p.getByText('iPhone · no Apple ID needed').waitFor();
+  await p.screenshot({ path: `${OUT}/16-install-page.png`, fullPage: true });
   await c.close();
 });
 

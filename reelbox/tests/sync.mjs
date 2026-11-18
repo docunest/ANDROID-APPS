@@ -1,6 +1,7 @@
-// Family account + sync across devices, against the real monorepo API (apps/api) and Postgres.
-//   cd ../api && npm run build && cd ../reelbox && npm run build
-//   TEST_DATABASE_URL=postgres://postgres:pg@localhost:5433/postgres node tests/sync.mjs   (database is wiped)
+// Family account + sync across devices, against the real shared API and Postgres.
+// The API lives in docunest/monorepo → apps/api; point API_DIR at a built checkout of it.
+//   (cd <monorepo>/apps/api && npm ci && npm run build) && npm run build
+//   API_DIR=<monorepo>/apps/api TEST_DATABASE_URL=postgres://postgres:pg@localhost:5433/postgres node tests/sync.mjs   (database is wiped)
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -11,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 const { chromium, devices } = require('playwright');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const apiDir = path.resolve(root, '../api');
+const apiDir = path.resolve(process.env.API_DIR || path.join(root, '../../monorepo/apps/api'));
 const { Pool } = require(path.join(apiDir, 'node_modules/pg'));
 const bcrypt = require(path.join(apiDir, 'node_modules/bcryptjs'));
 const OUT = path.join(root, 'tests', 'out');
