@@ -76,11 +76,10 @@ object Nav {
                 Split.openMaps(context, i.dataString)
                 return true
             }
-            if (runCatching { context.startActivity(i) }.isSuccess) {
-                // Waze sometimes takes the link and never runs it: check, and restart it if so.
-                if (i.`package` == Apps.WAZE) i.dataString?.let { WazeLinkCheck.sent(it) }
-                return true
-            }
+            // The same place sent twice in a few minutes = Waze ignored it: restart Waze and resend (WazeLinkCheck).
+            if (i.`package` == Apps.WAZE && i.dataString != null &&
+                WazeLinkCheck.beforeSend(context, i.dataString!!, title, lat, lng)) return true
+            if (runCatching { context.startActivity(i) }.isSuccess) return true
         }
         Toast.makeText(context, "No navigation app could open this place", Toast.LENGTH_LONG).show()
         return false

@@ -130,9 +130,16 @@ Seen on the unit (build 72, Foz do Arelho → Caldas): the screen is **1280×480
 - **Tap or hold the middle** opens the big view (2× the old size, square, over Waze; the dock map no longer opens). Pinch and pan; tap a place to get a card with Waze and ✕. Buttons: ✕ · ◎ follow · Auto · City · Autobahn · Explore · Hide. A tap outside or 60 s idle closes it.
 - **Hide** switches the mini-map off. The **"Mini-map" icon** in the app list (`MiniMapLauncher`) brings it back.
 
-## Waze ignoring a sent link (2026-11-17)
+## Waze ignoring a sent link (2026-11-17, changed 2026-11-20)
 
-Three links sent to a running Waze were taken (`Sending to native`) but never run. After the owner killed Waze, the same link worked at once. Waze's log of a working cold start: `Url is not valid` → `Falling back to init` → `Executing query` after startup. The warm failures' log was lost (the file starts over when Waze restarts), so the cause is a strong guess. `WazeLinkCheck.kt`: after a link, if Waze logs lines but no `Executing query` / `startNavigationFlow caller=DeepLink` within 12 s, it restarts Waze (root) and sends the link again, once. If the Waze log isn't readable, it leaves Waze alone. Lines tagged `NAV` in the debug log.
+Three links sent to a running Waze were taken (`Sending to native`) but never run; after the owner killed Waze the same link worked at once.
+The first fix (restart Waze when it hadn't started the search 12 s after a link) was **too aggressive** (owner 2026-11-20): it fired while Waze was
+still calculating a slow route, or while the owner was looking at the route before pressing Go. Removed.
+
+Now (`WazeLinkCheck.kt`, the owner's rule): **the same place sent twice within 5 minutes** = Waze ignored it ("there is no other practical need to do
+this"). Unless Waze's log showed the first link start navigation (`startNavigationFlow … caller=DeepLink`), the dock restarts Waze (root) and sends the
+link again, and an amber notice at the top stays until navigation is seen working — that log line, or the place appearing in Waze's recent places
+(Trip) — then turns green "✓ Waze is navigating…" for 4 s. Tap the notice to close it. A single send never does anything. Lines tagged `NAV`.
 
 ## Dock map + mini-map, round 2 (2026-11-17)
 
