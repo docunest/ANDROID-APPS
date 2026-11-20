@@ -127,6 +127,7 @@ object WifiDoctor {
     @Volatile var lastGatewayAnswerAt = 0L
     /** Internet checks failed in a row (each 30 s apart, or sooner on demand). */
     @Volatile var failedChecks = 0
+    @Volatile var firstFailedAt = 0L
     private val checkPool = java.util.concurrent.Executors.newFixedThreadPool(3)
     private val checker = Handler(HandlerThread("wifi-checks").apply { start() }.looper)
     private const val CHECK_EVERY_MS = 30_000L
@@ -155,10 +156,11 @@ object WifiDoctor {
         val fHot = checkPool.submit<Int?> { gw?.let { ping(it, waitSec = 2) } }
         val fDns = checkPool.submit<Int?> { dnsServer?.let { dnsCheck(net, it) } }
         val fHttp = checkPool.submit<Pair<Int?, Int?>> { httpCheck(net) }
-        fun <T> Future<T>.within(): T? = runCatching { get(8, java.util.concurrent.TimeUnit.SECONDS) }.getOrNull()
-        val hotMs = fHot.within()
-        val dnsMs = fDns.within()
-        val (httpCode, httpMs) = fHttp.within() ?: (null to null)
+        // Wait as long as each check's own timeouts allow (they run at the same time): a slow answer isn't "none".
+        fun <T> Future<T>.within(sec: Long): T? = runCatching { get(sec, java.util.concurrent.TimeUnit.SECONDS) }.getOrNull()
+        val hotMs = fHot.within(5)
+        val dnsMs = fDns.within(9)
+        val (httpCode, httpMs) = fHttp.within(26) ?: (null to null)
         if (hotMs != null) lastGatewayAnswerAt = now()
         // The 2 s pinger counts too: one lost ping isn't "the iPhone isn't answering".
         val hotOk = if (gw == null) null else hotMs != null || now() - lastGatewayAnswerAt < 6_000
@@ -167,20 +169,24 @@ object WifiDoctor {
         checks = c
         verdict = v
         checkedAt = now()
-        failedChecks = if (v.internet == false) failedChecks + 1 else 0
+        if (v.internet == false) { if (failedChecks == 0) firstFailedAt = now(); failedChecks++ } else failedChecks = 0
         DebugLog.change("WIFI", "verdict", v.level.name,
             "${v.text} · iPhone ${hotMs ?: "—"} ms · DNS ${dnsMs ?: "—"} ms · web ${httpCode ?: "—"} in ${httpMs ?: "—"} ms")
         worker.post { applyProbe(v.internet != false) }
     }
 
     /** A random, never-cached name straight to the hotspot's DNS server over Wi-Fi: answered only through the iPhone's data. */
-    private fun dnsCheck(net: Network, server: java.net.InetAddress): Int? = runCatching {
+    /** A fresh DNS lookup through the hotspot: two queries (3 s, then 4 s) — one lost UDP packet isn't "no internet". */
+    private fun dnsCheck(net: Network, server: java.net.InetAddress): Int? =
+        dnsOnce(net, server, 3_000) ?: dnsOnce(net, server, 4_000)
+
+    private fun dnsOnce(net: Network, server: java.net.InetAddress, timeoutMs: Int): Int? = runCatching {
         val id = (Math.random() * 65535).toInt()
         val name = "dock" + java.lang.Long.toString((Math.random() * 1e12).toLong(), 36) + ".connectivitycheck.gstatic.com"
         val q = NetVerdict.dnsQuery(id, name)
         java.net.DatagramSocket().use { s ->
             net.bindSocket(s)
-            s.soTimeout = 4_000
+            s.soTimeout = timeoutMs
             val start = System.nanoTime()
             s.send(java.net.DatagramPacket(q, q.size, server, 53))
             val buf = ByteArray(512)
@@ -194,21 +200,29 @@ object WifiDoctor {
         }
     }.getOrNull()
 
-    /** generate_204 over Wi-Fi: (HTTP code, ms). Generous timeouts — a 1–3 s reply on a slow link still counts. */
-    private fun httpCheck(net: Network): Pair<Int?, Int?> = runCatching {
+    /**
+     * generate_204 over Wi-Fi: (HTTP code, ms from the first try). HTTPS first; if that fails, plain HTTP to a
+     * second Google host (no TLS handshake) — one slow or lost request isn't "no internet". ≤ 12 s each.
+     */
+    private fun httpCheck(net: Network): Pair<Int?, Int?> {
         val start = System.nanoTime()
-        val c = net.openConnection(URL("https://www.google.com/generate_204")) as HttpURLConnection
+        val a = httpOnce(net, "https://www.google.com/generate_204")
+        val code = if (a == 204) a else httpOnce(net, "http://connectivitycheck.gstatic.com/generate_204") ?: a
+        return code to ((System.nanoTime() - start) / 1_000_000).toInt()
+    }
+
+    private fun httpOnce(net: Network, url: String): Int? = runCatching {
+        val c = net.openConnection(URL(url)) as HttpURLConnection
         c.connectTimeout = 6_000
         c.readTimeout = 6_000
         c.instanceFollowRedirects = false
         c.useCaches = false
         try {
-            val code = c.responseCode
-            code to ((System.nanoTime() - start) / 1_000_000).toInt()
+            c.responseCode
         } finally {
             c.disconnect()
         }
-    }.getOrDefault(null to null)
+    }.getOrNull()
 
     /** Android's auto-join state for the hotspot (root), e.g. "PERMANENTLY_DISABLED NO_INTERNET_PERMANENT". */
     @Volatile var joinStatus: String? = null
@@ -351,7 +365,7 @@ object WifiDoctor {
         if (silent >= 12_000 && now() - checkedAt > 10_000) checkNow()
         if (silent < STALL_MS || hasRoot != true) return
         // Pings can be lost while the internet works: two failed checks in a row, the last one fresh.
-        if (now() - checkedAt > 15_000 || verdict.internet != false || failedChecks < 2) return
+        if (now() - checkedAt > 15_000 || verdict.internet != false || failedChecks < 2 || now() - firstFailedAt < 20_000) return
         val name = ssid ?: return
         WifiAsk.ask(app, "stall", "$name isn't answering",
             "Wi-Fi is still connected, but the iPhone hasn't answered for ${silent / 1000} s and the internet check failed " +
@@ -852,8 +866,9 @@ object WifiDoctor {
                 val iface = gatewayIface
                 val cmd = if (iface != null) listOf("ping6", "-c", "1", "-W", "$waitSec", "$host%$iface") else listOf("ping", "-c", "1", "-W", "$waitSec", host)
                 val p = ProcessBuilder(cmd).redirectErrorStream(true).start()
-                val out = p.inputStream.bufferedReader().readText()
-                p.waitFor() to out
+                // Hard limit: a ping that hangs is killed and counted as one lost answer, never as a long silence.
+                if (!p.waitFor(waitSec + 2L, java.util.concurrent.TimeUnit.SECONDS)) { p.destroyForcibly(); return null }
+                p.exitValue() to p.inputStream.bufferedReader().readText()
             }
             val (code, out) = r.getOrNull() ?: (-1 to (r.exceptionOrNull()?.message ?: ""))
             if (code == 0) return Regex("time=([\\d.]+)").find(out)?.groupValues?.get(1)?.toFloatOrNull()?.toInt() ?: 0

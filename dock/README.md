@@ -144,6 +144,10 @@ Evidence (log of 15 Nov, ~4 h): 12 drops started by the dock itself — 7 "hotsp
 - While Wi-Fi is already down, joining one of your networks stays automatic (nothing to cut) — but now only after Android had 5 s to rejoin
   by itself (was 2 s), and never while Android is mid-handshake (unless stuck there 20 s). Wi-Fi off/on while down stays every third try.
 - "Reconnect now" / "Kick Bluetooth now" on the doctor screen still act at once (you asked).
+- Each internet check is no longer single-shot: DNS = 2 queries (3 s + 4 s), web = HTTPS generate_204 then plain-HTTP generate_204 on a
+  second host (≤ 12 s each), and the checks are waited for as long as their own timeouts (it used to give up after 8 s while the web request
+  could take 12 s, so a slow-but-working answer counted as a failure). The two failed checks must be ≥ 20 s apart. The 2-s ping has a hard
+  3-s limit (a hung ping process counts as one lost answer).
 
 ## Waze ignoring a sent link (2026-11-17, changed 2026-11-20)
 
