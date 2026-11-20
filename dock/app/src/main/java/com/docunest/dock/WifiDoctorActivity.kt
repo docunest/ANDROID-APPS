@@ -102,7 +102,8 @@ class WifiDoctorActivity : Activity() {
             startActivity(Intent(this, DebugActivity::class.java).putExtra(DebugActivity.EXTRA_TAG, "WIFI"))
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
         left.addView(space(6))
-        left.addView(toggle("Reconnect by itself (root: forces a rejoin, clears Android's no-internet block, restarts Wi-Fi if needed)", WifiDoctor.autoFix) { WifiDoctor.autoFix = it })
+        left.addView(toggle("Rejoin by itself when Wi-Fi is already down (root). A working connection is never cut without asking you: " +
+            "reconnecting a silent hotspot, switching Starlink ↔ iPhone and the Bluetooth kick all show a card first (asked ${WifiAsk.asked}×, yes ${WifiAsk.yes}× this session)", WifiDoctor.autoFix) { WifiDoctor.autoFix = it })
         left.addView(toggle("Bluetooth kick: no hotspot visible but the iPhone is on the car's Bluetooth → Bluetooth off/on, so the iPhone's automation switches its hotspot on (never during a call)", WifiDoctor.btKick) { WifiDoctor.btKick = it })
         left.addView(toggle("Keep-alive ping to the hotspot every 15 s (may stop the iPhone dropping an idle hotspot)", WifiDoctor.keepAlive) { WifiDoctor.keepAlive = it })
         left.addView(label("Internet is checked once a minute through Wi-Fi (~1 KB of iPhone data).", 12f, Palette.MUTED))

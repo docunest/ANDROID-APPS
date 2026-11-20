@@ -130,6 +130,21 @@ Seen on the unit (build 72, Foz do Arelho → Caldas): the screen is **1280×480
 - **Tap or hold the middle** opens the big view (2× the old size, square, over Waze; the dock map no longer opens). Pinch and pan; tap a place to get a card with Waze and ✕. Buttons: ✕ · ◎ follow · Auto · City · Autobahn · Explore · Hide. A tap outside or 60 s idle closes it.
 - **Hide** switches the mini-map off. The **"Mini-map" icon** in the app list (`MiniMapLauncher`) brings it back.
 
+## Wi-Fi doctor asks before cutting a connection (2026-11-20)
+
+Owner: "way too aggressive … keeps disconnecting my phone … if you are dropping the Wi-Fi connection, it must be confirmed by me".
+Evidence (log of 15 Nov, ~4 h): 12 drops started by the dock itself — 7 "hotspot stalled" forced reconnects, 5 Starlink ↔ iPhone switches.
+
+- `WifiAsk.kt`: everything that would cut a working connection — forced reconnect of a quiet hotspot, switching Starlink ↔ iPhone, the
+  Bluetooth off/on kick — shows a card at the top ("why" + **Leave it** / **Reconnect**). Nothing happens without Yes. The card closes by itself
+  (nothing done) when the problem clears or after 90 s; the same question isn't asked again within 5 min, and "Leave it" silences that kind
+  for 30 min. Every question and answer is in the debug log (`WIFI ASK [...]`).
+- Asking needs stronger evidence than the old automatic reconnect: iPhone silent ≥ 60 s (was 45 s) **and** the internet check failed twice in a
+  row (was once). Lost pings, a slow web check or a short internet gap don't count.
+- While Wi-Fi is already down, joining one of your networks stays automatic (nothing to cut) — but now only after Android had 5 s to rejoin
+  by itself (was 2 s), and never while Android is mid-handshake (unless stuck there 20 s). Wi-Fi off/on while down stays every third try.
+- "Reconnect now" / "Kick Bluetooth now" on the doctor screen still act at once (you asked).
+
 ## Waze ignoring a sent link (2026-11-17, changed 2026-11-20)
 
 Three links sent to a running Waze were taken (`Sending to native`) but never run; after the owner killed Waze the same link worked at once.

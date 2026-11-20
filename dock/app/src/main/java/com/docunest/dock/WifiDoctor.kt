@@ -61,7 +61,7 @@ object WifiDoctor {
     /** "Ours" seen this recently counts as visible. */
     private const val VISIBLE_MS = 6_000L
     /** The hotspot silent this long (and a fresh check failing) before a forced reconnect. */
-    private const val STALL_MS = 45_000L
+    private const val STALL_MS = 60_000L
     /** Automatic network switches per session before Dock stops and asks. */
     private const val MAX_JUMPS = 3
     /** Stay on a network this long after switching to it (unless it doesn't work). */
@@ -125,6 +125,8 @@ object WifiDoctor {
     @Volatile var verdict = NetVerdict.Verdict(NetVerdict.Level.UNKNOWN, "Not checked yet")
     @Volatile var checkedAt = 0L
     @Volatile var lastGatewayAnswerAt = 0L
+    /** Internet checks failed in a row (each 30 s apart, or sooner on demand). */
+    @Volatile var failedChecks = 0
     private val checkPool = java.util.concurrent.Executors.newFixedThreadPool(3)
     private val checker = Handler(HandlerThread("wifi-checks").apply { start() }.looper)
     private const val CHECK_EVERY_MS = 30_000L
@@ -165,6 +167,7 @@ object WifiDoctor {
         checks = c
         verdict = v
         checkedAt = now()
+        failedChecks = if (v.internet == false) failedChecks + 1 else 0
         DebugLog.change("WIFI", "verdict", v.level.name,
             "${v.text} · iPhone ${hotMs ?: "—"} ms · DNS ${dnsMs ?: "—"} ms · web ${httpCode ?: "—"} in ${httpMs ?: "—"} ms")
         worker.post { applyProbe(v.internet != false) }
@@ -336,41 +339,40 @@ object WifiDoctor {
         checkNow()
     }
 
-    private var lastStallFix = 0L
-    /** Pause between forced reconnects: 5 min, doubled (to 30 min) while they keep not helping. */
-    private var stallGap = 5 * 60_000L
-
     /**
-     * Wi-Fi still says "connected" but the iPhone hasn't answered for 20 s: force a reconnect to it
-     * (root join; if it still doesn't answer, Wi-Fi off/on and join). Once a minute at most.
+     * Wi-Fi still says "connected" but the iPhone hasn't answered for [STALL_MS] AND the internet check
+     * failed twice in a row: ASK the owner whether to reconnect ([WifiAsk], owner 2026-11-20 — never
+     * by itself any more). Lost pings or one failed check (tunnel, slow web) are not enough.
      */
     private fun recoverStall() {
         val gw = gateway ?: return
         val silent = now() - maxOf(lastGatewayAnswerAt, upSince)
         // 12 s quiet: get a fresh verdict from the parallel checks before deciding anything.
         if (silent >= 12_000 && now() - checkedAt > 10_000) checkNow()
-        // The iPhone hotspot goes quiet for 20–45 s and comes back by itself; reconnecting every
-        // minute just cut a usable link (owner, 2026-11-15: 7 forced reconnects in 10 min, none helped).
-        if (silent < STALL_MS || now() - lastStallFix < stallGap || hasRoot != true) return
-        // Pings can be lost while the internet works: only a fresh check that also fails counts as a stall.
-        if (now() - checkedAt > 15_000 || verdict.internet != false) return
-        // Stalling again soon after the last reconnect: that one didn't help — wait longer next time.
-        stallGap = if (lastStallFix > 0 && now() - lastStallFix < 15 * 60_000L) (stallGap * 2).coerceAtMost(30 * 60_000L) else 5 * 60_000L
-        lastStallFix = now()
+        if (silent < STALL_MS || hasRoot != true) return
+        // Pings can be lost while the internet works: two failed checks in a row, the last one fresh.
+        if (now() - checkedAt > 15_000 || verdict.internet != false || failedChecks < 2) return
         val name = ssid ?: return
-        DebugLog.log("WIFI", "stall: $name connected but $gw silent for ${silent / 1000} s — forcing a reconnect")
-        lastAction = "iPhone not answering for ${silent / 1000} s — reconnecting"
-        record("Hotspot stalled", "Wi-Fi stayed connected but the iPhone didn't answer for ${silent / 1000} s — Dock forced a reconnect.", Fault.IPHONE, silent)
-        actions.post {
-            val r = rootWifi("enable", name)
-            DebugLog.log("WIFI", "stall: rejoin $name → ${r ?: "root refused"}")
-            Thread.sleep(10_000)
-            if (now() - lastGatewayAnswerAt > 60_000) {
-                DebugLog.log("WIFI", "stall: still silent — Wi-Fi off/on, then join $name")
-                Root.run("svc wifi disable", "sleep 2", "svc wifi enable", "sleep 5")
-                rootWifi("enable", name)
+        WifiAsk.ask(app, "stall", "$name isn't answering",
+            "Wi-Fi is still connected, but the iPhone hasn't answered for ${silent / 1000} s and the internet check failed " +
+                "$failedChecks× in a row. Reconnect to $name? (It often comes back by itself.)",
+            "Reconnect",
+            stillWrong = { connected && ssid == name && now() - lastGatewayAnswerAt > 20_000 },
+        ) {
+            DebugLog.log("WIFI", "stall: owner said reconnect — $name, $gw silent")
+            lastAction = "Reconnecting to $name (you asked)"
+            record("Hotspot stalled", "Wi-Fi stayed connected but the iPhone didn't answer — you chose to reconnect.", Fault.IPHONE, silent)
+            actions.post {
+                val r = rootWifi("enable", name)
+                DebugLog.log("WIFI", "stall: rejoin $name → ${r ?: "root refused"}")
+                Thread.sleep(10_000)
+                if (now() - lastGatewayAnswerAt > 60_000) {
+                    DebugLog.log("WIFI", "stall: still silent — Wi-Fi off/on, then join $name")
+                    Root.run("svc wifi disable", "sleep 2", "svc wifi enable", "sleep 5")
+                    rootWifi("enable", name)
+                }
+                refreshNow()
             }
-            refreshNow()
         }
     }
 
@@ -551,15 +553,32 @@ object WifiDoctor {
             if (hasRoot != true) DebugLog.change("WIFI", "prefer", "$to visible but no root to switch from $current")
             return
         }
+        // Owner 2026-11-20: switching drops the connection — ask first, never by itself.
         lastPreferSwitch = now()
-        preferTries++
-        if (p == null) jumps += now()
-        DebugLog.log("WIFI", "prefer: on $current (${if (connected) rssi else "—"} dBm, internet $works) but $to is visible (${visible[to]} dBm) — switching (try $preferTries)")
-        lastAction = "Switching to $to (preferred over $current)"
-        actions.post {
-            val r = rootWifi("enable", to)
-            DebugLog.log("WIFI", "prefer: switch to $to → ${r ?: "root refused"}")
-            refreshNow()
+        val why = when {
+            !connected -> "Wi-Fi is down and $to is in range (${visible[to]} dBm)."
+            works == false -> "$current's internet check failed${if (failedChecks > 1) " $failedChecks× in a row" else ""}; $to is in range (${visible[to]} dBm)."
+            else -> "$to is in range (${visible[to]} dBm) and is preferred over $current (${rssi} dBm, internet ${if (works == true) "works" else "not checked"})."
+        }
+        if (!connected) {
+            // Nothing working to cut: just join.
+            preferTries++
+            actions.post { DebugLog.log("WIFI", "prefer: (down) join $to → ${rootWifi("enable", to) ?: "root refused"}"); refreshNow() }
+            return
+        }
+        WifiAsk.ask(app, "switch", "Switch Wi-Fi to $to?", "$why Switching drops ${current ?: "this network"} for a few seconds.",
+            "Switch to $to",
+            stillWrong = { connected && ssid == current && now() - oursSeenAt < VISIBLE_MS && oursVisible.containsKey(to) },
+        ) {
+            preferTries++
+            if (p == null) jumps += now()
+            DebugLog.log("WIFI", "prefer: owner said switch $current → $to")
+            lastAction = "Switching to $to (you asked)"
+            actions.post {
+                val r = rootWifi("enable", to)
+                DebugLog.log("WIFI", "prefer: switch to $to → ${r ?: "root refused"}")
+                refreshNow()
+            }
         }
     }
 
@@ -747,8 +766,17 @@ object WifiDoctor {
                 lastRestartAt = now()
             }
             WifiPlan.Action.BT_KICK -> {
-                changed()
-                lastAction += " → " + BtKick.kick()
+                if (force) { changed(); lastAction += " → " + BtKick.kick() }
+                else {
+                    // Bluetooth off/on also cuts the phone's Bluetooth: ask first (owner 2026-11-20).
+                    val asked = WifiAsk.ask(app, "btkick", "No hotspot in range",
+                        "Wi-Fi has been down ${GpsDoctor.duration(down)} and none of your networks is visible. " +
+                            "Switch Bluetooth off and on so the iPhone turns its hotspot on? (Bluetooth drops for a few seconds.)",
+                        "Kick Bluetooth",
+                        stillWrong = { !connected && now() - oursSeenAt > VISIBLE_MS },
+                    ) { lastAction = "Bluetooth kick (you asked): " + BtKick.kick(); changed() }
+                    lastAction += if (asked) " → asking you first" else " → not asking again yet"
+                }
             }
         }
         changed()

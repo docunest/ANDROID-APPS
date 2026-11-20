@@ -25,28 +25,36 @@ class WifiPlanTest {
         }.filter { it.second != Action.NONE }
     }
 
-    @Test fun hotspotVisibleIsJoinedWithin2sThenRetriedFast() {
+    @Test fun hotspotVisibleIsJoinedWithin5sThenRetriedFast() {
         val s = Sim()
         val start = s.t
         val acts = s.run(80, visible = true)
         assertEquals(Action.JOIN, acts[0].second)
-        assertEquals(2, ((acts[0].first - start) / 1000).toInt())
+        assertEquals(5, ((acts[0].first - start) / 1000).toInt()) // Android gets 5 s to rejoin by itself
         val secs = acts.map { ((it.first - start) / 1000).toInt() }
-        assertEquals(listOf(2, 8, 18, 38, 68), secs)
+        assertEquals(listOf(5, 11, 21, 41, 71), secs)
         assertEquals(Action.RESTART_AND_JOIN, acts[2].second) // every third try
     }
 
     @Test fun midHandshakeIsLeftAlone() {
         val s = Sim()
-        s.run(3, visible = true) // first join at 2 s
+        s.run(6, visible = true) // first join at 5 s
         assertTrue(s.run(6, visible = true, joining = true).isEmpty())
+    }
+
+    @Test fun androidRejoiningByItselfIsNeverInterrupted() {
+        // Owner 2026-11-20: too many drops. Android mid-handshake right after a drop: no forced join at all…
+        val s = Sim()
+        assertTrue(s.run(15, visible = true, joining = true).isEmpty())
+        // …unless it's stuck mid-join for 20 s.
+        assertEquals(Action.JOIN, s.run(10, visible = true, joining = true).first().second)
     }
 
     @Test fun connectedResetsEverything() {
         val s = Sim()
         s.run(20, visible = true)
         s.run(1, connected = true)
-        assertEquals(1, s.run(3, visible = true).size)
+        assertEquals(1, s.run(6, visible = true).size)
         assertEquals(1, s.p.joinTries)
     }
 
@@ -77,7 +85,7 @@ class WifiPlanTest {
     @Test fun hotspotAppearsAfterKickAndGetsJoined() {
         val s = Sim()
         s.run(12)
-        val acts = s.run(5, visible = true)
+        val acts = s.run(6, visible = true)
         assertEquals(Action.JOIN, acts.single().second)
     }
 
