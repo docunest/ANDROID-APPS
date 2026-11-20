@@ -25,36 +25,38 @@ class WifiPlanTest {
         }.filter { it.second != Action.NONE }
     }
 
-    @Test fun hotspotVisibleIsJoinedWithin5sThenRetriedFast() {
+    @Test fun hotspotVisibleIsJoinedWithin2sThenRetriedFast() {
         val s = Sim()
         val start = s.t
         val acts = s.run(80, visible = true)
         assertEquals(Action.JOIN, acts[0].second)
-        assertEquals(5, ((acts[0].first - start) / 1000).toInt()) // Android gets 5 s to rejoin by itself
         val secs = acts.map { ((it.first - start) / 1000).toInt() }
-        assertEquals(listOf(5, 11, 21, 41, 71), secs)
-        assertEquals(Action.RESTART_AND_JOIN, acts[2].second) // every third try
+        assertEquals(listOf(2, 8, 18, 38, 68), secs)
+        // No automatic Wi-Fi off/on any more (2026-11-20).
+        assertTrue(acts.all { it.second == Action.JOIN })
     }
 
     @Test fun midHandshakeIsLeftAlone() {
         val s = Sim()
-        s.run(6, visible = true) // first join at 5 s
+        s.run(3, visible = true) // first join at 2 s
         assertTrue(s.run(6, visible = true, joining = true).isEmpty())
     }
 
-    @Test fun androidRejoiningByItselfIsNeverInterrupted() {
-        // Owner 2026-11-20: too many drops. Android mid-handshake right after a drop: no forced join at all…
+    @Test fun flickeringScanListDoesNotDelayTheFirstJoin() {
+        // 2026-11-20 on the unit: visible 1 s, gone 2 s, visible 1 s … — build 77 waited 43 s.
         val s = Sim()
-        assertTrue(s.run(15, visible = true, joining = true).isEmpty())
-        // …unless it's stuck mid-join for 20 s.
-        assertEquals(Action.JOIN, s.run(10, visible = true, joining = true).first().second)
+        val start = s.t
+        val acts = mutableListOf<Pair<Long, Action>>()
+        repeat(4) { acts += s.run(1, visible = true); acts += s.run(2, visible = false, bt = false) }
+        assertEquals(Action.JOIN, acts.first().second)
+        assertTrue("joined within 6 s", acts.first().first - start <= 6_000)
     }
 
     @Test fun connectedResetsEverything() {
         val s = Sim()
         s.run(20, visible = true)
         s.run(1, connected = true)
-        assertEquals(1, s.run(6, visible = true).size)
+        assertEquals(1, s.run(3, visible = true).size)
         assertEquals(1, s.p.joinTries)
     }
 
@@ -85,7 +87,7 @@ class WifiPlanTest {
     @Test fun hotspotAppearsAfterKickAndGetsJoined() {
         val s = Sim()
         s.run(12)
-        val acts = s.run(6, visible = true)
+        val acts = s.run(5, visible = true)
         assertEquals(Action.JOIN, acts.single().second)
     }
 

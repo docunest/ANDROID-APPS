@@ -141,8 +141,13 @@ Evidence (log of 15 Nov, ~4 h): 12 drops started by the dock itself — 7 "hotsp
   for 30 min. Every question and answer is in the debug log (`WIFI ASK [...]`).
 - Asking needs stronger evidence than the old automatic reconnect: iPhone silent ≥ 60 s (was 45 s) **and** the internet check failed twice in a
   row (was once). Lost pings, a slow web check or a short internet gap don't count.
-- While Wi-Fi is already down, joining one of your networks stays automatic (nothing to cut) — but now only after Android had 5 s to rejoin
-  by itself (was 2 s), and never while Android is mid-handshake (unless stuck there 20 s). Wi-Fi off/on while down stays every third try.
+- While Wi-Fi is already down, joining one of your networks stays automatic (nothing to cut): 2 s after the hotspot first shows up, then
+  6 / 10 / 20 / 30 s. (Build 77–78 waited for 5 s of *continuous* visibility and deferred to Android; on the unit the hotspot flickers in and
+  out of the scan list every few seconds, so the first join came 43 s after a drop instead of 3 s. Reverted in build 79; a flicker no longer
+  restarts the wait, "visible" = seen in the last 12 s.) No automatic Wi-Fi off/on any more.
+- **Something on the unit switches Wi-Fi off** ~65 s into a drop and every ~65 s after (seen 17, 18, 20 Nov; ~6 s off each time, which empties
+  the scan list). Not Dock: Dock logs every Wi-Fi restart it does and none happened then. When Wi-Fi goes off and Dock didn't do it, Dock now
+  logs Android's own lines about it (`setWifiEnabled package=…`, SelfRecovery, WifiController) to name the culprit.
 - "Reconnect now" / "Kick Bluetooth now" on the doctor screen still act at once (you asked).
 - Each internet check is no longer single-shot: DNS = 2 queries (3 s + 4 s), web = HTTPS generate_204 then plain-HTTP generate_204 on a
   second host (≤ 12 s each), and the checks are waited for as long as their own timeouts (it used to give up after 8 s while the web request

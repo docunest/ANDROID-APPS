@@ -59,7 +59,8 @@ object WifiDoctor {
     private const val WEAK_RSSI = -80
     private const val NOTIFY_ID = 7
     /** "Ours" seen this recently counts as visible. */
-    private const val VISIBLE_MS = 6_000L
+    /** 12 s (was 6): scan results arrive every few seconds and the iPhone is sometimes missing from one. */
+    private const val VISIBLE_MS = 12_000L
     /** The hotspot silent this long (and a fresh check failing) before a forced reconnect. */
     private const val STALL_MS = 60_000L
     /** Automatic network switches per session before Dock stops and asks. */
@@ -240,6 +241,8 @@ object WifiDoctor {
     private lateinit var app: Context
     private var started = false
     private var lastRestartAt = 0L
+    /** When Dock itself last switched Wi-Fi off/on (so an off we didn't do is noticed and traced). */
+    @Volatile private var ourToggleAt = 0L
     private var lastRssis = ArrayDeque<Int>()
     private var notified = false
     /** A drop is waiting for its reason; a quick comeback is noted here until it's written. */
@@ -382,7 +385,7 @@ object WifiDoctor {
                 Thread.sleep(10_000)
                 if (now() - lastGatewayAnswerAt > 60_000) {
                     DebugLog.log("WIFI", "stall: still silent — Wi-Fi off/on, then join $name")
-                    Root.run("svc wifi disable", "sleep 2", "svc wifi enable", "sleep 5")
+                    ourToggleAt = now(); Root.run("svc wifi disable", "sleep 2", "svc wifi enable", "sleep 5")
                     rootWifi("enable", name)
                 }
                 refreshNow()
@@ -417,7 +420,16 @@ object WifiDoctor {
         val wm = app.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val wasConnected = connected
+        val wasEnabled = enabled
         enabled = wm.isWifiEnabled
+        if (wasEnabled && !enabled && now() - ourToggleAt > 15_000) {
+            // Seen 2026-11-17/18/20: Wi-Fi switched OFF ~65 s into a drop and every ~65 s after — not by Dock.
+            // Find out who: Android logs every setWifiEnabled with the calling package.
+            actions.post {
+                val who = Root.output("logcat -b main,system -d -t 3000 | grep -iE 'setWifiEnabled|SelfRecovery|WifiController|setWifiApEnabled|wifi.*(disable|enable)' | tail -n 12")
+                DebugLog.log("WIFI", "Wi-Fi switched OFF — not by Dock. Android's log: " + (who?.trim()?.lines()?.joinToString(" ⏎ ")?.take(2500)?.ifEmpty { "(nothing matching)" } ?: "(log not readable)"))
+            }
+        }
         val net = wifiNetwork(cm)
         @Suppress("DEPRECATION") val info = wm.connectionInfo
         connected = net != null || (info != null && info.supplicantState == SupplicantState.COMPLETED && info.networkId != -1)
@@ -732,6 +744,7 @@ object WifiDoctor {
         if (!enabled) {
             if (root) {
                 lastAction = "Switching Wi-Fi on"
+                DebugLog.log("WIFI", "Wi-Fi is off — switching it on")
                 Root.run("svc wifi enable")
             } else lastAction = "Wi-Fi is off — switch it on (no root)"
             return
@@ -771,7 +784,7 @@ object WifiDoctor {
                 }
                 if (step.action == WifiPlan.Action.RESTART_AND_JOIN) {
                     changed()
-                    Root.run("svc wifi disable", "sleep 2", "svc wifi enable", "sleep 4")
+                    ourToggleAt = now(); Root.run("svc wifi disable", "sleep 2", "svc wifi enable", "sleep 4")
                 }
                 joinStatus = rootWifi("status", t)?.substringAfter(' ', "")?.takeIf { it.isNotBlank() }
                 if (joinStatus?.contains("DISABLED") == true) lastAction += " (Android had blocked it: $joinStatus — clearing)"

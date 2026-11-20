@@ -40,7 +40,7 @@ class WifiPlan {
     private var downSince = -1L
     private var visibleSince = -1L
     private var lastJoinAt = -1L
-    private var joiningSince = -1L
+    private var lastVisibleAt = -1L
     var joinTries = 0
         private set
     private var lastKickAt = -1L
@@ -49,28 +49,29 @@ class WifiPlan {
 
     fun next(i: Input): Step {
         if (i.connected) {
-            downSince = -1; visibleSince = -1; joinTries = 0; kicks = 0; lastJoinAt = -1; joiningSince = -1
+            downSince = -1; visibleSince = -1; joinTries = 0; kicks = 0; lastJoinAt = -1; lastVisibleAt = -1
             return Step(Action.NONE, "connected")
         }
         if (downSince < 0) downSince = i.t
         if (!i.wifiOn) return Step(Action.NONE, "Wi-Fi is off")
 
         if (i.oursVisible) {
+            // First sighting in this drop. A flicker in the scan results (seen 2026-11-20: visible / not visible
+            // every few seconds) must not restart the wait — that delayed the first join to 43 s.
             if (visibleSince < 0) visibleSince = i.t
-            // Android rejoining by itself (handshake / address): don't interrupt it with our own join —
-            // unless it has been stuck mid-join for [STUCK_JOINING_MS].
-            if (i.joining) { if (joiningSince < 0) joiningSince = i.t } else joiningSince = -1
-            if (i.joining && i.t - joiningSince < STUCK_JOINING_MS && (lastJoinAt < 0 || i.t - lastJoinAt < JOINING_GRACE_MS))
-                return Step(Action.NONE, "joining…")
+            lastVisibleAt = i.t
+            // Our own join is mid-handshake: give it a moment.
+            if (i.joining && lastJoinAt >= 0 && i.t - lastJoinAt < JOINING_GRACE_MS) return Step(Action.NONE, "joining…")
             val wait = if (joinTries == 0) FIRST_JOIN_MS else JOIN_GAPS_MS[minOf(joinTries - 1, JOIN_GAPS_MS.size - 1)]
             val since = if (lastJoinAt < 0) i.t - visibleSince else i.t - lastJoinAt
             if (since < wait) return Step(Action.NONE, "visible — joining in ${(wait - since + 999) / 1000} s")
             joinTries++
             lastJoinAt = i.t
-            return if (joinTries % 3 == 0) Step(Action.RESTART_AND_JOIN, "try $joinTries: Wi-Fi off/on, then join")
-            else Step(Action.JOIN, "try $joinTries: join")
+            // No automatic Wi-Fi off/on any more (2026-11-20): something on the unit already restarts Wi-Fi
+            // ~65 s into a drop, and every restart wipes the scan list and any join in progress.
+            return Step(Action.JOIN, "try $joinTries: join")
         }
-        visibleSince = -1
+        if (visibleSince >= 0 && i.t - lastVisibleAt > VISIBLE_FORGET_MS) visibleSince = -1
 
         if (i.btPhone != true) return Step(Action.NONE, if (i.btPhone == null) "no hotspot visible" else "no hotspot visible, no iPhone on Bluetooth")
         if (i.inCall) return Step(Action.NONE, "no hotspot visible — in a call, not touching Bluetooth")
@@ -84,11 +85,12 @@ class WifiPlan {
     }
 
     companion object {
-        /** Android usually rejoins by itself within a few seconds: give it that first (was 2 s). */
-        const val FIRST_JOIN_MS = 5_000L
+        /** 2 s after the hotspot shows up (5 s in build 77–78 made reconnects slower — back to 2 s). */
+        const val FIRST_JOIN_MS = 2_000L
+        /** Not seen for this long = gone (a scan-list flicker doesn't count). */
+        const val VISIBLE_FORGET_MS = 20_000L
         val JOIN_GAPS_MS = longArrayOf(6_000, 10_000, 20_000, 30_000)
         const val JOINING_GRACE_MS = 8_000L
-        const val STUCK_JOINING_MS = 20_000L
         const val KICK_AFTER_MS = 10_000L
         const val BT_SETTLE_MS = 25_000L
         val KICK_GAPS_MS = longArrayOf(45_000, 60_000, 120_000, 300_000)
