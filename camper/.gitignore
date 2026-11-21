@@ -1,0 +1,7 @@
+.gradle/
+.kotlin/
+build/
+app/build/
+local.properties
+# device keys never go in the repo
+*.env

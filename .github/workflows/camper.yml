@@ -1,0 +1,47 @@
+name: Camper APK
+
+# Builds the camper control app (wall screen + always-on controller) and publishes it as release
+# "camper-v<run>" with camper.apk attached. Protocol unit tests must pass first.
+on:
+  push:
+    paths:
+      - "camper/**"
+      - ".github/workflows/camper.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Protocol tests (Tuya 3.5, Midea V3 vectors)
+        working-directory: camper
+        run: ./gradlew testDebugUnitTest --no-daemon
+
+      - name: Build APK
+        working-directory: camper
+        run: ./gradlew assembleRelease --no-daemon -PbuildNumber=${{ github.run_number }}
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp camper/app/build/outputs/apk/release/app-release.apk camper.apk
+          gh release create "camper-v${{ github.run_number }}" camper.apk \
+            --target "${{ github.sha }}" \
+            --title "Camper build ${{ github.run_number }}" \
+            --notes "Branch ${{ github.ref_name }}, commit ${{ github.sha }}."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: camper-apk
+          path: camper.apk

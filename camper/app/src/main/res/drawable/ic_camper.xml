@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Half dial with the amber "on" arc, like the home screen. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
+    <path android:fillColor="#FF0A0C0F" android:pathData="M0,0h48v48h-48z" />
+    <path android:strokeColor="#FF2A3038" android:strokeWidth="5" android:strokeLineCap="round"
+        android:pathData="M14,8 A18,18 0 0,1 14,40" />
+    <path android:strokeColor="#FFFFB547" android:strokeWidth="5" android:strokeLineCap="round"
+        android:pathData="M28,12 A18,18 0 0,1 32,24" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M32,24m-3,0a3,3 0 1,0 6,0a3,3 0 1,0 -6,0" />
+</vector>
