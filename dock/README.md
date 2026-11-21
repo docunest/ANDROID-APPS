@@ -30,7 +30,7 @@ docunest/MapPal `lib/dock/`).
 - **Wi-Fi lost toast**: the moment Wi-Fi drops, a message says whether it was coming — "Reception was bad before the drop (-79 dBm, ping 340 ms, 30 % lost)" or "Link was fine right up to the drop (…) — sudden: the iPhone ended it or Android hung up". Also saved with the drop in the Wi-Fi doctor's history.
 - **New place from the phone** → a card appears at the top of the screen: tap the name or **Drive · Waze** (one tap), or **Maps** for Google Maps. The button shows an amber count of unseen places.
 - **Places list and map**: pinned and unseen first, then recently used, each with the area map (tap = show on the big map), direction + distance and town. Up front (list, map pins, slide menu): places **within 300 km, or sent / driven to in the last 3 days** (the next destination can be far ahead); pinned and new always. The rest sits under **Show more** — all history kept. Where the car is comes from the GPS, else the position saved before the last cold start (it used to be "unknown" after a cold start, which put every place on the map). Area maps are made once per place while there's signal (≤ 4 OSM tiles, same User-Agent as the map) and kept as files, so they show offline (`Thumbs.kt`).
-- **Waze** is opened with a name search (`waze.com/ul?q=<name, address>&navigate=yes`) — the only form that started a route with the place's name in field tests (Waze test #9; 🧪 buttons still in the app for now). Tap the **name** = navigate (Waze; set Google Maps as default in ⚙ if ever wanted). Small **G** = the place in Google Maps beside Waze (split screen). Area map picture (or 🗺) = show on map. Long-press = pin / delete / open original link.
+- **Waze** is opened with a name search (`waze.com/ul?q=<name, address>&navigate=yes`) — the only form that started a route with the place's name in field tests (Waze test #9; the 🧪 Waze test screen is gone). Tap the **name** = navigate (Waze; set Google Maps as default in ⚙ if ever wanted). Small **G** = the place in Google Maps beside Waze (split screen). Area map picture (or 🗺) = show on map. Long-press = pin / delete / open original link.
 - **Split screen — Waze keeps the route, Google Maps beside it**:
   - Slide menu → **Google Maps** always opens in split screen next to Waze.
   - New place card → **Preview**: the place in Google Maps beside Waze (name, photos, reviews) without touching the route; **Drive · Waze** when you decide.
@@ -265,6 +265,16 @@ KSW-Q userdebug v4.2.9 (BMW NBT/EVO UI), Android 10, Snapdragon msm8953, SELinux
 4. ⚙ → **Server**: your MapPal address (e.g. `https://xxx.vercel.app`) → **Save + test**. The token is pre-filled.
 
 After that it **updates itself** — silently on the rooted head unit; on a phone without root Android shows one "Update" tap the first time (after allowing "install unknown apps" for Dock once), and on Android 12+ later updates are silent too: every push to `dock/` builds a new release, and the app installs it silently with root (`pm install -r`) as soon as the dock starts (car on) and every 3 minutes — tap the version badge in the dock window to check now. Signing key `dock/dock.keystore` is committed on purpose so every build installs over the previous one.
+
+### Updates over metered mobile data
+
+The head unit's internet is the iPhone hotspot, so every byte counts:
+
+- **Small APK:** R8 code and resource shrinking are on (`app/build.gradle.kts`, keep rules for the `app_process` helpers in `app/proguard-rules.pro`). The map library's PNG icons are swapped for tiny vectors, and offline map-archive readers are left out (`OsmTiles.kt`). A full download was 1.53 MB and is now about **330 KB** (`dock.apk.gz`; `dock.apk` is about 665 KB because its code is stored uncompressed, see below). CI fails if `dock.apk` goes over 850 KB.
+- **Updates are patches:** each release also carries `dock-from-<build>.patch` for the 3 builds before it. The unit downloads only the patch and rebuilds the exact new APK from the one it has installed (`DeltaPatch.kt`, made by `tools/delta.py`). Measured: a text fix is about **5 KB** and a small feature about **60 KB**. If the patch is missing, for another build or wrong in any way (SHA-256 check), it downloads `dock.apk.gz`, then `dock.apk`. Older releases' patches are deleted, so the update check stays small.
+- **Proof before publishing:** CI rebuilds every patch with the app's own patcher (`DeltaPatchTest`), and only then creates the release.
+- README-only changes don't build a release.
+- The version badge (and Debug log, `UPD`) shows what an update cost, e.g. "Updated to v123 (patch 6 KB)".
 
 Set repo variable `MAPPAL_URL` (Settings → Secrets and variables → Actions → Variables) to bake the server address into builds.
 

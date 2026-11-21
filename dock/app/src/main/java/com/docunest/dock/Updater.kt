@@ -9,6 +9,7 @@ import android.os.Build
 import android.provider.Settings
 import org.json.JSONArray
 import java.io.File
+import java.util.zip.GZIPInputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -16,6 +17,8 @@ import java.net.URL
  * Self-update: GitHub Actions publishes every build as a release tagged
  * "dock-v<build>" in [BuildConfig.UPDATE_REPO] with dock.apk attached. If a
  * newer one exists, download it and `pm install -r` it as root — no prompt.
+ * Download, cheapest first (metered hotspot): `dock-from-<build>.patch`
+ * against the installed APK, else `dock.apk.gz`, else `dock.apk`.
  * Without root (a phone) Android's installer is used: one tap the first
  * time, silent afterwards on Android 12+.
  * The app restarts itself afterwards (BootReceiver: MY_PACKAGE_REPLACED).
@@ -72,9 +75,9 @@ object Updater {
 
     /**
      * Download with timeouts (a stalled hotspot used to hang the updater for good on "Downloading…"),
-     * to a temp file, checked against Content-Length, up to 3 tries.
+     * to a temp file, checked against Content-Length, up to 3 tries. False if the release has no such file (404).
      */
-    private fun download(url: String, file: File) {
+    private fun download(url: String, file: File): Boolean {
         var last: Exception? = null
         repeat(3) { attempt ->
             val tmp = File(file.path + ".part")
@@ -84,6 +87,7 @@ object Updater {
                 c.readTimeout = 30_000
                 c.instanceFollowRedirects = true
                 try {
+                    if (c.responseCode == 404) return false
                     if (c.responseCode != 200) throw java.io.IOException("HTTP ${c.responseCode}")
                     val expected = c.contentLengthLong
                     c.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it) } }
@@ -92,8 +96,8 @@ object Updater {
                     c.disconnect()
                 }
                 if (!tmp.renameTo(file)) throw java.io.IOException("can't move the download")
-                DebugLog.log("UPD", "downloaded ${file.length()} bytes")
-                return
+                DebugLog.log("UPD", "downloaded ${file.length()} bytes: ${url.substringAfterLast('/')}")
+                return true
             } catch (e: Exception) {
                 last = e
                 tmp.delete()
@@ -103,6 +107,43 @@ object Updater {
         }
         throw last ?: java.io.IOException("download failed")
     }
+
+    /**
+     * Cheapest first, as the hotspot's mobile data is metered: a patch from the
+     * installed build ([DeltaPatch], a few KB), else dock.apk.gz, else dock.apk.
+     * Returns what it cost, e.g. "patch 6 KB".
+     */
+    private fun downloadCheapest(context: Context, rel: Release, file: File): String {
+        val dir = rel.apkUrl.substringBeforeLast('/')
+        val tmp = File(file.path + ".dl")
+        try {
+            if (download("$dir/dock-from-${BuildConfig.VERSION_CODE}.patch", tmp)) {
+                try {
+                    val base = File(context.applicationInfo.sourceDir).readBytes()
+                    file.outputStream().buffered().use { out -> tmp.inputStream().use { DeltaPatch.apply(base, it, out) } }
+                    return "patch ${kb(tmp.length())}"
+                } catch (e: Exception) {
+                    file.delete()
+                    DebugLog.log("UPD", "patch unusable (${e.message}) — full download")
+                }
+            }
+            if (download("$dir/dock.apk.gz", tmp)) {
+                try {
+                    GZIPInputStream(tmp.inputStream()).use { input -> file.outputStream().use { input.copyTo(it) } }
+                    return "full ${kb(tmp.length())}"
+                } catch (e: Exception) {
+                    file.delete()
+                    DebugLog.log("UPD", "dock.apk.gz unusable (${e.message}) — plain APK")
+                }
+            }
+            if (!download(rel.apkUrl, file)) throw java.io.IOException("dock.apk missing")
+            return "full ${kb(file.length())}"
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    private fun kb(bytes: Long) = "${(bytes + 1023) / 1024} KB"
 
     fun latest(context: Context): Release? {
         val prefs = Prefs(context)
@@ -144,8 +185,9 @@ object Updater {
         set(true, "Downloading v${rel.build}…")
         DebugLog.log("UPD", "v${BuildConfig.VERSION_CODE} → v${rel.build}: downloading")
         val file = File(context.cacheDir, "dock-${rel.build}.apk")
-        runCatching { download(rel.apkUrl, file) }.onFailure { return done("Download failed: ${it.message}") }
-        set(true, "Installing v${rel.build}…")
+        val got = runCatching { downloadCheapest(context, rel, file) }
+            .getOrElse { file.delete(); return done("Download failed: ${it.message}") }
+        set(true, "Installing v${rel.build} ($got)…")
         // pm can't always read app-private files: stage in /data/local/tmp.
         val staged = "/data/local/tmp/dock-update.apk"
         DebugLog.log("UPD", "installing v${rel.build} via ${Root.via()}")
@@ -153,7 +195,7 @@ object Updater {
         DebugLog.log("UPD", "install v${rel.build}: ${if (ok) "ok — restarting" else "FAILED"}")
         if (ok) {
             file.delete()
-            return done("Updated to v${rel.build} — restarting")
+            return done("Updated to v${rel.build} ($got) — restarting")
         }
         prefs.failedBuild = rel.build
         prefs.failedAt = System.currentTimeMillis()

@@ -27,7 +27,6 @@ import android.widget.TextView
 import android.widget.Toast
 import com.docunest.dock.MiniModes.Mode
 import org.osmdroid.config.Configuration as OsmConfig
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
@@ -147,8 +146,7 @@ class MiniMap(private val ctx: Context, private val wm: WindowManager) {
             elevation = dp(6).toFloat()
         }
         setDiscShape(round = true)
-        map = MapView(ctx).apply {
-            setTileSource(TileSourceFactory.MAPNIK)
+        map = MapView(ctx, OsmTiles.provider(ctx)).apply {
             setMultiTouchControls(false)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             isTilesScaledToDpi = true
