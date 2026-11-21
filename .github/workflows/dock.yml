@@ -69,7 +69,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp delta/dock.apk dock.apk
-          gh release create "dock-v${{ github.run_number }}" dock.apk dock.apk.gz delta/dock-from-*.patch \
+          shopt -s nullglob
+          patches=(delta/dock-from-*.patch)   # none when the last builds were too different (e.g. before delta updates)
+          gh release create "dock-v${{ github.run_number }}" dock.apk dock.apk.gz "${patches[@]}" \
             --target "${{ github.sha }}" \
             --title "Dock build ${{ github.run_number }}" \
             --notes "Branch ${{ github.ref_name }}, commit ${{ github.sha }}. Installed automatically on the head unit within minutes (or tap the version badge). Downloads only a patch when the unit is on one of the last 3 builds."
