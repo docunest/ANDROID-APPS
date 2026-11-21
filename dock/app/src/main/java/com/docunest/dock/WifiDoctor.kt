@@ -22,6 +22,7 @@ import android.os.SystemClock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
+import java.util.concurrent.Future
 import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -40,19 +41,33 @@ import java.util.Locale
  *    Android doesn't rejoin, makes it rejoin (root): first a "user" connect
  *    through [RootWifi] — that also clears Android 10's no-internet block,
  *    which otherwise keeps it off the hotspot for good after a tunnel —
- *    then Wi-Fi off/on + connect. Up to [MAX_RESTARTS] tries per drop,
- *    further apart each time. If the hotspot isn't visible there's nothing
+ *    then Wi-Fi off/on + connect — retried fast, no give-up ([WifiPlan]). If the hotspot isn't visible there's nothing
  *    to join: it says so (open Personal Hotspot on the iPhone) and keeps
  *    scanning.
  *  - with root, stops Android hanging up when the hotspot misses a few
  *    ARP replies (`cmd wifi set-ipreach-disconnect disabled`).
+ *
+ * Aggressive since 2026-11-08 (owner: only the iPhone hotspots + Starlink
+ * are used, battery doesn't matter): "ours" = every saved network (root) +
+ * every one we've been on; scans every 2 s while down and joins whichever
+ * of ours shows up, retrying fast ([WifiPlan]); none visible but an iPhone
+ * on the car's Bluetooth → [BtKick] (Bluetooth off/on fires the iPhone's
+ * "turn hotspot on" automation).
  */
 object WifiDoctor {
     private const val KEEP = 60
-    private const val MAX_RESTARTS = 3
     private const val WEAK_RSSI = -80
-    private const val PROBE_EVERY_MS = 60_000L
     private const val NOTIFY_ID = 7
+    /** "Ours" seen this recently counts as visible. */
+    /** 12 s (was 6): scan results arrive every few seconds and the iPhone is sometimes missing from one. */
+    private const val VISIBLE_MS = 12_000L
+    /** The hotspot silent this long (and a fresh check failing) before a forced reconnect. */
+    private const val STALL_MS = 60_000L
+    /** Automatic network switches per session before Dock stops and asks. */
+    private const val MAX_JUMPS = 3
+    /** Stay on a network this long after switching to it (unless it doesn't work). */
+    private const val DWELL_MS = 2 * 60_000L
+    private const val ASK_ID = 8
     private const val CHANNEL = "wifi"
 
     enum class Fault(val label: String) {
@@ -81,18 +96,153 @@ object WifiDoctor {
     @Volatile var noInternetSince = 0L
     /** Rejoin attempts during this drop. */
     @Volatile var restarts = 0
+    /** Our networks: every saved one (root) + every one we've been on. */
+    @Volatile var ours: Set<String> = emptySet()
+    /** Ours seen in scans: SSID → dBm, and when any of them was last seen. */
+    @Volatile var oursVisible: Map<String, Int> = emptyMap()
+    @Volatile var oursSeenAt = 0L
+    private val plan = WifiPlan()
+    /** Rolling ping meter to the hotspot (every 2 s while connected) — the "about to drop" hint. */
+    val link = LinkQuality()
+    /** What the link looked like just before the last drop (for the toast and the event). */
+    @Volatile var beforeLastDrop: String? = null
+    private val pingThread = HandlerThread("wifi-ping").apply { start() }
+    private val pinger = Handler(pingThread.looper)
+    private val pingLoop = object : Runnable {
+        override fun run() {
+            val gw = gateway
+            if (connected && gw != null) {
+                val ms = ping(gw, waitSec = 1)
+                if (ms != null) lastGatewayAnswerAt = now()
+                link.add(ms)
+                DebugLog.change("WIFI", "link", link.level().name, "${link.text()} · via $rttMethod to $gw")
+            }
+            pinger.postDelayed(this, 2_000L)
+        }
+    }
+    // --- Parallel checks: the iPhone link and the real internet, every 30 s and on demand ---------------
+    /** Last result of the three checks and what they mean ([NetVerdict]). */
+    @Volatile var checks: NetVerdict.Checks? = null
+    @Volatile var verdict = NetVerdict.Verdict(NetVerdict.Level.UNKNOWN, "Not checked yet")
+    @Volatile var checkedAt = 0L
+    @Volatile var lastGatewayAnswerAt = 0L
+    /** Internet checks failed in a row (each 30 s apart, or sooner on demand). */
+    @Volatile var failedChecks = 0
+    @Volatile var firstFailedAt = 0L
+    private val checkPool = java.util.concurrent.Executors.newFixedThreadPool(3)
+    private val checker = Handler(HandlerThread("wifi-checks").apply { start() }.looper)
+    private const val CHECK_EVERY_MS = 30_000L
+    private val checkLoop = object : Runnable {
+        override fun run() {
+            runCatching { runChecks() }
+            checker.removeCallbacks(this)
+            checker.postDelayed(this, CHECK_EVERY_MS)
+        }
+    }
+
+    /** Check now (doctor opened, "Check now", just connected). */
+    fun checkNow() {
+        if (!::app.isInitialized) return
+        checker.removeCallbacks(checkLoop)
+        checker.post(checkLoop)
+    }
+
+    /** iPhone ping, fresh DNS lookup and a real web request — all three at the same time, ~5 s at most. */
+    private fun runChecks() {
+        val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val net = wifiNetwork(cm)
+        if (!connected || net == null) return
+        val gw = gateway
+        val dnsServer = cm.getLinkProperties(net)?.dnsServers?.firstOrNull { it is java.net.Inet4Address } ?: cm.getLinkProperties(net)?.dnsServers?.firstOrNull()
+        val fHot = checkPool.submit<Int?> { gw?.let { ping(it, waitSec = 2) } }
+        val fDns = checkPool.submit<Int?> { dnsServer?.let { dnsCheck(net, it) } }
+        val fHttp = checkPool.submit<Pair<Int?, Int?>> { httpCheck(net) }
+        // Wait as long as each check's own timeouts allow (they run at the same time): a slow answer isn't "none".
+        fun <T> Future<T>.within(sec: Long): T? = runCatching { get(sec, java.util.concurrent.TimeUnit.SECONDS) }.getOrNull()
+        val hotMs = fHot.within(5)
+        val dnsMs = fDns.within(9)
+        val (httpCode, httpMs) = fHttp.within(26) ?: (null to null)
+        if (hotMs != null) lastGatewayAnswerAt = now()
+        // The 2 s pinger counts too: one lost ping isn't "the iPhone isn't answering".
+        val hotOk = if (gw == null) null else hotMs != null || now() - lastGatewayAnswerAt < 6_000
+        val c = NetVerdict.Checks(hotMs, hotOk, dnsMs, if (dnsServer == null) null else dnsMs != null, httpMs, httpCode)
+        val v = NetVerdict.classify(c)
+        checks = c
+        verdict = v
+        checkedAt = now()
+        if (v.internet == false) { if (failedChecks == 0) firstFailedAt = now(); failedChecks++ } else failedChecks = 0
+        DebugLog.change("WIFI", "verdict", v.level.name,
+            "${v.text} · iPhone ${hotMs ?: "—"} ms · DNS ${dnsMs ?: "—"} ms · web ${httpCode ?: "—"} in ${httpMs ?: "—"} ms")
+        worker.post { applyProbe(v.internet != false) }
+    }
+
+    /** A random, never-cached name straight to the hotspot's DNS server over Wi-Fi: answered only through the iPhone's data. */
+    /** A fresh DNS lookup through the hotspot: two queries (3 s, then 4 s) — one lost UDP packet isn't "no internet". */
+    private fun dnsCheck(net: Network, server: java.net.InetAddress): Int? =
+        dnsOnce(net, server, 3_000) ?: dnsOnce(net, server, 4_000)
+
+    private fun dnsOnce(net: Network, server: java.net.InetAddress, timeoutMs: Int): Int? = runCatching {
+        val id = (Math.random() * 65535).toInt()
+        val name = "dock" + java.lang.Long.toString((Math.random() * 1e12).toLong(), 36) + ".connectivitycheck.gstatic.com"
+        val q = NetVerdict.dnsQuery(id, name)
+        java.net.DatagramSocket().use { s ->
+            net.bindSocket(s)
+            s.soTimeout = timeoutMs
+            val start = System.nanoTime()
+            s.send(java.net.DatagramPacket(q, q.size, server, 53))
+            val buf = ByteArray(512)
+            val reply = java.net.DatagramPacket(buf, buf.size)
+            while (true) {
+                s.receive(reply)
+                if (NetVerdict.dnsAnswered(id, buf, reply.length)) return@runCatching ((System.nanoTime() - start) / 1_000_000).toInt()
+                if (reply.length >= 2 && ((buf[0].toInt() and 0xff shl 8) or (buf[1].toInt() and 0xff)) == id) return@runCatching null // SERVFAIL etc.
+            }
+            @Suppress("UNREACHABLE_CODE") null
+        }
+    }.getOrNull()
+
+    /**
+     * generate_204 over Wi-Fi: (HTTP code, ms from the first try). HTTPS first; if that fails, plain HTTP to a
+     * second Google host (no TLS handshake) — one slow or lost request isn't "no internet". ≤ 12 s each.
+     */
+    private fun httpCheck(net: Network): Pair<Int?, Int?> {
+        val start = System.nanoTime()
+        val a = httpOnce(net, "https://www.google.com/generate_204")
+        val code = if (a == 204) a else httpOnce(net, "http://connectivitycheck.gstatic.com/generate_204") ?: a
+        return code to ((System.nanoTime() - start) / 1_000_000).toInt()
+    }
+
+    private fun httpOnce(net: Network, url: String): Int? = runCatching {
+        val c = net.openConnection(URL(url)) as HttpURLConnection
+        c.connectTimeout = 6_000
+        c.readTimeout = 6_000
+        c.instanceFollowRedirects = false
+        c.useCaches = false
+        try {
+            c.responseCode
+        } finally {
+            c.disconnect()
+        }
+    }.getOrNull()
+
     /** Android's auto-join state for the hotspot (root), e.g. "PERMANENTLY_DISABLED NO_INTERNET_PERMANENT". */
     @Volatile var joinStatus: String? = null
     @Volatile var lastAction = ""
     @Volatile var hasRoot: Boolean? = null
 
     private val thread = HandlerThread("wifi-doctor").apply { start() }
+    /** Fast: reads the Wi-Fi state every 2 s / on every Android event. Never blocks on network or root. */
     private val worker = Handler(thread.looper)
+    /** Slow work (internet check, joins, Bluetooth kicks, root calls) — so the state above never lags behind it. */
+    private val actions = Handler(HandlerThread("wifi-actions").apply { start() }.looper)
+    @Volatile private var acting = false
+    private var lastRootCheck = 0L
     private val main = Handler(Looper.getMainLooper())
     private lateinit var app: Context
     private var started = false
     private var lastRestartAt = 0L
-    private var lastProbeAt = 0L
+    /** When Dock itself last switched Wi-Fi off/on (so an off we didn't do is noticed and traced). */
+    @Volatile private var ourToggleAt = 0L
     private var lastRssis = ArrayDeque<Int>()
     private var notified = false
     /** A drop is waiting for its reason; a quick comeback is noted here until it's written. */
@@ -117,12 +267,31 @@ object WifiDoctor {
     var keepAlive: Boolean
         get() = sp().getBoolean("wifiKeepAlive", true)
         set(v) { sp().edit().putBoolean("wifiKeepAlive", v).apply(); changed() }
+    var btKick: Boolean
+        get() = sp().getBoolean("wifiBtKick", true)
+        set(v) { sp().edit().putBoolean("wifiBtKick", v).apply(); changed() }
+
+    private fun learned(): Set<String> = sp().getString("wifiKnown", "")!!.split('\n').filter { it.isNotBlank() }.toSet()
+
+    /** Saved networks (root) + learned ones. Worker thread. */
+    private fun loadOurs() {
+        val saved = if (hasRoot == true) {
+            val apk = app.applicationInfo.sourceDir
+            Root.output("CLASSPATH=$apk app_process /system/bin ${RootWifi::class.java.name} list")
+                ?.lines()?.lastOrNull { it.startsWith("list") }?.removePrefix("list")?.trim()
+                ?.split(',')?.filter { it.isNotBlank() }
+                ?.mapNotNull { h -> runCatching { String(h.chunked(2).map { it.toInt(16).toByte() }.toByteArray(), Charsets.UTF_8) }.getOrNull() }
+                .orEmpty()
+        } else emptyList()
+        ours = saved.toSet() + learned() + listOfNotNull(target)
+    }
 
     private val tick = object : Runnable {
         override fun run() {
             runCatching { check() }
             worker.removeCallbacks(this)
-            worker.postDelayed(this, if (connected && internet != false) 15_000L else 5_000L)
+            // Every 2 s: reading the state is cheap now that the slow work runs on [actions].
+            worker.postDelayed(this, 2_000L)
         }
     }
 
@@ -131,6 +300,7 @@ object WifiDoctor {
         if (started) return
         started = true
         app = context.applicationContext
+        BtKick.start(app)
         val kick = { worker.removeCallbacks(tick); worker.post(tick) }
         app.registerReceiver(object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
@@ -153,24 +323,86 @@ object WifiDoctor {
                 },
             )
         }
-        worker.post {
-            hasRoot = Root.run("id")
+        actions.post { rootSetup() }
+        worker.post(tick)
+        pinger.post(pingLoop)
+        checker.postDelayed(checkLoop, 5_000)
+    }
+
+    /**
+     * Root (su or the head unit's own adb — [Root]) and what needs it once per boot. Re-run every minute
+     * until it works: adb may only be ready (or allowed) a little after the dock starts.
+     */
+    private fun rootSetup() {
+        val was = hasRoot
+        hasRoot = Root.run("id")
+        if (hasRoot == was) return
+        DebugLog.log("WIFI", "root: ${if (hasRoot == true) "yes, via ${Root.via()}" else "NO (${Root.via()}) — forced rejoin, Wi-Fi restart and Bluetooth kick won't work"}")
+        if (hasRoot == true) {
+            Diagnostics.runAsync(app) // once root works: the full scan into the debug log
             // Scans more often than 4 per 2 min (Android's default throttle).
-            if (hasRoot == true) Root.run(
+            Root.run(
                 "settings put global wifi_scan_throttle_enabled 0",
                 // Android 10 drops Wi-Fi when the gateway misses ARP replies — iPhones in power save do. Not kept across reboots.
                 "cmd wifi set-ipreach-disconnect disabled",
             )
         }
-        worker.post(tick)
+        loadOurs()
+    }
+
+    /** Re-read the state now (a doctor / debug screen just opened) and run the internet checks. */
+    fun refreshNow() {
+        if (::app.isInitialized) worker.post { runCatching { check() } }
+        checkNow()
+    }
+
+    /**
+     * Wi-Fi still says "connected" but the iPhone hasn't answered for [STALL_MS] AND the internet check
+     * failed twice in a row: ASK the owner whether to reconnect ([WifiAsk], owner 2026-11-20 — never
+     * by itself any more). Lost pings or one failed check (tunnel, slow web) are not enough.
+     */
+    private fun recoverStall() {
+        val gw = gateway ?: return
+        val silent = now() - maxOf(lastGatewayAnswerAt, upSince)
+        // 12 s quiet: get a fresh verdict from the parallel checks before deciding anything.
+        if (silent >= 12_000 && now() - checkedAt > 10_000) checkNow()
+        if (silent < STALL_MS || hasRoot != true) return
+        // Pings can be lost while the internet works: two failed checks in a row, the last one fresh.
+        if (now() - checkedAt > 15_000 || verdict.internet != false || failedChecks < 2 || now() - firstFailedAt < 20_000) return
+        val name = ssid ?: return
+        WifiAsk.ask(app, "stall", "$name isn't answering",
+            "Wi-Fi is still connected, but the iPhone hasn't answered for ${silent / 1000} s and the internet check failed " +
+                "$failedChecks× in a row. Reconnect to $name? (It often comes back by itself.)",
+            "Reconnect",
+            stillWrong = { connected && ssid == name && now() - lastGatewayAnswerAt > 20_000 },
+        ) {
+            DebugLog.log("WIFI", "stall: owner said reconnect — $name, $gw silent")
+            lastAction = "Reconnecting to $name (you asked)"
+            record("Hotspot stalled", "Wi-Fi stayed connected but the iPhone didn't answer — you chose to reconnect.", Fault.IPHONE, silent)
+            actions.post {
+                val r = rootWifi("enable", name)
+                DebugLog.log("WIFI", "stall: rejoin $name → ${r ?: "root refused"}")
+                Thread.sleep(10_000)
+                if (now() - lastGatewayAnswerAt > 60_000) {
+                    DebugLog.log("WIFI", "stall: still silent — Wi-Fi off/on, then join $name")
+                    ourToggleAt = now(); Root.run("svc wifi disable", "sleep 2", "svc wifi enable", "sleep 5")
+                    rootWifi("enable", name)
+                }
+                refreshNow()
+            }
+        }
     }
 
     /** "Reconnect now" on the doctor screen: skip the waiting. */
-    fun reconnectNow() = worker.post {
-        restarts = 0
-        lastRestartAt = 0L
-        runCatching { fix(force = true) }
-        check()
+    fun reconnectNow() = actions.post {
+        runCatching { act(force = true) }
+        refreshNow()
+    }
+
+    /** "Kick Bluetooth now" on the doctor screen (testing the iPhone automation). */
+    fun kickNow() = actions.post {
+        lastAction = "Bluetooth kick: " + BtKick.kick()
+        changed()
     }
 
     // --- The check ------------------------------------------------------------
@@ -181,10 +413,23 @@ object WifiDoctor {
 
     @SuppressLint("MissingPermission")
     private fun check() {
+        if (hasRoot != true && now() - lastRootCheck > 60_000) {
+            lastRootCheck = now()
+            actions.post { rootSetup() }
+        }
         val wm = app.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val wasConnected = connected
+        val wasEnabled = enabled
         enabled = wm.isWifiEnabled
+        if (wasEnabled && !enabled && now() - ourToggleAt > 15_000) {
+            // Seen 2026-11-17/18/20: Wi-Fi switched OFF ~65 s into a drop and every ~65 s after — not by Dock.
+            // Find out who: Android logs every setWifiEnabled with the calling package.
+            actions.post {
+                val who = Root.output("logcat -b main,system -d -t 3000 | grep -iE 'setWifiEnabled|SelfRecovery|WifiController|setWifiApEnabled|wifi.*(disable|enable)' | tail -n 12")
+                DebugLog.log("WIFI", "Wi-Fi switched OFF — not by Dock. Android's log: " + (who?.trim()?.lines()?.joinToString(" ⏎ ")?.take(2500)?.ifEmpty { "(nothing matching)" } ?: "(log not readable)"))
+            }
+        }
         val net = wifiNetwork(cm)
         @Suppress("DEPRECATION") val info = wm.connectionInfo
         connected = net != null || (info != null && info.supplicantState == SupplicantState.COMPLETED && info.networkId != -1)
@@ -193,6 +438,10 @@ object WifiDoctor {
             if (name != null) {
                 ssid = name
                 if (name != target) sp().edit().putString("wifiTarget", name).apply()
+                if (name !in learned()) {
+                    sp().edit().putString("wifiKnown", (learned() + name).joinToString("\n")).apply()
+                    ours = ours + name
+                }
             }
             rssi = info?.rssi ?: 0
             linkMbps = info?.linkSpeed ?: 0
@@ -210,18 +459,159 @@ object WifiDoctor {
             }
         }
 
+        val lastSsid = lastConnectedSsid
+        if (connected) lastConnectedSsid = ssid
+        DebugLog.change("WIFI", "connection", if (!enabled) "OFF" else if (connected) "connected ${ssid ?: "?"}" else "DOWN",
+            "rssi $rssi · ours visible ${oursVisible.keys} · bt ${BtKick.phoneConnected()} ${BtKick.phone ?: ""}")
         when {
             connected && !wasConnected -> back()
+            connected && wasConnected && ssid != lastSsid && lastSsid != null -> DebugLog.log("WIFI", "switched network: $lastSsid → $ssid")
             !connected && wasConnected -> lost()
             !connected && downSince == 0L -> downSince = now() // started while down
         }
 
+        BtKick.judge(oursSeenAt, connected)
         if (connected) {
-            val probeDue = internet != true || now() - lastProbeAt > PROBE_EVERY_MS
-            if (keepAlive || probeDue) gatewayPingMs = gateway?.let { ping(it) }
-            if (probeDue && net != null) {
-                lastProbeAt = now()
-                val ok = probe(net)
+            preferIPhone(wm)
+            synchronized(plan) { plan.next(WifiPlan.Input(now(), true, false, false, null, -1, false, enabled)) } // resets the plan
+            gatewayPingMs = link.avgMs() // the 2 s pinger keeps this current
+            // Internet: the parallel checks run every 30 s on their own thread ([runChecks]).
+            recoverStall()
+        } else {
+            gatewayPingMs = null
+            internet = null
+            @Suppress("DEPRECATION") runCatching { wm.startScan() }
+            if (autoFix && !acting) {
+                acting = true
+                actions.post { try { runCatching { act(force = false) } } finally { acting = false } }
+            }
+            notifyLost()
+        }
+        changed()
+    }
+
+    private var lastConnectedSsid: String? = null
+    private var lastPreferScan = 0L
+    private var lastPreferSwitch = 0L
+    private var preferTries = 0
+    /** Automatic network switches this session (since the dock started or the owner last answered). */
+    private val jumps = mutableListOf<Long>()
+    /** After [MAX_JUMPS] switches: no more automatic ones until the owner answers. */
+    @Volatile private var held = false
+    /** The owner's choice for this session (null = automatic). */
+    @Volatile var pinned: String? = null
+        private set
+
+    /** The owner answered "which network?": [ssid] to stay on it this session, null to keep switching automatically. */
+    fun ownerChoice(ssid: String?) {
+        held = false
+        jumps.clear()
+        pinned = ssid
+        DebugLog.log("WIFI", if (ssid == null) "owner: keep switching automatically (counter reset)" else "owner: stay on $ssid this session")
+        lastAction = if (ssid == null) "Switching networks automatically" else "Staying on $ssid (your choice)"
+        if (::app.isInitialized) runCatching { (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(ASK_ID) }
+        refreshNow()
+    }
+
+    /** "Wi-Fi switched 3 times — which network?" with one button per answer. */
+    private fun askOwner(current: String?, other: String) {
+        DebugLog.log("WIFI", "prefer: ${jumps.size} switches this session — holding on ${current ?: "—"}, asking the owner (other: $other)")
+        lastAction = "Switched ${jumps.size}× — holding on ${current ?: "this network"}, waiting for your choice"
+        runCatching {
+            val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.createNotificationChannel(NotificationChannel(CHANNEL, "Wi-Fi lost", NotificationManager.IMPORTANCE_LOW))
+            fun choice(code: Int, ssid: String?, label: String) = Notification.Action.Builder(
+                null as android.graphics.drawable.Icon?, label,
+                PendingIntent.getService(app, code, Intent(app, DockService::class.java).setAction(DockService.ACTION_WIFI_CHOICE)
+                    .putExtra(DockService.EXTRA_SSID, ssid ?: ""), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT),
+            ).build()
+            val b = Notification.Builder(app, CHANNEL)
+                .setSmallIcon(R.drawable.ic_dock)
+                .setContentTitle("Wi-Fi switched ${jumps.size}× — which network?")
+                .setStyle(Notification.BigTextStyle().bigText("${current ?: "This network"} and $other keep trading places. Dock stays where it is until you choose."))
+                .setContentIntent(PendingIntent.getActivity(app, 21, Intent(app, WifiDoctorActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE))
+            current?.let { b.addAction(choice(22, it, "Stay on $it")) }
+            b.addAction(choice(23, other, "Use $other"))
+            b.addAction(choice(24, null, "Keep switching"))
+            nm.notify(ASK_ID, b.build())
+        }
+    }
+    /** Networks whose internet just failed (a Starlink with no internet): not switched to for 10 min. */
+    private val failedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /**
+     * Owner's rule ([WifiPrefer], 2026-11-15): a working Starlink with a decent signal first, the iPhone
+     * hotspot when Starlink is away, weak or without internet. Scans every 6 s; retries every 20 s, every
+     * 60 s after 3 tries that didn't stick. Uses the root join ([RootWifi] "enable": user-connect, others off).
+     */
+    private fun preferIPhone(wm: WifiManager) {
+        val current = ssid
+        if (now() - lastPreferScan > 6_000) {
+            lastPreferScan = now()
+            @Suppress("DEPRECATION") runCatching { wm.startScan() }
+        }
+        val visible = if (now() - oursSeenAt < VISIBLE_MS) oursVisible else emptyMap()
+        // What we're on: its signal, and whether its internet worked at the last check (≤ 90 s old).
+        val works = if (connected && now() - checkedAt < 90_000) verdict.internet else null
+        if (connected && current != null && works == false) failedAt[current] = now()
+        val avoid = failedAt.filterValues { now() - it < 10 * 60_000L }.keys
+        val auto = WifiPrefer.switchTo(current, visible, if (connected) rssi else null, works, avoid)
+        // The owner chose a network for this session: only ever go back to it.
+        val p = pinned
+        val to = if (p != null) p.takeIf { current != p && visible.containsKey(it) } else auto
+        if (to == null) {
+            preferTries = 0
+            return
+        }
+        if (p == null) {
+            if (held) return
+            // Just switched: give it 2 min before judging again — unless it isn't working at all.
+            if (now() - lastPreferSwitch < DWELL_MS && connected && works != false) return
+            // Third automatic switch this session: stop and ask the owner instead.
+            if (jumps.size >= MAX_JUMPS) {
+                held = true
+                askOwner(current, to)
+                return
+            }
+        }
+        val gap = if (preferTries < 3) 20_000L else 60_000L
+        if (now() - lastPreferSwitch < gap || hasRoot != true) {
+            if (hasRoot != true) DebugLog.change("WIFI", "prefer", "$to visible but no root to switch from $current")
+            return
+        }
+        // Owner 2026-11-20: switching drops the connection — ask first, never by itself.
+        lastPreferSwitch = now()
+        val why = when {
+            !connected -> "Wi-Fi is down and $to is in range (${visible[to]} dBm)."
+            works == false -> "$current's internet check failed${if (failedChecks > 1) " $failedChecks× in a row" else ""}; $to is in range (${visible[to]} dBm)."
+            else -> "$to is in range (${visible[to]} dBm) and is preferred over $current (${rssi} dBm, internet ${if (works == true) "works" else "not checked"})."
+        }
+        if (!connected) {
+            // Nothing working to cut: just join.
+            preferTries++
+            actions.post { DebugLog.log("WIFI", "prefer: (down) join $to → ${rootWifi("enable", to) ?: "root refused"}"); refreshNow() }
+            return
+        }
+        WifiAsk.ask(app, "switch", "Switch Wi-Fi to $to?", "$why Switching drops ${current ?: "this network"} for a few seconds.",
+            "Switch to $to",
+            stillWrong = { connected && ssid == current && now() - oursSeenAt < VISIBLE_MS && oursVisible.containsKey(to) },
+        ) {
+            preferTries++
+            if (p == null) jumps += now()
+            DebugLog.log("WIFI", "prefer: owner said switch $current → $to")
+            lastAction = "Switching to $to (you asked)"
+            actions.post {
+                val r = rootWifi("enable", to)
+                DebugLog.log("WIFI", "prefer: switch to $to → ${r ?: "root refused"}")
+                refreshNow()
+            }
+        }
+    }
+
+    /** Internet check result (worker thread). */
+    private fun applyProbe(ok: Boolean) {
+        if (!connected) return
+        run {
                 if (internet != false && !ok) {
                     noInternetSince = now()
                 } else if (internet == false && ok && noInternetSince > 0) {
@@ -235,18 +625,14 @@ object WifiDoctor {
                     noInternetSince = 0L
                 }
                 internet = ok
-            }
-        } else {
-            gatewayPingMs = null
-            internet = null
-            @Suppress("DEPRECATION") runCatching { wm.startScan() }
-            if (autoFix) fix(force = false)
-            notifyLost()
+                DebugLog.change("WIFI", "internet", if (ok) "works" else "NONE", "hotspot ping ${gatewayPingMs ?: "no answer"} ms · ${ssid}")
         }
         changed()
     }
 
     private fun back() {
+        lastGatewayAnswerAt = now() // fresh link: give the pinger its 20 s
+        checkNow()
         val down = if (downSince > 0) now() - downSince else 0L
         if (down > 0) {
             val how = if (restarts > 0) "after Dock forced a rejoin ($restarts×)" else "by itself"
@@ -256,9 +642,9 @@ object WifiDoctor {
         downSince = 0L
         upSince = now()
         restarts = 0
+        link.clear()
         lastAction = ""
         internet = null
-        lastProbeAt = 0L
         if (notified) {
             (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIFY_ID)
             notified = false
@@ -266,6 +652,17 @@ object WifiDoctor {
     }
 
     private fun lost() {
+        // How the link was just before: justified by bad reception, or sudden? Toast now, stored with the event.
+        val (justified, before) = LinkQuality.beforeDrop(lastRssis.lastOrNull() ?: rssi, lastRssis.maxOrNull() ?: rssi, link)
+        beforeLastDrop = before
+        val lostName = ssid ?: "Wi-Fi"
+        main.post {
+            runCatching {
+                android.widget.Toast.makeText(app, "📶 Wi-Fi lost ($lostName). $before", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+        link.clear()
+        runCatching { loadOurs() } // a network saved since the last drop counts too
         downSince = now()
         upSince = 0L
         restarts = 0
@@ -280,7 +677,7 @@ object WifiDoctor {
         // Give the scan a moment, then decide with the supplicant's reason (root) + whether the hotspot is still there.
         dropPending = true
         pendingAfter = null
-        worker.postDelayed({
+        actions.postDelayed({
             runCatching {
                 val reason = if (hasRoot == true) disconnectReason() else null
                 joinStatus = if (hasRoot == true) rootWifi("status", name)?.substringAfter(' ', "")?.takeIf { it.isNotBlank() } else null
@@ -290,7 +687,7 @@ object WifiDoctor {
                 else explain(reason, visible, lastSeen, lastGood)
                 val block = joinStatus?.takeIf { it.contains("DISABLED") }
                     ?.let { " Android has also blocked auto-join for it ($it) — it won't rejoin by itself; Dock clears that." } ?: ""
-                record("Lost $name", why + block, fault, null, pendingAfter)
+                record("Lost $name", why + block + " " + before, fault, null, pendingAfter)
             }
             dropPending = false
             pendingAfter = null
@@ -341,58 +738,97 @@ object WifiDoctor {
 
     // --- Getting back on ------------------------------------------------------
 
-    private fun fix(force: Boolean) {
+    private fun act(force: Boolean) {
         val down = if (downSince > 0) now() - downSince else 0L
         val root = hasRoot == true
         if (!enabled) {
             if (root) {
                 lastAction = "Switching Wi-Fi on"
+                DebugLog.log("WIFI", "Wi-Fi is off — switching it on")
                 Root.run("svc wifi enable")
             } else lastAction = "Wi-Fi is off — switch it on (no root)"
             return
         }
-        val visible = now() - targetSeenAt < 15_000
-        if (!visible) {
-            lastAction = "Scanning — ${target ?: "hotspot"} not visible"
-            return
+        val visible = now() - oursSeenAt < VISIBLE_MS
+        val wm = app.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        @Suppress("DEPRECATION") val sup = runCatching { wm.connectionInfo?.supplicantState }.getOrNull()
+        val joining = sup in setOf(
+            SupplicantState.ASSOCIATING, SupplicantState.ASSOCIATED, SupplicantState.AUTHENTICATING,
+            SupplicantState.FOUR_WAY_HANDSHAKE, SupplicantState.GROUP_HANDSHAKE, SupplicantState.COMPLETED,
+        )
+        val step = if (force) {
+            when {
+                visible -> WifiPlan.Step(WifiPlan.Action.JOIN, "joining now (asked)")
+                BtKick.phoneConnected() == true && !BtKick.inCall(app) -> WifiPlan.Step(WifiPlan.Action.BT_KICK, "none of ours visible — Bluetooth kick (asked)")
+                else -> WifiPlan.Step(WifiPlan.Action.NONE, "none of your networks visible, no iPhone on Bluetooth — scanning")
+            }
+        } else synchronized(plan) {
+            plan.next(
+                WifiPlan.Input(
+                    now(), false, joining, visible,
+                    if (btKick) BtKick.phoneConnected() else false, BtKick.since, BtKick.inCall(app), enabled,
+                ),
+            )
         }
-        if (!root) {
-            lastAction = "Hotspot visible — waiting for Android to rejoin (no root to force it)"
-            return
-        }
-        val gap = 60_000L + 30_000L * restarts
-        val due = force || (down >= 20_000 && restarts < MAX_RESTARTS && now() - lastRestartAt >= gap)
-        if (!due) {
-            lastAction = if (restarts >= MAX_RESTARTS) "Hotspot visible but Android won't rejoin after $restarts tries — check the saved password"
-            else "Hotspot visible — giving Android ${GpsDoctor.duration(maxOf(20_000 - down, gap - (now() - lastRestartAt), 0))} to rejoin"
-            return
-        }
-        restarts++
-        lastRestartAt = now()
-        val t = target
-        joinStatus = t?.let { rootWifi("status", it) }?.substringAfter(' ', "")?.takeIf { it.isNotBlank() }
-        val blocked = joinStatus?.contains("DISABLED") == true
-        if (restarts > 1) {
-            lastAction = "Restarting Wi-Fi, then rejoining (try $restarts)"
-            changed()
-            Root.run("svc wifi disable", "sleep 2", "svc wifi enable", "sleep 6")
-        } else {
-            lastAction = if (blocked) "Android had blocked $t (${joinStatus}) — clearing that and rejoining" else "Asking Android to rejoin $t"
-            changed()
-        }
-        if (t != null) {
-            val r = rootWifi("enable", t)
-            if (r?.startsWith("ok") != true) lastAction += " — ${r ?: "root refused"}"
+        restarts = plan.joinTries
+        if (step.action != WifiPlan.Action.NONE) DebugLog.log("WIFI", "action ${step.action}: ${step.why}")
+        DebugLog.change("WIFI", "plan", step.why.substringBefore(" — ").substringBefore(" in "))
+        lastAction = if (visible) "${best() ?: "hotspot"} visible — ${step.why}" else "Down ${GpsDoctor.duration(down)} — ${step.why}"
+        when (step.action) {
+            WifiPlan.Action.NONE -> Unit
+            WifiPlan.Action.JOIN, WifiPlan.Action.RESTART_AND_JOIN -> {
+                val t = best() ?: return
+                if (!root) {
+                    lastAction = "$t visible — waiting for Android to join (no root to force it)"
+                    return
+                }
+                if (step.action == WifiPlan.Action.RESTART_AND_JOIN) {
+                    changed()
+                    ourToggleAt = now(); Root.run("svc wifi disable", "sleep 2", "svc wifi enable", "sleep 4")
+                }
+                joinStatus = rootWifi("status", t)?.substringAfter(' ', "")?.takeIf { it.isNotBlank() }
+                if (joinStatus?.contains("DISABLED") == true) lastAction += " (Android had blocked it: $joinStatus — clearing)"
+                val r = rootWifi("enable", t)
+                if (r?.startsWith("ok") != true) lastAction += " — ${r ?: "root refused"}"
+                lastRestartAt = now()
+            }
+            WifiPlan.Action.BT_KICK -> {
+                if (force) { changed(); lastAction += " → " + BtKick.kick() }
+                else {
+                    // Bluetooth off/on also cuts the phone's Bluetooth: ask first (owner 2026-11-20).
+                    val asked = WifiAsk.ask(app, "btkick", "No hotspot in range",
+                        "Wi-Fi has been down ${GpsDoctor.duration(down)} and none of your networks is visible. " +
+                            "Switch Bluetooth off and on so the iPhone turns its hotspot on? (Bluetooth drops for a few seconds.)",
+                        "Kick Bluetooth",
+                        stillWrong = { !connected && now() - oursSeenAt > VISIBLE_MS },
+                    ) { lastAction = "Bluetooth kick (you asked): " + BtKick.kick(); changed() }
+                    lastAction += if (asked) " → asking you first" else " → not asking again yet"
+                }
+            }
         }
         changed()
+    }
+
+    /** Which of ours to join: the one we were last on if it's there, else the strongest visible. */
+    private fun best(): String? {
+        val v = oursVisible
+        return target?.takeIf { it in v } ?: v.maxByOrNull { it.value }?.key
     }
 
     @Suppress("DEPRECATION")
     @SuppressLint("MissingPermission")
     private fun readScan() {
         val wm = app.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        // Fresh results only (ScanResult.timestamp is µs since boot): cached ones from minutes ago don't count.
+        val results = runCatching { wm.scanResults }.getOrNull().orEmpty().filter { now() - it.timestamp / 1000 < 15_000 }
+        // Any of ours (scan results only arrive with location on — Android 10).
+        val mine = results.filter { it.SSID in ours }
+            .groupBy { it.SSID }.mapValues { (_, l) -> l.maxOf { it.level } }
+        val newest = results.filter { it.SSID in ours }.maxOfOrNull { it.timestamp / 1000 } ?: 0L
+        oursVisible = mine
+        if (newest > oursSeenAt) oursSeenAt = newest
         val t = target ?: return
-        val hit = runCatching { wm.scanResults }.getOrNull()?.filter { it.SSID == t }?.maxByOrNull { it.level } ?: return
+        val hit = results.filter { it.SSID == t }.maxByOrNull { it.level } ?: return
         // ScanResult.timestamp is µs since boot.
         val seen = hit.timestamp / 1000
         if (seen > targetSeenAt) {
@@ -403,14 +839,14 @@ object WifiDoctor {
     }
 
     private fun notifyLost() {
-        if (notified || downSince == 0L || now() - downSince < 30_000 || now() - targetSeenAt < 15_000 || !enabled) return
+        if (notified || downSince == 0L || now() - downSince < 30_000 || now() - oursSeenAt < 15_000 || !enabled) return
         val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "Wi-Fi lost", NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(app, 3, Intent(app, WifiDoctorActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE)
         val n = Notification.Builder(app, CHANNEL)
             .setSmallIcon(R.drawable.ic_dock)
-            .setContentTitle("Wi-Fi lost — ${target ?: "hotspot"} not visible")
-            .setContentText("Open Personal Hotspot on the iPhone. Dock reconnects by itself.")
+            .setContentTitle("Wi-Fi lost — none of your networks visible")
+            .setContentText(if (BtKick.phoneConnected() == true) "Kicking Bluetooth to switch the iPhone hotspot on. Or open Personal Hotspot." else "Open Personal Hotspot on the iPhone. Dock reconnects by itself.")
             .setContentIntent(open)
             .setAutoCancel(true)
             .build()
@@ -428,25 +864,37 @@ object WifiDoctor {
 
     // --- Measurements -----------------------------------------------------------
 
-    private fun ping(host: String): Int? = runCatching {
-        val iface = gatewayIface
-        val cmd = if (iface != null) listOf("ping6", "-c", "1", "-W", "2", "$host%$iface") else listOf("ping", "-c", "1", "-W", "2", host)
-        val p = ProcessBuilder(cmd).redirectErrorStream(true).start()
-        val out = p.inputStream.bufferedReader().readText()
-        if (p.waitFor() != 0) null
-        else Regex("time=([\\d.]+)").find(out)?.groupValues?.get(1)?.toFloatOrNull()?.toInt() ?: 0
-    }.getOrNull()
+    /** How round trips are measured: "ping", or "tcp" when this unit doesn't let apps ping. */
+    @Volatile var rttMethod = "ping"
+        private set
 
-    /** Real internet through the Wi-Fi network itself (not mobile data): ~1 KB. */
-    private fun probe(net: Network): Boolean = runCatching {
-        val c = net.openConnection(URL("https://www.google.com/generate_204")) as HttpURLConnection
-        c.connectTimeout = 6000
-        c.readTimeout = 6000
-        c.instanceFollowRedirects = false
-        val code = c.responseCode
-        c.disconnect()
-        code == 204
-    }.getOrDefault(false)
+    /**
+     * Round trip to the hotspot in ms, null = no answer. `ping` exits 1 for "no reply" but 2 (or says
+     * "not permitted") when apps may not ping at all — then every ping looked lost and the link "bad".
+     * Fallback: a TCP probe ([java.net.InetAddress.isReachable]); a refused port still answers.
+     */
+    private fun ping(host: String, waitSec: Int = 2): Int? {
+        if (rttMethod == "ping") {
+            val r = runCatching {
+                val iface = gatewayIface
+                val cmd = if (iface != null) listOf("ping6", "-c", "1", "-W", "$waitSec", "$host%$iface") else listOf("ping", "-c", "1", "-W", "$waitSec", host)
+                val p = ProcessBuilder(cmd).redirectErrorStream(true).start()
+                // Hard limit: a ping that hangs is killed and counted as one lost answer, never as a long silence.
+                if (!p.waitFor(waitSec + 2L, java.util.concurrent.TimeUnit.SECONDS)) { p.destroyForcibly(); return null }
+                p.exitValue() to p.inputStream.bufferedReader().readText()
+            }
+            val (code, out) = r.getOrNull() ?: (-1 to (r.exceptionOrNull()?.message ?: ""))
+            if (code == 0) return Regex("time=([\\d.]+)").find(out)?.groupValues?.get(1)?.toFloatOrNull()?.toInt() ?: 0
+            if (code == 1 && !out.contains("permi", ignoreCase = true)) return null // a real "no reply"
+            rttMethod = "tcp"
+            DebugLog.log("WIFI", "ping not usable here (exit $code: ${out.trim().take(120)}) — measuring with a TCP probe instead")
+        }
+        return runCatching {
+            val start = System.nanoTime()
+            val ok = java.net.InetAddress.getByName(host).isReachable(waitSec * 1000)
+            if (ok) ((System.nanoTime() - start) / 1_000_000).toInt() else null
+        }.getOrNull()
+    }
 
     // --- History ----------------------------------------------------------------
 
@@ -489,7 +937,7 @@ object WifiDoctor {
     fun status(): String = when {
         !enabled -> "Wi-Fi is switched off."
         !connected -> "Wi-Fi lost ${GpsDoctor.duration(now() - downSince)} ago — " +
-            (if (now() - targetSeenAt < 15_000) "${target ?: "hotspot"} is visible ($targetSeenRssi dBm)." else "${target ?: "hotspot"} not visible.")
+            (best()?.takeIf { now() - oursSeenAt < VISIBLE_MS }?.let { "$it is visible (${oursVisible[it]} dBm)." } ?: "none of your networks visible.")
         internet == false && gatewayPingMs != null -> "Connected, but no internet behind the hotspot — iPhone has no mobile data (tunnel?)."
         internet == false -> "Connected, but the hotspot doesn't answer."
         internet == null -> "Connected to ${ssid ?: "Wi-Fi"}, checking internet…"

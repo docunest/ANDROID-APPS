@@ -27,7 +27,14 @@ data class Item(
     val createdAt: Long,
     /** Bookmark saved here, not yet on the server (no signal). */
     val pending: Boolean = false,
+    /** What the place is (MapPal lib/dock/category.ts): camp, grocery, fuel, parking, … — null until classified. */
+    val category: String? = null,
+    /** Inside a 100 k+ city (🏙 badge). */
+    val bigCity: Boolean = false,
 ) {
+    /** "⛺" / "🅿️ 🏙️" — what the place is, at a glance; "" when not classified yet. */
+    val kindIcon: String get() = listOfNotNull(Kinds.ICON[category], if (bigCity) "🏙️" else null).joinToString(" ")
+
     val hasPoint get() = lat != null && lng != null
     val isNew get() = kind == "link" && seenAt == null
     val approximate get() = locatedBy == "search"
@@ -45,6 +52,8 @@ data class Item(
         .put("openCount", openCount)
         .put("createdAt", Instant.ofEpochMilli(createdAt).toString())
         .put("pending", pending)
+        .put("category", category ?: JSONObject.NULL)
+        .put("bigCity", bigCity)
 
     companion object {
         private fun JSONObject.str(k: String): String? = if (isNull(k)) null else optString(k).takeIf { it.isNotEmpty() }
@@ -67,8 +76,24 @@ data class Item(
             openCount = o.optInt("openCount"),
             createdAt = o.time("createdAt") ?: System.currentTimeMillis(),
             pending = o.optBoolean("pending"),
+            category = o.str("category"),
+            bigCity = o.optBoolean("bigCity"),
         )
     }
+}
+
+/** Place categories, as MapPal classifies them (owner-approved 2026-11-15). */
+object Kinds {
+    val ORDER = listOf("camp", "grocery", "fuel", "parking", "shopping", "eat", "services", "sight", "town", "other")
+    val ICON = mapOf(
+        "camp" to "⛺", "grocery" to "🛒", "fuel" to "⛽", "parking" to "🅿️", "shopping" to "🛍️",
+        "eat" to "🍴", "services" to "🔧", "sight" to "📍", "town" to "🏘️", "other" to "❔",
+    )
+    val LABEL = mapOf(
+        "camp" to "Campsites", "grocery" to "Grocery", "fuel" to "Fuel", "parking" to "Parking", "shopping" to "Shopping",
+        "eat" to "Eat", "services" to "Services", "sight" to "Sights", "town" to "Towns", "other" to "Other",
+    )
+    const val CITY = "city"
 }
 
 /**

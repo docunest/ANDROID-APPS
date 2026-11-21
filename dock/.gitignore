@@ -2,3 +2,5 @@
 build/
 app/build/
 local.properties
+.kotlin/
+__pycache__/

@@ -13,6 +13,7 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.drawable.Icon
 import android.net.ConnectivityManager
 import android.net.Network
@@ -49,7 +50,7 @@ class DockService : Service() {
     private var fan: FanView? = null
     private var card: View? = null
     private val main = Handler(Looper.getMainLooper())
-    private val storeListener: () -> Unit = { refreshBadge() }
+    private val storeListener: () -> Unit = { refreshBadge(); prefetchThumbs() }
     private var netCallback: ConnectivityManager.NetworkCallback? = null
     private var syncing = false
 
@@ -57,6 +58,19 @@ class DockService : Service() {
         override fun onReceive(context: Context, intent: Intent) {
             Sync.pollSoon()
             checkUpdate()
+        }
+    }
+
+    private var miniMap: MiniMap? = null
+    private var policeFlash: PoliceFlash? = null
+    // Mini-map shown/hidden (dock map open?) every 2 s; trip (Waze destination, arrival, route) every 30 s.
+    private var tripTicks = 0
+    private val roadLoop = object : Runnable {
+        override fun run() {
+            if (miniMap == null) miniMap = MiniMap(this@DockService, wm)
+            miniMap?.sync()
+            if (tripTicks++ % 15 == 0) Trip.tick(this@DockService)
+            main.postDelayed(this, 2000)
         }
     }
 
@@ -79,6 +93,11 @@ class DockService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        DebugLog.init(this)
+        AdbShell.init(this)
+        AdbShell.warmUp()
+        // No root yet? Still scan what an app may read, a minute after start.
+        android.os.Handler(mainLooper).postDelayed({ if (Diagnostics.lastRun == "never") Diagnostics.runAsync(this) }, 60_000)
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
         prefs = Prefs(this)
         Sync.init(this)
@@ -95,6 +114,7 @@ class DockService : Service() {
         if (!syncing) {
             syncing = true
             Store.addListener(storeListener)
+            prefetchThumbs()
             Sync.onNewLinks = { if (bubble != null) showCard(it) else notifyNew(it) }
             Sync.start(this)
             registerWakeups()
@@ -102,7 +122,15 @@ class DockService : Service() {
             Updater.checkSoon(this, force = true)
             main.postDelayed(updateLoop, Updater.EVERY_MS)
             main.post(locationLoop)
+            Trip.init(this)
+            main.postDelayed(roadLoop, 3000)
+            // Police reports from Waze's log → flashing screen edges.
+            Police.start(this)
+            policeFlash = PoliceFlash(this, wm).also { it.start() }
+            FixHistory.resetBrokenStatsOnce(this)
             GpsWatch.start(this)
+            ParkedPosition.start(this)
+            AutoDoctor.start(this)
             WifiDoctor.start(this)
             // Background location: Wi-Fi names and GPS glitches while another app is in front.
             if (checkSelfPermission(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -124,6 +152,19 @@ class DockService : Service() {
             addBubble()
         } else if (intent?.action == ACTION_RELAYOUT) {
             relayoutBubble()
+        } else if (intent?.action == ACTION_WIFI_CHOICE) {
+            WifiDoctor.ownerChoice(intent.getStringExtra(EXTRA_SSID)?.takeIf { it.isNotEmpty() })
+        } else if (intent?.action == ACTION_POLICE_TEST) {
+            policeFlash?.test()
+        } else if (intent?.action == ACTION_MINIMAP) {
+            miniMap?.relayout() ?: miniMap?.sync()
+        } else if (intent?.action == ACTION_CLEAR_SKY) {
+            ClearSky.hint(this)
+        } else if (intent?.action == ACTION_RESET_POSITION) {
+            prefs.bubbleX = -1
+            prefs.bubbleY = -1
+            relayoutBubble()
+            DebugLog.log("APP", "button position reset")
         }
         Sync.pollSoon()
         return START_STICKY
@@ -140,12 +181,25 @@ class DockService : Service() {
             .setContentIntent(open)
             .setOngoing(true)
             .build()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(NOTIFICATION_ID, n)
-        }
+        // Location type only once location is allowed (Android 14+ refuses it otherwise).
+        val loc = Locator.hasPermission(this)
+        val ok = runCatching {
+            when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> startForeground(
+                    NOTIFICATION_ID, n,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or (if (loc) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0),
+                )
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && loc -> startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+                else -> startForeground(NOTIFICATION_ID, n)
+            }
+        }.onFailure { startForeground(NOTIFICATION_ID, n) }.isSuccess
+        locationService = loc && ok
+        DebugLog.log("APP", "foreground service: " + (if (locationService) "location ✓ (GPS keeps coming while Waze is in front)" else "no location type — location not allowed yet") +
+            " · background location " + (if (checkSelfPermission(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED) "granted" else "NOT granted"))
     }
+
+    /** The service runs as a location service (fixes reach us while another app is in front). */
+    private var locationService = false
 
     private fun registerWakeups() {
         registerReceiver(wakeReceiver, IntentFilter().apply {
@@ -159,7 +213,10 @@ class DockService : Service() {
         }.also { runCatching { cm.registerDefaultNetworkCallback(it) } }
     }
 
-    private fun checkUpdate() = Updater.checkSoon(this)
+    private fun checkUpdate() {
+        Updater.checkSoon(this)
+        OfflinePacks.tick(this)
+    }
 
     private fun screen(): DisplayMetrics = DisplayMetrics().also {
         @Suppress("DEPRECATION")
@@ -179,13 +236,16 @@ class DockService : Service() {
     private fun addBubble() {
         val size = dp(prefs.bubbleSizeDp.coerceIn(32, 96))
         val view = BubbleView(this).apply {
-            alpha = idleAlpha()
+            fade = idleAlpha()
             contentDescription = "Dock"
         }
         bubbleParams = overlayParams(size, size).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = prefs.bubbleX
-            y = prefs.bubbleY
+            // Never outside the screen (that's how it ended up under the status bar, untouchable).
+            flags = flags and WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS.inv()
+            val (sx, sy) = savedPos(size)
+            x = sx
+            y = sy
         }
 
         val slop = ViewConfiguration.get(this).scaledTouchSlop * 1.5f
@@ -208,7 +268,7 @@ class DockService : Service() {
                     downX = e.rawX; downY = e.rawY
                     startX = bubbleParams.x; startY = bubbleParams.y
                     dragging = false
-                    view.alpha = 1f
+                    view.fade = 1f
                     view.pressedLook = true
                     v.postDelayed(openFan, holdMs)
                 }
@@ -224,24 +284,27 @@ class DockService : Service() {
                             v.removeCallbacks(openFan)
                         }
                         if (dragging) {
-                            bubbleParams.x = startX + dx.toInt()
-                            bubbleParams.y = startY + dy.toInt()
+                            val (cx, cy) = BubblePlace.clamp(startX + dx.toInt(), startY + dy.toInt(), bubbleParams.width, safeArea())
+                            bubbleParams.x = cx
+                            bubbleParams.y = cy
                             wm.updateViewLayout(v, bubbleParams)
+                            SplitService.bubble = Rect(cx, cy, cx + bubbleParams.width, cy + bubbleParams.height)
                         }
                     }
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     v.removeCallbacks(openFan)
                     view.pressedLook = false
-                    view.alpha = idleAlpha()
+                    view.fade = idleAlpha()
                     val f = fan
                     when {
                         f != null -> {
-                            val chosen = if (e.actionMasked == MotionEvent.ACTION_UP) f.selected() else null
+                            val chosen = if (e.actionMasked == MotionEvent.ACTION_UP) f.selectedAction() else null
                             hideFan()
-                            chosen?.action?.invoke()
+                            chosen?.invoke()
                         }
                         dragging -> {
+                            // Saved already clamped: it can't be left anywhere untouchable.
                             prefs.bubbleX = bubbleParams.x
                             prefs.bubbleY = bubbleParams.y
                         }
@@ -253,7 +316,11 @@ class DockService : Service() {
         }
         wm.addView(view, bubbleParams)
         bubble = view
+        placeBubble()
+        watchWindows()
         refreshBadge()
+        main.removeCallbacks(gpsDotLoop)
+        main.post(gpsDotLoop)
     }
 
     private fun relayoutBubble() {
@@ -261,8 +328,102 @@ class DockService : Service() {
         val size = dp(prefs.bubbleSizeDp.coerceIn(32, 96))
         bubbleParams.width = size
         bubbleParams.height = size
-        b.alpha = idleAlpha()
-        runCatching { wm.updateViewLayout(b, bubbleParams) }
+        b.fade = idleAlpha()
+        placeBubble()
+    }
+
+    // --- Where the button may be ---------------------------------------------------------------
+
+    /** Keyboard bounds while one is showing (from the accessibility helper), else null. */
+    private var keyboard: BubblePlace.Area? = null
+    private var lastRaise = 0L
+    private var raiseStreak = 0
+
+    /** Below the status bar, above the navigation bar, inside the sides — where it can always be touched. */
+    private fun safeArea(): BubblePlace.Area {
+        val m = DisplayMetrics().also { @Suppress("DEPRECATION") wm.defaultDisplay.getRealMetrics(it) }
+        fun dimen(name: String) = resources.getIdentifier(name, "dimen", "android").takeIf { it > 0 }?.let { resources.getDimensionPixelSize(it) } ?: 0
+        val top = maxOf(dimen("status_bar_height"), dp(32)) + dp(8)
+        val bottom = m.heightPixels - dimen("navigation_bar_height").coerceAtMost(m.heightPixels / 4) - dp(4)
+        return BubblePlace.Area(dp(4), top, m.widthPixels - dp(4), bottom)
+    }
+
+    /** The saved position, made safe (a position saved under the status bar is pulled back). Reset = left, mid-height. */
+    private fun savedPos(size: Int): Pair<Int, Int> {
+        val a = safeArea()
+        if (prefs.bubbleX < 0 || prefs.bubbleY < 0) return BubblePlace.default(size, a)
+        return BubblePlace.clamp(prefs.bubbleX, prefs.bubbleY, size, a)
+    }
+
+    /** Put the button where it belongs now: its saved place, out of the keyboard's way (or hidden). */
+    private fun placeBubble() {
+        val b = bubble ?: return
+        val size = bubbleParams.width
+        val (x, y) = savedPos(size)
+        val pos = BubblePlace.avoidKeyboard(x, y, size, keyboard, safeArea(), dp(8))
+        if (pos == null) {
+            b.visibility = View.GONE // keyboard up and no room above it: out of the way until it closes
+            return
+        }
+        b.visibility = View.VISIBLE
+        if (bubbleParams.x != pos.first || bubbleParams.y != pos.second) {
+            bubbleParams.x = pos.first
+            bubbleParams.y = pos.second
+            runCatching { wm.updateViewLayout(b, bubbleParams) }
+        }
+        SplitService.bubble = Rect(pos.first, pos.second, pos.first + size, pos.second + size)
+    }
+
+    /** The Dock keyboard is the current keyboard. */
+    private fun ourKeyboard() = runCatching {
+        Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD) == DockKeyboard.id(this)
+    }.getOrDefault(false)
+
+    /** Keyboard and other apps' overlays, from the accessibility helper's window list. */
+    private fun watchWindows() {
+        DockKeyboard.onPanel = {
+            main.post {
+                val kb = DockKeyboard.panelOnScreen?.let { BubblePlace.Area(it.left, it.top, it.right, it.bottom) }
+                if (kb != keyboard) { keyboard = kb; placeBubble() }
+            }
+        }
+        SplitService.onWindows = { w ->
+            main.post {
+                // Our own keyboard's window spans the screen (transparent): avoid only its panel.
+                val kb = (DockKeyboard.panelOnScreen ?: w.keyboard.takeIf { DockKeyboard.panelOnScreen == null && !ourKeyboard() })
+                    ?.let { BubblePlace.Area(it.left, it.top, it.right, it.bottom) }
+                if (kb != keyboard) {
+                    keyboard = kb
+                    DebugLog.log("APP", if (kb == null) "keyboard closed — button back" else "keyboard open (top ${kb.top}) — button moved out of its way")
+                    placeBubble()
+                }
+                w.coveredBy?.let { raiseBubble(it) }
+            }
+        }
+        // The helper is how we see the keyboard: switch it on (root / the unit's adb) if it isn't.
+        main.postDelayed({
+            if (SplitService.instance == null) Thread { Root.enableSplitService(this) }.start()
+        }, 10_000)
+    }
+
+    /** Another app's overlay landed on top of the button: add the button again — the newest overlay is on top. */
+    private fun raiseBubble(by: String) {
+        val b = bubble ?: return
+        val now = android.os.SystemClock.elapsedRealtime()
+        // At most every 5 s, and not more than 6 times in a row without a pause (never a loop).
+        if (now - lastRaise < 5_000 || fan != null || b.pressedLook) return
+        if (now - lastRaise < 20_000) raiseStreak++ else raiseStreak = 0
+        if (raiseStreak > 6) return
+        lastRaise = now
+        runCatching {
+            wm.removeView(b)
+            wm.addView(b, bubbleParams)
+        }.onSuccess { DebugLog.log("APP", "button was covered by $by — raised to the top") }
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        main.post { placeBubble() } // rotation / screen size: stay on screen
     }
 
     private fun togglePanel() {
@@ -275,7 +436,131 @@ class DockService : Service() {
         bubble?.badge = Store.all().count { it.isNew }
     }
 
+    // Status ring on the button (GPS left, Wi-Fi right), once a second — redrawn only when it changes.
+    // Measured on its own thread: asking Android's location service can block for many seconds when
+    // the GPS loses signal (22.7 s seen at 95 km/h), and on the main thread that froze the button and
+    // the Dock keyboard (both drawn there).
+    private val ringThread = android.os.HandlerThread("ring").apply { start() }
+    private val ringHandler = Handler(ringThread.looper)
+    private val ringBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val gpsDotLoop = object : Runnable {
+        override fun run() {
+            runCatching {
+                GpsWatch.start(this@DockService) // idempotent: may not have started if location was granted after the dock
+                if (!locationService && Locator.hasPermission(this@DockService)) startInForeground() // granted since: become a location service
+            }
+            if (ringBusy.compareAndSet(false, true)) ringHandler.post {
+                try { runCatching { refreshRing() } } finally { ringBusy.set(false) }
+            }
+            main.postDelayed(this, 1000)
+        }
+    }
+
+    /** On the ring thread; only the drawing goes back to the main thread. */
+    private fun refreshRing() {
+        val b = bubble ?: return
+        val t = android.os.SystemClock.elapsedRealtime()
+        val g = gpsLevel()
+        val w = wifiLevel()
+        val gArc = gpsDebounce.update(t, if (prefs.gpsDot) GpsDot.arc(g) else Ring.FINE)
+        val wArc = wifiDebounce.update(t, if (prefs.wifiDot) WifiDot.arc(w) else Ring.FINE)
+        main.post {
+            b.gpsArc = gArc
+            b.wifiArc = wArc
+            b.contentDescription = "Dock · GPS ${g.label} · Wi-Fi ${w.label}"
+        }
+        DebugLog.change("RING", "gps", if (gArc.fine) "white" else g.name, gpsInputs)
+        DebugLog.change("RING", "wifi", if (wArc.fine) "white" else w.name,
+            "connected ${WifiDoctor.connected} ${WifiDoctor.ssid ?: ""} · internet ${WifiDoctor.internet} · link ${WifiDoctor.link.text()} via ${WifiDoctor.rttMethod} · rssi ${WifiDoctor.rssi}")
+        // Raw levels (before the 8 s debounce) too: blips show here even when the ring stays white.
+        DebugLog.change("GPS", "level", g.name, gpsInputs)
+        DebugLog.change("WIFI", "level", w.name)
+        DebugLog.status["Ring now"] = "GPS ${g.name} (${g.label}) shown ${if (gArc.fine) "white" else "as warning"} · Wi-Fi ${w.name} (${w.label}) shown ${if (wArc.fine) "white" else "as warning"}"
+        DebugLog.status["Wi-Fi"] = "connected ${WifiDoctor.connected} ${WifiDoctor.ssid ?: ""} · rssi ${WifiDoctor.rssi} · internet ${WifiDoctor.internet} · link ${WifiDoctor.link.text()} via ${WifiDoctor.rttMethod}" +
+            " · checks: ${WifiDoctor.verdict.text}"
+        DebugLog.status["Service"] = "location service $locationService · background location " +
+            (checkSelfPermission(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED) +
+            " · auto ${AutoDoctor.call?.mode} · parked ${ParkedPosition.logic?.state}"
+        DebugLog.status["Root"] = "via ${Root.via()} · adb: ${AdbShell.status}"
+        if (t - lastUploadTry > 120_000) {
+            lastUploadTry = t
+            uploader.execute { runCatching { DebugLog.uploadNow(this) } }
+        }
+        if (t - lastSnapshot > 60_000) {
+            lastSnapshot = t
+            DebugLog.log("SNAP", "gps ${g.name} [$gpsInputs] · wifi ${w.name} · ${WifiDoctor.link.text()} · auto ${AutoDoctor.call?.mode} · parked ${ParkedPosition.logic?.state}")
+        }
+    }
+
+    private val gpsDebounce = Ring.Debounce()
+    private val wifiDebounce = Ring.Debounce()
+    private var lastSnapshot = 0L
+    private var lastUploadTry = 0L
+    private val uploader = java.util.concurrent.Executors.newSingleThreadExecutor()
+    /** What the last GPS level was computed from — for the debug log. */
+    private var gpsInputs = ""
+
+    /** Freshest real fix from the background listener, the GPS doctor's own listener, or Android's last known. */
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun freshestFix(now: Long): Pair<Long, Float?>? {
+        val cands = mutableListOf<Pair<Long, Float?>>()
+        val parts = mutableListOf<String>()
+        fun note(name: String, at: Long, acc: Float?) {
+            cands += at to acc
+            parts += "$name ${(now - at) / 1000}s/±${acc?.toInt() ?: "?"}"
+        }
+        if (GpsWatch.lastFixAt > 0) note("watch", GpsWatch.lastFixAt, GpsWatch.lastAccuracy) else parts += "watch —"
+        GpsDoctor.fix?.takeIf { GpsDoctor.fixAt > 0 }?.let { note("doctor", GpsDoctor.fixAt, if (it.hasAccuracy()) it.accuracy else null) } ?: run { parts += "doctor —" }
+        if (Locator.hasPermission(this)) runCatching {
+            val lm = getSystemService(LOCATION_SERVICE) as android.location.LocationManager
+            lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)?.takeIf { !it.isMockFix() }?.let {
+                note("system", now - (android.os.SystemClock.elapsedRealtimeNanos() - it.elapsedRealtimeNanos) / 1_000_000, if (it.hasAccuracy()) it.accuracy else null)
+            } ?: run { parts += "system —" }
+        }
+        gpsInputs = parts.joinToString(" · ") + " · listening ${GpsDoctor.isWatching} · location service $locationService · sky known ${GpsDoctor.skyKnown()}"
+        DebugLog.status["GPS fix sources"] = gpsInputs
+        return cands.maxByOrNull { it.first }
+    }
+
+    private fun gpsLevel(): GpsDot.Level {
+        val now = android.os.SystemClock.elapsedRealtime()
+        val mode = AutoDoctor.call?.mode
+        val fix = freshestFix(now)
+        return GpsDot.level(
+            settingsOk = GpsDoctor.settingsOk(this),
+            emulated = ParkedPosition.mocking,
+            fixAgeMs = fix?.let { now - it.first },
+            accuracyM = fix?.second,
+            noSky = mode == SkyJudge.Mode.TUNNEL || mode == SkyJudge.Mode.COVERED || mode == SkyJudge.Mode.DEAD_ZONE,
+            asked = GpsDoctor.isWatching,
+        )
+    }
+
+    private fun wifiLevel(): WifiDot.Level {
+        val w = WifiDoctor
+        return WifiDot.level(
+            enabled = w.enabled,
+            connected = w.connected,
+            internet = w.internet,
+            oursVisible = android.os.SystemClock.elapsedRealtime() - w.oursSeenAt < 6_000,
+            kickPending = BtKick.pendingAt > 0,
+            // Pings to the iPhone get lost while the internet works (seen live): with a working web check
+            // in the last 90 s, a "bad" ping meter is only "poor".
+            link = w.link.level().let { l ->
+                if (l == LinkQuality.Level.BAD && w.verdict.internet == true && android.os.SystemClock.elapsedRealtime() - w.checkedAt < 90_000) LinkQuality.Level.POOR else l
+            },
+        )
+    }
+
     // --- Press-and-slide menu -------------------------------------------
+
+    /** Area maps for what the menu and list show first — made while there's signal, shown offline. */
+    private fun prefetchThumbs() {
+        val here = Near.here(this)
+        val top = Store.sorted().filter { Near.isMain(here, it) }.take(20)
+        Thumbs.prefetch(this, top)
+        Photos.prefetch(this, top)
+    }
 
     private fun fanTargets(): List<FanTarget> {
         val t = mutableListOf<FanTarget>()
@@ -297,16 +582,20 @@ class DockService : Service() {
         val (main, more) = Store.sorted().partition { Near.isMain(here, it) }
         val shown = main.take(prefs.fanLinks.coerceIn(0, 8))
         for (item in shown) {
+            // Recognisable at a glance: direction + distance, town, how long ago — plus the area map.
             val bits = mutableListOf<String>()
-            Near.label(here, item)?.let { bits += it }
             if (item.isNew) bits += "NEW"
-            if (item.kind == "bookmark") bits += "★"
+            item.kindIcon.takeIf { it.isNotEmpty() }?.let { bits += it }
+            Near.label(here, item)?.let { bits += it }
+            Near.town(item.address, item.title)?.let { bits += it }
+            bits += if (item.kind == "bookmark") "★ ${ago(item.recency)}" else ago(item.recency)
             if (item.approximate) bits += "approx."
-            bits += "→ $nav"
             t += FanTarget(
                 item.title, null,
                 if (item.isNew) Color.parseColor("#92400E") else Color.argb(240, 31, 41, 55),
-                pill = true, subtitle = bits.joinToString(" · "),
+                pill = true, subtitle = bits.joinToString(" · ") + " → $nav", image = Photos.get(this, item) ?: Thumbs.get(this, item),
+                // Side quests (a café a passenger sent): the place in Google Maps beside Waze — the route stays.
+                altLabel = "G", alt = { Split.preview(this, item) },
             ) { Nav.go(this, item) }
         }
         // Always last: the full history (far & older places included).
@@ -398,21 +687,6 @@ class DockService : Service() {
             })
         }
         root.addView(gap())
-        // Debug (temporary): every Waze method as a button.
-        root.addView(bigButton("🧪", Palette.CARD_HI, 16f) {
-            hideCard()
-            startActivity(
-                Intent(this, NavTestActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).apply {
-                    if (item.lat != null && item.lng != null) {
-                        putExtra(NavTestActivity.EXTRA_LAT, item.lat); putExtra(NavTestActivity.EXTRA_LNG, item.lng)
-                    }
-                    putExtra(NavTestActivity.EXTRA_TITLE, item.title)
-                    putExtra(NavTestActivity.EXTRA_ADDRESS, item.address)
-                    putExtra(NavTestActivity.EXTRA_URL, item.resolvedUrl ?: item.sourceUrl)
-                },
-            )
-        })
-        root.addView(gap())
         root.addView(bigButton("✕", Palette.CARD, 18f) {
             hideCard()
             Sync.patch(item.id, JSONObject().put("seen", true))
@@ -502,10 +776,14 @@ class DockService : Service() {
     }
 
     override fun onDestroy() {
+        miniMap?.hide()
+        policeFlash?.stop()
+        Police.stop()
         Sync.stop()
         Sync.onNewLinks = null
         Store.removeListener(storeListener)
         main.removeCallbacksAndMessages(null)
+        ringThread.quitSafely()
         runCatching { unregisterReceiver(wakeReceiver) }
         netCallback?.let { cb -> runCatching { (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(cb) } }
         hideFan()
@@ -522,6 +800,12 @@ class DockService : Service() {
         private const val NOTIFICATION_ID = 1
         const val ACTION_STOP = "com.docunest.dock.STOP"
         const val ACTION_RELAYOUT = "com.docunest.dock.RELAYOUT"
+        const val ACTION_RESET_POSITION = "com.docunest.dock.RESET_POSITION"
+        const val ACTION_CLEAR_SKY = "com.docunest.dock.CLEAR_SKY"
+        const val ACTION_MINIMAP = "com.docunest.dock.MINIMAP"
+        const val ACTION_POLICE_TEST = "com.docunest.dock.POLICE_TEST"
+        const val ACTION_WIFI_CHOICE = "com.docunest.dock.WIFI_CHOICE"
+        const val EXTRA_SSID = "ssid"
         private var rootTried = false
 
         fun start(context: Context, action: String? = null) {

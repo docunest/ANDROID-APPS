@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Replaces osmdroid's PNG of the same name in every density (APK size). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
+    <path android:fillColor="#331E88E5" android:pathData="M24,4 A20,20 0 1,1 23.99,4 Z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M24,12 A12,12 0 1,1 23.99,12 Z"/>
+    <path android:fillColor="#1E88E5" android:pathData="M24,15 A9,9 0 1,1 23.99,15 Z"/>
+</vector>

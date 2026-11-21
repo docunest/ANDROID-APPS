@@ -106,6 +106,7 @@ class SettingsActivity : Activity() {
         slider("Places in press-and-slide", prefs.fanLinks, 0, 8, "") { prefs.fanLinks = it }
 
         section("Split screen (Google Maps beside Waze)")
+        switch("Waze on the right, Google Maps on the left", prefs.wazeOnRight) { prefs.wazeOnRight = it }
         col.addView(label(
             "Used by: slide menu → Google Maps, 🔎 Nearby, and Preview on a new place. " +
                 "Helper: ${if (SplitService.instance != null) "on ✓" else "off ✗"}. Method now: ${prefs.splitMethod}.",
@@ -128,9 +129,131 @@ class SettingsActivity : Activity() {
         }.toTypedArray())
         switch("\"🔎 Nearby\" in press-and-slide", prefs.fanNearby) { prefs.fanNearby = it }
 
+        section("Offline map data")
+        col.addView(label(OfflinePacks.installed(this).let { i ->
+            if (i.isEmpty()) "Nothing installed — fuel, rest areas, camper services … for driving with no signal."
+            else "Installed: " + i.keys.joinToString { OfflinePacks.COUNTRIES[it] ?: it } + " · " + OfflinePacks.status
+        }, 13f, Palette.MUTED))
+        row(bigButton("🗺 Offline map data (Spain, Portugal, France, Italy, Germany)", Palette.BLUE, 15f) {
+            startActivity(Intent(this, OfflineDataActivity::class.java))
+        })
+
+        section("Mini-map (round, over Waze)")
+        col.addView(label("Turns with you (heading-up), the van low in the circle so most of it is the road ahead; the route and the " +
+            "places switched on above the dock map; the next diesel at the bottom. Zoom: drag the dot around the ring " +
+            "(clockwise = further out); tap the dot = Auto (close-up near the trip's start and end, far out mid-trip). " +
+            "Tap the middle = the dock map, drag the middle = move it. Hidden while the dock map is open.", 13f, Palette.MUTED))
+        switch("Show the mini-map", prefs.miniMap) { prefs.miniMap = it; DockService.start(this, DockService.ACTION_MINIMAP) }
+        slider("Mini-map size", prefs.miniSizeDp, 110, 300, " dp") { prefs.miniSizeDp = it; DockService.start(this, DockService.ACTION_MINIMAP) }
+        row(bigButton("Put it back bottom-left", Palette.CARD_HI, 14f) {
+            prefs.miniX = -1; prefs.miniY = -1; DockService.start(this, DockService.ACTION_MINIMAP)
+        })
+        row(bigButton("Zoom back to Auto", Palette.CARD_HI, 14f) {
+            prefs.miniSpanM = 0; DockService.start(this, DockService.ACTION_MINIMAP)
+        })
+
+        section("Police ahead (from Waze)")
+        col.addView(label("When Waze has a police report ahead (along the route, or in front of you without one) the " +
+            "screen edges flash red / blue with \"🚓 POLICE · 650 m\" at the top — about 90 s before you get there " +
+            "(1.5–4 km), and for anything within 500 m whatever the direction (better too many than too few). Touches go through; the middle of the screen stays clear. Reads Waze's detail log " +
+            "on this unit; nothing is sent anywhere.\n" + policeStatus(), 13f, Palette.MUTED))
+        switch("Flash for police ahead", prefs.policeFlash) { prefs.policeFlash = it }
+        switch("Record Waze details while driving (road type, turns, reports → debug log)", prefs.wazeRecord) {
+            prefs.wazeRecord = it; WazeTap.enabled = it
+        }
+        row(bigButton("🚓 Test the flash (6 s)", Palette.RED, 14f) {
+            DockService.start(this, DockService.ACTION_POLICE_TEST)
+            Toast.makeText(this, "Close this screen to see it over Waze", Toast.LENGTH_SHORT).show()
+        })
+        row(bigButton("Turn Waze's detail log back on", Palette.CARD_HI, 14f) {
+            AlertDialog.Builder(this).setMessage("Waze closes for a few seconds and reopens (navigation resumes). Do it now?")
+                .setPositiveButton("Do it") { _, _ ->
+                    Thread {
+                        val ok = Police.enableDebug()
+                        runOnUiThread { Toast.makeText(this, if (ok) "Done — Waze restarted" else "Couldn't (root?)", Toast.LENGTH_LONG).show() }
+                    }.start()
+                }.setNegativeButton("Not now", null).show()
+        })
+
+        section("Dock keyboard")
+        row(bigButton("🧪 iDrive test (records every control)", Palette.CARD_HI, 15f) {
+            startActivity(Intent(this, IDriveLabActivity::class.java))
+        })
+        col.addView(label("A compact keyboard on the side opposite the text field, so Waze's search results stay visible. " +
+            "⇄ flips the side, ▾ shrinks it to a small button. iDrive: push = move between keys, turn = next / previous, press = type the yellow key.", 13f, Palette.MUTED))
+        val kbStatus = label("", 13f, Palette.MUTED)
+        fun showKb() {
+            val cur = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+            kbStatus.text = if (cur == DockKeyboard.id(this)) "Dock keyboard is in use ✓" else "In use now: ${cur ?: "?"}"
+        }
+        showKb()
+        col.addView(kbStatus)
+        row(
+            bigButton("Use Dock keyboard", Palette.BLUE, 15f) {
+                val id = DockKeyboard.id(this)
+                val before = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+                if (before != null && before != id) prefs.previousKeyboard = before
+                kbStatus.text = "Switching to the Dock keyboard…"
+                Thread {
+                    // `ime` reports success even when it refuses, so read back what Android now uses.
+                    val said = Root.output("ime enable $id 2>&1", "ime set $id 2>&1", "settings get secure default_input_method")
+                    var now = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+                    DebugLog.log("KEY", "use Dock keyboard ($id): ${said?.trim()?.replace("\n", " | ") ?: "root refused"} → in use: $now")
+                    if (said != null && now != id) {
+                        // Fallback: write the settings ime would have written.
+                        val enabled = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_INPUT_METHODS).orEmpty()
+                        val list = if (enabled.split(':').any { it.substringBefore(';') == id }) enabled
+                            else listOf(enabled, id).filter { it.isNotBlank() }.joinToString(":")
+                        Root.run("settings put secure enabled_input_methods '$list'", "settings put secure default_input_method $id")
+                        now = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+                        DebugLog.log("KEY", "settings fallback → in use: $now")
+                    }
+                    runOnUiThread {
+                        showKb()
+                        when {
+                            said == null -> {
+                                Toast.makeText(this, "No root: switch it on in Android's keyboard settings", Toast.LENGTH_LONG).show()
+                                runCatching { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
+                            }
+                            now == id -> Toast.makeText(this, "Dock keyboard on ✓ — tap a text field", Toast.LENGTH_LONG).show()
+                            else -> {
+                                Toast.makeText(this, "Android refused: ${said.trim().lines().firstOrNull { it.isNotBlank() } ?: "?"}", Toast.LENGTH_LONG).show()
+                                runCatching { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
+                            }
+                        }
+                    }
+                    Thread { DebugLog.uploadNow(applicationContext) }.start()
+                }.start()
+            },
+            bigButton("Previous keyboard", Palette.CARD_HI, 15f) {
+                val prev = prefs.previousKeyboard
+                if (prev.isBlank()) {
+                    runCatching { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
+                } else Thread {
+                    val said = Root.output("ime set $prev 2>&1")
+                    DebugLog.log("KEY", "previous keyboard ($prev): ${said?.trim() ?: "root refused"}")
+                    runOnUiThread { showKb() }
+                }.start()
+            },
+        )
+
         section("Floating button")
+        row(bigButton("Reset button position", Palette.BLUE, 15f) {
+            DockService.start(this, DockService.ACTION_RESET_POSITION)
+            Toast.makeText(this, "Button moved to the left edge, half-way down", Toast.LENGTH_SHORT).show()
+        })
+        col.addView(label("It always stays fully on screen (below the status bar) and moves out of the keyboard's way.", 13f, Palette.MUTED))
         slider("Size", prefs.bubbleSizeDp, 32, 96, " dp") { prefs.bubbleSizeDp = it; DockService.start(this, DockService.ACTION_RELAYOUT) }
         slider("Opacity when idle", prefs.bubbleAlpha, 15, 100, " %") { prefs.bubbleAlpha = it; DockService.start(this, DockService.ACTION_RELAYOUT) }
+
+        section("GPS")
+        col.addView(label("Auto doctor: watches the GPS while the dock runs and starts the GPS doctor's fixes by itself when it breaks. Waits out tunnels, underground car parks and places where the GPS always drops.", 13f, Palette.MUTED))
+        switch("GPS auto doctor", AutoDoctor.enabled(this)) { AutoDoctor.setEnabled(this, it) }
+        col.addView(label("Parked position: after a start with no sky (garage), give Waze the last saved GPS position until the van moves, so a route can be set. The real GPS is paused meanwhile and gets it back at once when you drive or the sky shows.", 13f, Palette.MUTED))
+        switch("Show parked position after start", ParkedPosition.enabled(this)) { ParkedPosition.setEnabled(this, it) }
+        col.addView(label("Status ring on the floating button — white = all fine. Left half GPS: orange = barely (worse than ±50 m or no fix 15–60 s), grey dashed = no sky (tunnel / car park), red = gone, pink = parked position shown. Right half Wi-Fi: yellow = link getting poor (may drop), orange = no internet / link bad, blue = joining, purple = Bluetooth kicked, red = lost, grey dashed = Wi-Fi off.", 13f, Palette.MUTED))
+        switch("GPS half of the ring", prefs.gpsDot) { prefs.gpsDot = it }
+        switch("Wi-Fi half of the ring", prefs.wifiDot) { prefs.wifiDot = it }
 
         section("Updates")
         col.addView(label("Build ${BuildConfig.VERSION_CODE}. New builds from GitHub install by themselves (root), checked when the dock starts and every 3 min.", 13f, Palette.MUTED))
@@ -146,6 +269,12 @@ class SettingsActivity : Activity() {
 
     private fun names(pkgs: List<String>) =
         pkgs.joinToString(", ") { Apps.entry(this, it)?.label ?: "$it (not installed)" }.ifBlank { "none" }
+
+    private fun policeStatus(): String {
+        val log = when (Police.debugLog) { true -> "Waze detail log: on ✓"; false -> "⚠ Waze detail log is OFF — no police reports until it's back on"; null -> "Waze detail log: not checked yet" }
+        val n = Police.reports.size
+        return "$log · ${Police.status}" + if (n > 0) " · $n report${if (n == 1) "" else "s"} known now" else ""
+    }
 
     private fun section(title: String) {
         col.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(18)) })

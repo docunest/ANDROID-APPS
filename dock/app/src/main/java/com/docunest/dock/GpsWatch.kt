@@ -32,6 +32,11 @@ object GpsWatch {
         private set
     @Volatile var since = 0L
         private set
+    /** Last real GPS fix any app got (elapsedRealtime, 0 = none) and its accuracy — for the button's dot. */
+    @Volatile var lastFixAt = 0L
+        private set
+    @Volatile var lastAccuracy: Float? = null
+        private set
     private val detector = GlitchDetector()
     private var satsUsed = 0
     private var started = false
@@ -69,7 +74,10 @@ object GpsWatch {
     }
 
     private fun check(cur: Location) {
-        if (cur.provider != LocationManager.GPS_PROVIDER) return
+        if (cur.provider != LocationManager.GPS_PROVIDER || cur.isMockFix()) return
+        ParkedPosition.save(app, cur)
+        lastFixAt = android.os.SystemClock.elapsedRealtime()
+        lastAccuracy = if (cur.hasAccuracy()) cur.accuracy else null
         fixesSeen++
         val what = detector.feed(
             GlitchDetector.Fix(

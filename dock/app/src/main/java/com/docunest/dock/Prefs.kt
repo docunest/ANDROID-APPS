@@ -38,7 +38,7 @@ class Prefs(context: Context) {
 
     /** How many recent places appear in the press-and-slide menu. */
     var fanLinks: Int
-        get() = sp.getInt("fanLinks", 4)
+        get() = sp.getInt("fanLinks", 6)
         set(value) = sp.edit().putInt("fanLinks", value).apply()
 
     var fanBookmarkHere: Boolean
@@ -70,6 +70,70 @@ class Prefs(context: Context) {
     var bubbleY: Int
         get() = sp.getInt("bubbleY", 300)
         set(value) = sp.edit().putInt("bubbleY", value).apply()
+
+    /** Split screen: Waze on the right, Google Maps on the left (owner's choice 2026-11-13). */
+    var wazeOnRight: Boolean
+        get() = sp.getBoolean("wazeOnRight", true)
+        set(value) = sp.edit().putBoolean("wazeOnRight", value).apply()
+
+    /** The keyboard in use before switching to the Dock keyboard (to switch back). */
+    var previousKeyboard: String
+        get() = sp.getString("previousKeyboard", "") ?: ""
+        set(value) = sp.edit().putString("previousKeyboard", value).apply()
+
+    /** Satellites drawn around the van on the dock map (🛰 chip). */
+    /** Round GTA-style mini-map over Waze (owner 2026-11-16: "I want this to be visible" — on by default). */
+    var miniMap: Boolean
+        get() = sp.getBoolean("miniMap", true)
+        set(value) = sp.edit().putBoolean("miniMap", value).apply()
+    /** Owner 2026-11-17: "shrink the bubble by 30 %" (was 240; new key so it applies once). */
+    var miniSizeDp: Int
+        get() = sp.getInt("miniSizeDp2", 168)
+        set(value) = sp.edit().putInt("miniSizeDp2", value).apply()
+    /** Mini-map mode: "auto" or a MiniModes.Mode name. */
+    var miniMode: String
+        get() = sp.getString("miniMode", MiniModes.AUTO) ?: MiniModes.AUTO
+        set(value) = sp.edit().putString("miniMode", value).apply()
+    var miniX: Int
+        get() = sp.getInt("miniX", -1)
+        set(value) = sp.edit().putInt("miniX", value).apply()
+    var miniY: Int
+        get() = sp.getInt("miniY", -1)
+        set(value) = sp.edit().putInt("miniY", value).apply()
+    /** Police reports from Waze flash the screen edges (owner 2026-11-17). */
+    var policeFlash: Boolean
+        get() = sp.getBoolean("policeFlash", true)
+        set(value) = sp.edit().putBoolean("policeFlash", value).apply()
+    /** Waze's useful log lines into the dock's debug log while driving (WazeTap). */
+    var wazeRecord: Boolean
+        get() = sp.getBoolean("wazeRecord", true)
+        set(value) = sp.edit().putBoolean("wazeRecord", value).apply()
+    /** Mini-map zoom set with the ring: metres across, 0 = Auto. */
+    var miniSpanM: Int
+        get() = sp.getInt("miniSpanM", 0)
+        set(value) = sp.edit().putInt("miniSpanM", value).apply()
+    /** Dock map full width (list hidden, ⤢ button). */
+    var mapWide: Boolean
+        get() = sp.getBoolean("mapWide", false)
+        set(value) = sp.edit().putBoolean("mapWide", value).apply()
+    /** Dock map view: auto / route / a span in km (1, 3, 8, 25, 80, 250). */
+    var mapView: String
+        get() = sp.getString("mapView", MapViews.AUTO) ?: MapViews.AUTO
+        set(value) = sp.edit().putString("mapView", value).apply()
+
+    var skyOnMap: Boolean
+        get() = sp.getBoolean("skyOnMap", true)
+        set(value) = sp.edit().putBoolean("skyOnMap", value).apply()
+
+    /** GPS-state dot on the floating button. */
+    var gpsDot: Boolean
+        get() = sp.getBoolean("gpsDot", true)
+        set(value) = sp.edit().putBoolean("gpsDot", value).apply()
+
+    /** Wi-Fi-state dot on the floating button. */
+    var wifiDot: Boolean
+        get() = sp.getBoolean("wifiDot", true)
+        set(value) = sp.edit().putBoolean("wifiDot", value).apply()
 
     var startOnBoot: Boolean
         get() = sp.getBoolean("startOnBoot", true)

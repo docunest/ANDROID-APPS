@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -9,13 +10,26 @@
     <uses-permission android:name="android.permission.ACCESS_LOCATION_EXTRA_COMMANDS" />
     <!-- Wi-Fi doctor + GPS glitch recorder keep working while Waze is in front (granted with root). -->
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!-- Parked position after a cold start in a garage: Dock is the "mock location app" (granted with root). -->
+    <uses-permission android:name="android.permission.ACCESS_MOCK_LOCATION"
+        tools:ignore="MockLocation,ProtectedPermissions" />
     <!-- Wi-Fi doctor: state, scans for the hotspot. -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Wi-Fi doctor's Bluetooth kick: see the iPhone on the car's Bluetooth, switch Bluetooth off/on. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- KSW unit: follow the Goodocom Bluetooth module's log (granted through the unit's own adb). -->
+    <uses-permission android:name="android.permission.READ_LOGS"
+        tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <!-- The floating button, fan menu and new-link card are overlays. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- The dock service is also a location service: GPS fixes keep coming while Waze is in front
+         (without it, Android 10 stops them unless background location was granted). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Head unit power-cycles with the ignition: start on boot. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -34,6 +48,20 @@
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.Dock">
 
+        <!-- "Mini-map" in the app list: shows the mini-map again after Hide. -->
+        <activity
+            android:name=".MiniMapLauncher"
+            android:exported="true"
+            android:label="Mini-map"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity="com.docunest.dock.minimap"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
         <activity
             android:name=".DockActivity"
             android:exported="true"
@@ -80,9 +108,29 @@
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
 
         <activity
-            android:name=".NavTestActivity"
+            android:name=".DebugActivity"
             android:exported="false"
-            android:label="Waze test" />
+            android:label="Debug log"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
+
+        <activity
+            android:name=".FixReportActivity"
+            android:exported="false"
+            android:label="GPS fix report"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
+
+        <!-- 🧪 Temporary: iDrive test (records every control, blocks their actions). -->
+        <activity
+            android:name=".IDriveLabActivity"
+            android:exported="false"
+            android:label="iDrive test"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation" />
+
+        <activity
+            android:name=".OfflineDataActivity"
+            android:exported="false"
+            android:label="Offline map data" />
 
         <!-- Split screen helper: presses Android's "toggle split screen" so Waze
              stays on one side and Google Maps opens on the other. -->
@@ -99,6 +147,20 @@
                 android:resource="@xml/split_service" />
         </service>
 
+        <!-- The Dock keyboard: a side panel that never covers Waze's results; iDrive controllable. -->
+        <service
+            android:name=".DockKeyboard"
+            android:label="Dock keyboard"
+            android:permission="android.permission.BIND_INPUT_METHOD"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/dock_ime" />
+        </service>
+
         <receiver
             android:name=".UpdateReceiver"
             android:exported="false" />
@@ -106,7 +168,7 @@
         <service
             android:name=".DockService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse|location">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Floating dock button over the car head unit, receives places sent from the phone" />

@@ -1,0 +1,15 @@
+nwr/amenity=fuel,toilets,drinking_water,sanitary_dump_station,parking
+nwr/highway=rest_area,services
+nwr/shop=supermarket,convenience
+nwr/tourism=caravan_site,camp_site,picnic_site,viewpoint
+w/maxheight
+w/maxweight
+w/bridge
+nwr/leisure=playground
+nwr/natural=beach
+nwr/man_made=works,lighthouse
+nwr/power=plant
+nwr/landuse=quarry
+nwr/waterway=dam
+nwr/aeroway=aerodrome
+nwr/historic=castle

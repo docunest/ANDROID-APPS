@@ -9,6 +9,7 @@ import android.os.Build
 import android.provider.Settings
 import org.json.JSONArray
 import java.io.File
+import java.util.zip.GZIPInputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -16,6 +17,8 @@ import java.net.URL
  * Self-update: GitHub Actions publishes every build as a release tagged
  * "dock-v<build>" in [BuildConfig.UPDATE_REPO] with dock.apk attached. If a
  * newer one exists, download it and `pm install -r` it as root — no prompt.
+ * Download, cheapest first (metered hotspot): `dock-from-<build>.patch`
+ * against the installed APK, else `dock.apk.gz`, else `dock.apk`.
  * Without root (a phone) Android's installer is used: one tap the first
  * time, silent afterwards on Android 12+.
  * The app restarts itself afterwards (BootReceiver: MY_PACKAGE_REPLACED).
@@ -33,7 +36,10 @@ object Updater {
 
     // Own thread: a download never blocks place syncing.
     private val thread = android.os.HandlerThread("dock-update").apply { start() }
-    private val worker = android.os.Handler(thread.looper)
+    private var worker = android.os.Handler(thread.looper)
+    /** When the running check started (0 = none) — a check stuck past [STUCK_MS] gets a fresh thread. */
+    @Volatile private var checkStartedAt = 0L
+    private const val STUCK_MS = 6 * 60_000L
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
 
     /** What the version badge shows. */
@@ -54,8 +60,90 @@ object Updater {
     /** Check in the background (badge tap, car start, every few minutes). */
     fun checkSoon(context: Context, force: Boolean = false) {
         val app = context.applicationContext
-        worker.post { check(app, force) }
+        val started = checkStartedAt
+        if (started > 0 && System.currentTimeMillis() - started > STUCK_MS) {
+            // The old check hangs (it shouldn't with timeouts — belt and braces): don't queue behind it.
+            DebugLog.log("UPD", "previous check stuck for ${(System.currentTimeMillis() - started) / 1000} s — new thread")
+            worker = android.os.Handler(android.os.HandlerThread("updater").apply { start() }.looper)
+            checkStartedAt = 0L
+        }
+        worker.post {
+            checkStartedAt = System.currentTimeMillis()
+            try { check(app, force) } finally { checkStartedAt = 0L }
+        }
     }
+
+    /**
+     * Download with timeouts (a stalled hotspot used to hang the updater for good on "Downloading…"),
+     * to a temp file, checked against Content-Length, up to 3 tries. False if the release has no such file (404).
+     */
+    private fun download(url: String, file: File): Boolean {
+        var last: Exception? = null
+        repeat(3) { attempt ->
+            val tmp = File(file.path + ".part")
+            try {
+                val c = URL(url).openConnection() as HttpURLConnection
+                c.connectTimeout = 15_000
+                c.readTimeout = 30_000
+                c.instanceFollowRedirects = true
+                try {
+                    if (c.responseCode == 404) return false
+                    if (c.responseCode != 200) throw java.io.IOException("HTTP ${c.responseCode}")
+                    val expected = c.contentLengthLong
+                    c.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                    if (expected > 0 && tmp.length() != expected) throw java.io.IOException("got ${tmp.length()} of $expected bytes")
+                } finally {
+                    c.disconnect()
+                }
+                if (!tmp.renameTo(file)) throw java.io.IOException("can't move the download")
+                DebugLog.log("UPD", "downloaded ${file.length()} bytes: ${url.substringAfterLast('/')}")
+                return true
+            } catch (e: Exception) {
+                last = e
+                tmp.delete()
+                DebugLog.log("UPD", "download try ${attempt + 1} failed: ${e.javaClass.simpleName} ${e.message}")
+                Thread.sleep(3_000)
+            }
+        }
+        throw last ?: java.io.IOException("download failed")
+    }
+
+    /**
+     * Cheapest first, as the hotspot's mobile data is metered: a patch from the
+     * installed build ([DeltaPatch], a few KB), else dock.apk.gz, else dock.apk.
+     * Returns what it cost, e.g. "patch 6 KB".
+     */
+    private fun downloadCheapest(context: Context, rel: Release, file: File): String {
+        val dir = rel.apkUrl.substringBeforeLast('/')
+        val tmp = File(file.path + ".dl")
+        try {
+            if (download("$dir/dock-from-${BuildConfig.VERSION_CODE}.patch", tmp)) {
+                try {
+                    val base = File(context.applicationInfo.sourceDir).readBytes()
+                    file.outputStream().buffered().use { out -> tmp.inputStream().use { DeltaPatch.apply(base, it, out) } }
+                    return "patch ${kb(tmp.length())}"
+                } catch (e: Exception) {
+                    file.delete()
+                    DebugLog.log("UPD", "patch unusable (${e.message}) — full download")
+                }
+            }
+            if (download("$dir/dock.apk.gz", tmp)) {
+                try {
+                    GZIPInputStream(tmp.inputStream()).use { input -> file.outputStream().use { input.copyTo(it) } }
+                    return "full ${kb(tmp.length())}"
+                } catch (e: Exception) {
+                    file.delete()
+                    DebugLog.log("UPD", "dock.apk.gz unusable (${e.message}) — plain APK")
+                }
+            }
+            if (!download(rel.apkUrl, file)) throw java.io.IOException("dock.apk missing")
+            return "full ${kb(file.length())}"
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    private fun kb(bytes: Long) = "${(bytes + 1023) / 1024} KB"
 
     fun latest(context: Context): Release? {
         val prefs = Prefs(context)
@@ -95,17 +183,29 @@ object Updater {
             return done("v${rel.build} failed to install — retrying later")
         }
         set(true, "Downloading v${rel.build}…")
+        DebugLog.log("UPD", "v${BuildConfig.VERSION_CODE} → v${rel.build}: downloading")
         val file = File(context.cacheDir, "dock-${rel.build}.apk")
-        runCatching {
-            URL(rel.apkUrl).openStream().use { input -> file.outputStream().use { input.copyTo(it) } }
-        }.onFailure { return done("Download failed: ${it.message}") }
-        set(true, "Installing v${rel.build}…")
+        val got = runCatching { downloadCheapest(context, rel, file) }
+            .getOrElse { file.delete(); return done("Download failed: ${it.message}") }
+        set(true, "Installing v${rel.build} ($got)…")
         // pm can't always read app-private files: stage in /data/local/tmp.
         val staged = "/data/local/tmp/dock-update.apk"
-        val ok = Root.run("cp '${file.absolutePath}' $staged", "chmod 644 $staged", "pm install -r -d $staged", "rm -f $staged")
+        DebugLog.log("UPD", "installing v${rel.build} via ${Root.via()}")
+        // Play Protect treats a root/adb `pm install` like a USB install and can hold Dock's update
+        // up to an hour waiting for a tap, so shell-install checks are off (owner's call 2026-10-28;
+        // Play Store and browser installs are still checked). The install's own exit code decides
+        // (the commands run joined with ";", so otherwise the clean-up's code would count). A subshell
+        // `(exit r)` sets it without ending the shell: the adb route still appends its own exit check.
+        val ok = Root.runLong(
+            120_000,
+            "settings put global verifier_verify_adb_installs 0",
+            "cp '${file.absolutePath}' $staged", "chmod 644 $staged",
+            "pm install -r -d $staged", "r=\$?", "rm -f $staged", "(exit \$r)",
+        )
+        DebugLog.log("UPD", "install v${rel.build}: ${if (ok) "ok — restarting" else "FAILED"}")
         if (ok) {
             file.delete()
-            return done("Updated to v${rel.build} — restarting")
+            return done("Updated to v${rel.build} ($got) — restarting")
         }
         prefs.failedBuild = rel.build
         prefs.failedAt = System.currentTimeMillis()
@@ -119,6 +219,7 @@ object Updater {
     }
 
     private fun done(status: String): String {
+        if (!status.startsWith("Up to date")) DebugLog.log("UPD", status)
         set(false, status)
         return status
     }

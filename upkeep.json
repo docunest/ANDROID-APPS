@@ -1,0 +1,1 @@
+{"lastAudit": "2026-11-21T11:54:07Z", "result": "dock + camper (Gradle): AGP 8.7.3, Kotlin 2.0.21, osmdroid 6.1.20, no known CVEs; dock 138/138 tests ok. reelbox npm: 4 moderate, reelbox/native: 3 moderate (glob/minimatch in build tools), fixes need breaking bumps, not applied."}

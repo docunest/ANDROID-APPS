@@ -2,12 +2,17 @@ name: Dock APK
 
 # Builds the car dock app and publishes it as release "dock-v<run>" with
 # dock.apk attached. The app on the (rooted) head unit polls these releases
-# and installs newer builds by itself (dock/app/.../Updater.kt).
+# and installs newer builds by itself (dock/app/.../Updater.kt). It downloads
+# the smallest file that works: dock-from-<its build>.patch, else dock.apk.gz.
+# Only main ships (owner 2026-11-21: one version, not one per branch); other
+# branches just build and test.
 on:
   push:
     paths:
       - "dock/**"
+      - "!dock/tools/**"
       - ".github/workflows/dock.yml"
+      - "!dock/**/*.md"
   workflow_dispatch:
 
 permissions:
@@ -24,21 +29,84 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Build APK
         working-directory: dock
         run: ./gradlew assembleRelease --no-daemon -PbuildNumber=${{ github.run_number }} -PserverUrl="${{ vars.MAPPAL_URL }}"
 
-      - name: Publish release (the head unit installs it by itself)
+      - name: Unit tests
+        working-directory: dock
+        run: ./gradlew testDebugUnitTest --no-daemon
+
+      - name: Size guard (the car downloads over metered mobile data)
+        run: |
+          size=$(stat -c%s dock/app/build/outputs/apk/release/app-release.apk)
+          echo "dock.apk: $size bytes"
+          # Was 1.53 MB before code shrinking (now ~665 KB stored, ~330 KB gzipped). Stop if it creeps back up.
+          if [ "$size" -gt 850000 ]; then echo "::error::dock.apk is $size bytes (limit 850000)"; exit 1; fi
+
+      - name: Delta patches from the last 3 Dock builds
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp dock/app/build/outputs/apk/release/app-release.apk dock.apk
-          gh release create "dock-v${{ github.run_number }}" dock.apk \
+          pip install --quiet bsdiff4==1.4.4
+          mkdir -p delta
+          cp dock/app/build/outputs/apk/release/app-release.apk delta/dock.apk
+          gzip -9 -n -c delta/dock.apk > dock.apk.gz
+          full=$(stat -c%s dock.apk.gz)
+          for n in $(gh release list --limit 100 --json tagName --jq '.[].tagName' \
+                     | sed -n 's/^dock-v\([0-9]*\)$/\1/p' | sort -n | awk -v me=${{ github.run_number }} '$1 < me' | tail -3); do
+            gh release download "dock-v$n" -p dock.apk -O "delta/old-$n.apk" || continue
+            python3 dock/tools/delta.py make "delta/old-$n.apk" delta/dock.apk "delta/dock-from-$n.patch" || { rm -f "delta/dock-from-$n.patch"; continue; }
+            # Not worth it if it isn't much smaller than the gzipped APK (e.g. from a pre-delta build).
+            if [ "$(stat -c%s "delta/dock-from-$n.patch")" -gt $((full * 6 / 10)) ]; then rm "delta/dock-from-$n.patch"; fi
+          done
+          ls -la delta dock.apk.gz
+
+      - name: Check the patches with the app's own patcher
+        if: github.ref == 'refs/heads/main'
+        working-directory: dock
+        run: ./gradlew testDebugUnitTest --no-daemon --rerun-tasks -PdeltaCheckDir="$GITHUB_WORKSPACE/delta"
+
+      - name: Publish release (the head unit installs it by itself)
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp delta/dock.apk dock.apk
+          shopt -s nullglob
+          patches=(delta/dock-from-*.patch)   # none when the last builds were too different (e.g. before delta updates)
+          gh release create "dock-v${{ github.run_number }}" dock.apk dock.apk.gz "${patches[@]}" \
             --target "${{ github.sha }}" \
             --title "Dock build ${{ github.run_number }}" \
-            --notes "Branch ${{ github.ref_name }}, commit ${{ github.sha }}. Installed automatically on the head unit within ~3 h (or Settings → Check now)."
+            --notes "Branch ${{ github.ref_name }}, commit ${{ github.sha }}. Installed automatically on the head unit within minutes (or tap the version badge). Downloads only a patch when the unit is on one of the last 3 builds."
+
+      - name: Drop patches from older releases (keeps the update check small)
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for n in $(ls delta | sed -n 's/^old-\([0-9]*\)\.apk$/\1/p'); do
+            for a in $(gh release view "dock-v$n" --json assets --jq '.assets[].name' | grep -E '\.patch$|\.apk\.gz$'); do
+              gh release delete-asset "dock-v$n" "$a" -y || true
+            done
+          done
+
+      - name: Keep only the 10 newest Dock releases
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for t in $(gh release list --limit 300 --json tagName --jq '.[].tagName' \
+                     | grep -E '^dock-v[0-9]+$' | sort -t v -k2 -n -r | tail -n +11); do
+            gh release delete "$t" --cleanup-tag -y || true
+          done
 
       - uses: actions/upload-artifact@v4
         with:
           name: dock-apk
-          path: dock.apk
+          path: dock/app/build/outputs/apk/release/app-release.apk

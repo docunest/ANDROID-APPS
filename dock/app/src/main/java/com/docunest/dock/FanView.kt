@@ -1,7 +1,11 @@
 package com.docunest.dock
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
+import android.graphics.Matrix
+import android.graphics.Shader
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
@@ -24,9 +28,22 @@ class FanTarget(
     /** Places get wide labelled pills; apps get round icons. */
     val pill: Boolean,
     val subtitle: String? = null,
+    /** Map of the area around a place ([Thumbs]), shown round at the pill's left. */
+    val image: Bitmap? = null,
+    /** Second choice at the pill's right end (e.g. "G" = Google Maps beside Waze). */
+    val altLabel: String? = null,
+    val altColor: Int = Palette.GMAPS,
+    val alt: (() -> Unit)? = null,
     val action: () -> Unit,
 ) {
     val rect = RectF()
+
+    /** The right-end circle of a pill with an [alt] choice. */
+    fun altRect(): RectF? {
+        if (alt == null || !pill) return null
+        val d = rect.height()
+        return RectF(rect.right - d, rect.top, rect.right, rect.bottom)
+    }
 }
 
 /**
@@ -38,12 +55,15 @@ class FanTarget(
  */
 class FanView(context: Context, private val targets: List<FanTarget>) : View(context) {
     private var hovered: FanTarget? = null
+    /** The finger is on [hovered]'s right-end alternative. */
+    private var hoveredAlt = false
     private val origin = IntArray(2)
     private val shade = Paint().apply { color = Color.argb(110, 0, 0, 0) }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = Color.WHITE }
     private val text = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; isFakeBoldText = true }
     private val sub = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(220, 255, 255, 255) }
+    private val picture = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private var cx = 0f
     private var cy = 0f
 
@@ -63,9 +83,11 @@ class FanView(context: Context, private val targets: List<FanTarget>) : View(con
             t.rect.set(x - iconSize / 2, y - iconSize / 2, x + iconSize / 2, y + iconSize / 2)
             clamp(t.rect, screenW, screenH)
         }
-        val pw = min(dp(330), screenW - dp(24)).toFloat()
-        val ph = dp(62).toFloat()
-        val gap = dp(10).toFloat()
+        val pw = min(dp(380), screenW - dp(24)).toFloat()
+        // 6 places + "Show more" must fit a 600 dp-high head unit screen (or a smaller one).
+        val n = pills.size.coerceAtLeast(1)
+        val gap = min(dp(10).toFloat(), (screenH - dp(24)) * 0.02f)
+        val ph = min(dp(66).toFloat(), (screenH - dp(24) - (n - 1) * gap) / n)
         val right = cx < screenW / 2f
         val px = if (right) cx + radius + iconSize / 2 + dp(24) else cx - radius - iconSize / 2 - dp(24) - pw
         val total = pills.size * ph + (pills.size - 1).coerceAtLeast(0) * gap
@@ -90,14 +112,20 @@ class FanView(context: Context, private val targets: List<FanTarget>) : View(con
     fun hover(x: Float, y: Float) {
         val slack = dp(14).toFloat()
         val hit = targets.firstOrNull { RectF(it.rect).apply { inset(-slack, -slack) }.contains(x, y) }
-        if (hit !== hovered) {
+        // Right end of the pill, and anything beyond it on that side, = the alternative.
+        val alt = hit?.altRect()?.let { x >= it.left } ?: false
+        if (hit !== hovered || alt != hoveredAlt) {
             hovered = hit
+            hoveredAlt = alt
             if (hit != null) performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
             invalidate()
         }
     }
 
     fun selected(): FanTarget? = hovered
+
+    /** What lifting the finger here does. */
+    fun selectedAction(): (() -> Unit)? = hovered?.let { h -> if (hoveredAlt && h.alt != null) h.alt else h.action }
 
     override fun onDraw(canvas: Canvas) {
         getLocationOnScreen(origin)
@@ -107,14 +135,39 @@ class FanView(context: Context, private val targets: List<FanTarget>) : View(con
             val on = t === hovered
             val r = RectF(t.rect).apply { offset(-origin[0].toFloat(), -origin[1].toFloat()) }
             if (on) r.inset(-dp(6).toFloat(), -dp(6).toFloat())
-            fill.color = if (on) Palette.BLUE else t.color
+            val onAlt = on && hoveredAlt && t.alt != null
+            fill.color = if (on && !onAlt) Palette.BLUE else t.color
             if (t.pill) {
                 canvas.drawRoundRect(r, r.height() / 2, r.height() / 2, fill)
                 if (on) canvas.drawRoundRect(r, r.height() / 2, r.height() / 2, stroke)
-                val pad = dp(18).toFloat()
-                text.textSize = dp(18).toFloat()
-                sub.textSize = dp(13).toFloat()
-                val avail = r.width() - pad * 2
+                var altSpace = 0f
+                if (t.alt != null) {
+                    // Right-end circle: lift on it for the alternative (Google Maps beside Waze).
+                    val d = r.height() - dp(8)
+                    val acx = r.right - dp(4) - d / 2
+                    fill.color = if (onAlt) Palette.BLUE else t.altColor
+                    canvas.drawCircle(acx, r.centerY(), d / 2, fill)
+                    if (onAlt) canvas.drawCircle(acx, r.centerY(), d / 2, stroke)
+                    text.textSize = dp(20).toFloat()
+                    val l = t.altLabel ?: "G"
+                    canvas.drawText(l, acx - text.measureText(l) / 2, r.centerY() + dp(7), text)
+                    altSpace = d + dp(8)
+                }
+                var pad = dp(18).toFloat()
+                t.image?.let { img ->
+                    // Round map picture filling the pill's left end.
+                    val d = r.height() - dp(8)
+                    val left = r.left + dp(4)
+                    val top = r.top + dp(4)
+                    val m = Matrix().apply { setScale(d / img.width, d / img.height); postTranslate(left, top) }
+                    picture.shader = BitmapShader(img, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply { setLocalMatrix(m) }
+                    canvas.drawCircle(left + d / 2, top + d / 2, d / 2, picture)
+                    pad = d + dp(16)
+                }
+                val big = r.height() >= dp(56)
+                text.textSize = dp(if (big) 18 else 16).toFloat()
+                sub.textSize = dp(if (big) 13 else 12).toFloat()
+                val avail = r.width() - pad - dp(18) - altSpace
                 val title = TextUtils.ellipsize(t.label, text, avail, TextUtils.TruncateAt.END).toString()
                 if (t.subtitle != null) {
                     canvas.drawText(title, r.left + pad, r.centerY() - dp(2), text)
