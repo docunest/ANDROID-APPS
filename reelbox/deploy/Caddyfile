@@ -1,0 +1,14 @@
+{$DOMAIN} {
+	# Video is already compressed; only text (app, JSON) gets gzip.
+	encode {
+		gzip
+		match {
+			header Content-Type text/*
+			header Content-Type application/json*
+			header Content-Type application/javascript*
+		}
+	}
+	reverse_proxy reelbox:8080 {
+		flush_interval -1
+	}
+}

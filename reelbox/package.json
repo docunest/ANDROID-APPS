@@ -1,0 +1,44 @@
+{
+  "name": "reelbox",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Cross-platform player for Xtream Codes servers (web/PWA, iOS, Android, Samsung Tizen, macOS)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "node server/proxy.mjs",
+    "serve": "node server/proxy.mjs",
+    "mock": "node server/mock-xtream.mjs",
+    "build:tizen": "npm run build && node scripts/build-tizen.mjs",
+    "cap:sync": "npm run build:cap && npx cap sync && node scripts/patch-native.mjs && node scripts/make-native-icons.cjs",
+    "test:e2e": "node tests/e2e.mjs",
+    "build:cap": "tsc --noEmit && vite build --mode capacitor",
+    "ios": "npm run cap:sync && npx cap open ios",
+    "android": "npm run cap:sync && npx cap open android",
+    "test:sync": "node tests/sync.mjs"
+  },
+  "dependencies": {
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.6.2",
+    "@capacitor/file-transfer": "^2.0.6",
+    "@capacitor/filesystem": "^8.1.5",
+    "hls.js": "^1.7.4",
+    "idb-keyval": "^6.3.0",
+    "qrcode-generator": "^1.5.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.5"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/cli": "^8.6.2",
+    "@capacitor/ios": "^8.6.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vite-plugin-pwa": "^2.0.0"
+  }
+}

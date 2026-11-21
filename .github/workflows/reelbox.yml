@@ -1,0 +1,75 @@
+name: Reelbox
+
+# Type-checks and builds Reelbox on every change. On main it also publishes release
+# "reelbox-v<run>" with reelbox.apk (Android) and the unsigned Samsung package attached.
+# The iPhone / Mac web app is published to GitHub Pages by ponas-pages.yml (one Pages site per repo).
+on:
+  push:
+    paths:
+      - "reelbox/**"
+      - ".github/workflows/reelbox.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reelbox-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: reelbox
+    env:
+      VITE_API_URL: ${{ vars.REELBOX_API_URL }}
+      REELBOX_BUILD: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: reelbox/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - run: npm ci
+
+      - name: Web app (type-check + build)
+        run: npm run build
+
+      - name: Samsung projector package (unsigned)
+        run: npm run build:tizen && cp build/Reelbox-unsigned.wgt reelbox-samsung-unsigned.wgt
+
+      - name: Android APK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" > /dev/null
+          npm run build:cap
+          npx cap sync android
+          node scripts/patch-native.mjs
+          (cd android && ./gradlew --no-daemon assembleRelease)
+          cp android/app/build/outputs/apk/release/app-release.apk reelbox.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reelbox-${{ github.run_number }}
+          path: |
+            reelbox/reelbox.apk
+            reelbox/reelbox-samsung-unsigned.wgt
+
+      - name: Publish release (main only)
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "reelbox-v${{ github.run_number }}" reelbox.apk reelbox-samsung-unsigned.wgt \
+            --target "${{ github.sha }}" \
+            --title "Reelbox build ${{ github.run_number }}" \
+            --notes "iPhone / Mac: https://docunest.github.io/ANDROID-APPS/reelbox/ (Safari → Share → Add to Home Screen). Android: install reelbox.apk. Samsung projector: sign reelbox-samsung-unsigned.wgt with Tizen Studio (see reelbox/README.md)."
