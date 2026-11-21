@@ -23,12 +23,20 @@ object Root {
         val now = android.os.SystemClock.elapsedRealtime()
         if (suOk == null || now - suCheckedAt > 10 * 60_000L) {
             suCheckedAt = now
+            var why = "su ran but gave no root — allow Dock in the root manager (Magisk / SuperSU)"
             suOk = runCatching {
                 val p = ProcessBuilder("su", "-c", "id").redirectErrorStream(true).start()
                 val out = p.inputStream.bufferedReader().readText()
                 p.waitFor() == 0 && out.contains("uid=0")
+            }.onFailure { e ->
+                val m = e.message.orEmpty()
+                why = when {
+                    "error=13" in m || "ermission denied" in m -> "su exists but Dock may not run it — allow Dock in the root manager (Magisk / SuperSU)"
+                    "error=2" in m || "No such file" in m -> "no su found — not rooted, or the root manager isn't installed"
+                    else -> "can't start su (${m.take(60)})"
+                }
             }.getOrDefault(false)
-            DebugLog.change("ROOT", "su", if (suOk == true) "usable" else "not usable for apps")
+            DebugLog.change("ROOT", "su", if (suOk == true) "usable" else "not usable for apps: $why")
         }
         return suOk == true
     }

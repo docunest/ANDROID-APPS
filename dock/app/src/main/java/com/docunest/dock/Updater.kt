@@ -191,7 +191,17 @@ object Updater {
         // pm can't always read app-private files: stage in /data/local/tmp.
         val staged = "/data/local/tmp/dock-update.apk"
         DebugLog.log("UPD", "installing v${rel.build} via ${Root.via()}")
-        val ok = Root.runLong(120_000, "cp '${file.absolutePath}' $staged", "chmod 644 $staged", "pm install -r -d $staged", "rm -f $staged")
+        // Play Protect treats a root/adb `pm install` like a USB install and can hold Dock's update
+        // up to an hour waiting for a tap, so shell-install checks are off (owner's call 2026-10-28;
+        // Play Store and browser installs are still checked). The install's own exit code decides
+        // (the commands run joined with ";", so otherwise the clean-up's code would count). A subshell
+        // `(exit r)` sets it without ending the shell: the adb route still appends its own exit check.
+        val ok = Root.runLong(
+            120_000,
+            "settings put global verifier_verify_adb_installs 0",
+            "cp '${file.absolutePath}' $staged", "chmod 644 $staged",
+            "pm install -r -d $staged", "r=\$?", "rm -f $staged", "(exit \$r)",
+        )
         DebugLog.log("UPD", "install v${rel.build}: ${if (ok) "ok — restarting" else "FAILED"}")
         if (ok) {
             file.delete()

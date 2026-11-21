@@ -264,7 +264,7 @@ KSW-Q userdebug v4.2.9 (BMW NBT/EVO UI), Android 10, Snapdragon msm8953, SELinux
 3. Open **Dock** → ⚙ → **Grant all with root** (overlay + location + battery whitelist in one go), then **Show button**.
 4. ⚙ → **Server**: your MapPal address (e.g. `https://xxx.vercel.app`) → **Save + test**. The token is pre-filled.
 
-After that it **updates itself** — silently on the rooted head unit; on a phone without root Android shows one "Update" tap the first time (after allowing "install unknown apps" for Dock once), and on Android 12+ later updates are silent too: every push to `dock/` builds a new release, and the app installs it silently with root (`pm install -r`) as soon as the dock starts (car on) and every 3 minutes — tap the version badge in the dock window to check now. Signing key `dock/dock.keystore` is committed on purpose so every build installs over the previous one.
+After that it **updates itself** — silently on the rooted head unit; on a phone without root Android shows one "Update" tap the first time (after allowing "install unknown apps" for Dock once), and on Android 12+ later updates are silent too: every push to `dock/` on `main` builds a new release, and the app installs it silently with root (`pm install -r`) as soon as the dock starts (car on) and every 3 minutes — tap the version badge in the dock window to check now. Signing key `dock/dock.keystore` is committed on purpose so every build installs over the previous one.
 
 ### Updates over metered mobile data
 
@@ -272,6 +272,7 @@ The head unit's internet is the iPhone hotspot, so every byte counts:
 
 - **Small APK:** R8 code and resource shrinking are on (`app/build.gradle.kts`, keep rules for the `app_process` helpers in `app/proguard-rules.pro`). The map library's PNG icons are swapped for tiny vectors, and offline map-archive readers are left out (`OsmTiles.kt`). A full download was 1.53 MB and is now about **330 KB** (`dock.apk.gz`; `dock.apk` is about 665 KB because its code is stored uncompressed, see below). CI fails if `dock.apk` goes over 850 KB.
 - **Updates are patches:** each release also carries `dock-from-<build>.patch` for the 3 builds before it. The unit downloads only the patch and rebuilds the exact new APK from the one it has installed (`DeltaPatch.kt`, made by `tools/delta.py`). Measured: a text fix is about **5 KB** and a small feature about **60 KB**. If the patch is missing, for another build or wrong in any way (SHA-256 check), it downloads `dock.apk.gz`, then `dock.apk`. Older releases' patches are deleted, so the update check stays small.
+- **One version:** only `main` publishes Dock releases (other branches just build and test), and only the 10 newest `dock-v*` releases are kept.
 - **Proof before publishing:** CI rebuilds every patch with the app's own patcher (`DeltaPatchTest`), and only then creates the release.
 - README-only changes don't build a release.
 - The version badge (and Debug log, `UPD`) shows what an update cost, e.g. "Updated to v123 (patch 6 KB)".
