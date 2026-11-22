@@ -10,7 +10,8 @@ import { PicturePanel, type DetectState } from '../components/PicturePanel';
 import { episodeRef, refKey, type Kind, type MediaRef } from '../lib/xtream';
 import { isIOS, isKey, isSafari, isStandalone, isTizen, nativePlatform } from '../lib/platform';
 import { focusFirst } from '../lib/spatial';
-import { load } from '../lib/store';
+import { load, usePersisted } from '../lib/store';
+import { NEUTRAL_TONE, toneFilter, type Tone } from '../lib/tone';
 import { Icon, toast } from '../components/ui';
 import { playPath } from './paths';
 
@@ -57,6 +58,10 @@ export default function Player() {
   const [pinchZoom, setPinchZoom] = useState<number | null>(null);
   const picture = pinchZoom ? { ...pic.picture, zoom: pinchZoom } : pic.picture;
   const picKey = JSON.stringify(picture);
+  // ---- tone: brightness / gamma for this screen (per device, not synced) ----
+  const [tone, mutateTone] = usePersisted<Tone>('device:tone', NEUTRAL_TONE);
+  const [toneSupported, setToneSupported] = useState(true);
+  const toneKey = JSON.stringify(tone);
   const [stageSize, setStageSize] = useState({ w: 0, h: 0 });
   const [detected, setDetected] = useState<Crop | null>(null);
   const [detectState, setDetectState] = useState<DetectState>('off');
@@ -156,6 +161,12 @@ export default function Player() {
     if (!en || !stageSize.w || !st) return;
     en.setFrame(frameRect(stageSize, { w: st.vw, h: st.vh }, picture, activeCrop), stageSize);
   }, [stageSize.w, stageSize.h, st?.vw, st?.vh, picKey, cropKey, engineName, reloadNonce]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const en = engine.current;
+    if (!en) return;
+    setToneSupported(en.setFilter(toneFilter(tone)) || en.name !== 'avplay');
+  }, [toneKey, engineName, reloadNonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Black bars: start from what we found last time for this title, then keep refining.
   useEffect(() => {
@@ -641,6 +652,12 @@ export default function Player() {
           onDetectNow={rescan}
           onReset={() => pic.reset()}
           onMakeDefault={() => pic.makeDefault().then(() => toast('Used as default for all videos'))}
+          tone={tone}
+          toneSupported={engineName !== 'avplay' && toneSupported}
+          onTone={(t) => {
+            mutateTone(() => t);
+            poke();
+          }}
           onClose={() => setPanel(null)}
         />
       )}

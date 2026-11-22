@@ -60,6 +60,8 @@ export interface Engine {
   setFrame(r: Rect, container: { w: number; h: number }): void;
   /** Element frames can be drawn from for black-bar detection (null if not possible). */
   frameSource(): HTMLVideoElement | null;
+  /** Apply a CSS filter (brightness/gamma…). Returns false where the engine can't (Samsung AVPlay). */
+  setFilter(css: string): boolean;
   togglePip?(): void;
   showAirplay?(): void;
   destroy(): void;
@@ -268,6 +270,10 @@ export class HtmlEngine extends Base implements Engine {
     st.height = `${r.h}px`;
     st.objectFit = 'fill';
   }
+  setFilter(css: string) {
+    this.video.style.filter = css;
+    return true;
+  }
   frameSource() {
     return this.video;
   }
@@ -397,6 +403,10 @@ export class AvPlayEngine extends Base implements Engine {
     }
   }
 
+  setFilter(css: string) {
+    // AVPlay draws on a hardware plane below the page: nothing on the page can change its pixels.
+    return !css;
+  }
   setFrame(r: Rect, container: { w: number; h: number }) {
     // AVPlay coordinates are on a 1920×1080 canvas regardless of the panel resolution.
     const sx = 1920 / (container.w || 1920);

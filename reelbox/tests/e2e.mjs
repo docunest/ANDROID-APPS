@@ -335,6 +335,68 @@ await step('picture: a normal 16:9 video is left alone', async () => {
   await page.keyboard.press('Escape');
 });
 
+await step('picture: brightness boost for a dim screen (per device, really brighter)', async () => {
+  await page.goto('http://localhost:8080/#/movie/104');
+  await page.getByRole('link', { name: /Resume|Play/ }).first().click();
+  await waitPlaying(page, 1);
+  await page.evaluate(() => document.querySelector('video').pause());
+  // What is actually on screen (CSS filters included), via screenshots of the paused frame.
+  const shot = async () => (await page.screenshot({ clip: { x: 340, y: 200, width: 600, height: 400 } })).toString('base64');
+  // Mean lift of the mid tones (the test pattern is mostly pure colours, which can't get brighter).
+  const lift = (a, b) =>
+    page.evaluate(async ([a, b]) => {
+      const px = async (b64) => {
+        const img = new Image();
+        img.src = `data:image/png;base64,${b64}`;
+        await img.decode();
+        const c = document.createElement('canvas');
+        c.width = img.width;
+        c.height = img.height;
+        const g = c.getContext('2d');
+        g.drawImage(img, 0, 0);
+        return g.getImageData(0, 0, c.width, c.height).data;
+      };
+      const [da, db] = [await px(a), await px(b)];
+      const L = (d, i) => 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+      let sum = 0;
+      let n = 0;
+      for (let i = 0; i < da.length; i += 4) {
+        const la = L(da, i);
+        // only pixels with headroom in every channel (pure colour bars are already at maximum)
+        if (la > 15 && Math.max(da[i], da[i + 1], da[i + 2]) < 200) {
+          sum += L(db, i) - la;
+          n++;
+        }
+      }
+      return { lift: sum / Math.max(1, n), n };
+    }, [a, b]);
+  await page.getByRole('button', { name: /Picture: aspect ratio and zoom/ }).click();
+  await page.getByRole('button', { name: 'Normal', exact: true }).click();
+  await page.getByRole('button', { name: 'Close' }).click();
+  await page.waitForTimeout(400);
+  const before = await shot();
+  await page.getByRole('button', { name: /Picture: aspect ratio and zoom/ }).click();
+  await page.getByRole('button', { name: 'Dim screen', exact: true }).click();
+  await page.getByRole('button', { name: 'Gamma up' }).click();
+  await page.locator('.seg-value', { hasText: '1.5' }).waitFor();
+  await page.screenshot({ path: `${OUT}/16-brightness-panel.png` });
+  const filter = await page.evaluate(() => document.querySelector('video').style.filter);
+  expect(/url\(.*reelbox-gamma.*\).*brightness/.test(filter), `filter: ${filter}`);
+  await page.getByRole('button', { name: 'Close' }).click();
+  await page.waitForTimeout(400);
+  const r = await lift(before, await shot());
+  expect(r.n > 500 && r.lift > 15, `boost should lift mid tones: +${r.lift.toFixed(1)} over ${r.n} px`);
+  await page.screenshot({ path: `${OUT}/16-brightness-boost.png` });
+  // Per device: kept for every video after a reload, and never part of the per-title picture.
+  await page.reload();
+  await waitPlaying(page, 0.5);
+  expect(/brightness/.test(await page.evaluate(() => document.querySelector('video').style.filter)), 'boost kept after reload');
+  await page.getByRole('button', { name: /Picture: aspect ratio and zoom/ }).click();
+  await page.getByRole('button', { name: 'Normal', exact: true }).click();
+  expect((await page.evaluate(() => document.querySelector('video').style.filter)) === '', 'Normal removes the filter');
+  await page.keyboard.press('Escape');
+});
+
 await step('search across movies, series and live', async () => {
   await page.goto('http://localhost:8080/#/search');
   await page.getByRole('searchbox', { name: 'Search' }).fill('port');

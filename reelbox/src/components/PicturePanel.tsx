@@ -1,5 +1,6 @@
 import { ASPECTS, describeCrop, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, type Crop, type Fit, type Picture } from '../lib/picture';
 import { Icon } from './ui';
+import { clampTone, isNeutral, TONE_LIMITS, TONE_PRESETS, type Tone } from '../lib/tone';
 
 export type DetectState = 'off' | 'scanning' | 'done' | 'unavailable';
 
@@ -14,6 +15,10 @@ interface Props {
   onReset: () => void;
   onMakeDefault: () => void;
   onClose: () => void;
+  tone: Tone;
+  /** False on Samsung's AVPlay engine, which draws below the page. */
+  toneSupported: boolean;
+  onTone: (t: Tone) => void;
 }
 
 const FITS: { value: Fit; label: string; hint: string }[] = [
@@ -25,7 +30,7 @@ const FITS: { value: Fit; label: string; hint: string }[] = [
 const pct = (z: number) => `${Math.round(z * 100)}%`;
 const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z / ZOOM_STEP) * ZOOM_STEP));
 
-export function PicturePanel({ picture: p, custom, scopeLabel, detected, detectState, onChange, onDetectNow, onReset, onMakeDefault, onClose }: Props) {
+export function PicturePanel({ picture: p, custom, scopeLabel, detected, detectState, onChange, onDetectNow, onReset, onMakeDefault, onClose, tone, toneSupported, onTone }: Props) {
   const zoomed = p.zoom > 1.001 || p.fit === 'cover';
   return (
     <div className="player-panel picture-panel" data-nav-scope="" role="dialog" aria-label="Picture settings">
@@ -126,6 +131,46 @@ export function PicturePanel({ picture: p, custom, scopeLabel, detected, detectS
               ? 'Looking for black bars…'
               : describeCrop(detected)}
       </p>
+
+      <div className="pp-head pp-sub">
+        <h3>Brightness</h3>
+        <span className="muted small">Saved for this screen</span>
+      </div>
+      <div className="pp-row" role="group" aria-label="Brightness presets">
+        <span className="pp-label">Boost</span>
+        <div className="seg">
+          {TONE_PRESETS.map((pr) => {
+            const on = (Object.keys(pr.tone) as (keyof Tone)[]).every((k) => Math.abs(pr.tone[k] - tone[k]) < 0.001);
+            return (
+              <button key={pr.label} className={`seg-btn ${on ? 'on' : ''}`} aria-pressed={on} title={pr.hint} onClick={() => onTone(pr.tone)}>
+                {pr.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      {(Object.keys(TONE_LIMITS) as (keyof Tone)[]).map((k) => (
+        <div className="pp-row" role="group" aria-label={TONE_LIMITS[k].label} key={k}>
+          <span className="pp-label">{TONE_LIMITS[k].label}</span>
+          <div className="seg">
+            <button className="seg-btn" aria-label={`${TONE_LIMITS[k].label} down`} onClick={() => onTone({ ...tone, [k]: clampTone(k, tone[k] - TONE_LIMITS[k].step) })}>
+              −
+            </button>
+            <span className="seg-value" aria-live="polite">
+              {k === 'gamma' ? tone[k].toFixed(1) : pct(tone[k])}
+            </span>
+            <button className="seg-btn" aria-label={`${TONE_LIMITS[k].label} up`} onClick={() => onTone({ ...tone, [k]: clampTone(k, tone[k] + TONE_LIMITS[k].step) })}>
+              +
+            </button>
+          </div>
+        </div>
+      ))}
+      {!toneSupported && !isNeutral(tone) && (
+        <p className="pp-status muted small">
+          Samsung’s built-in player can’t be brightened by an app. Use the projector’s Settings → Picture (Gamma / Brightness), or in Reelbox Settings set Video engine to “Web player” (plays MP4 and HLS).
+        </p>
+      )}
+      {!toneSupported && isNeutral(tone) && <p className="pp-status muted small">Not available with Samsung’s built-in player — use the projector’s own Picture settings.</p>}
 
       <div className="pp-actions">
         {custom && (

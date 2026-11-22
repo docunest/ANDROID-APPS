@@ -1269,13 +1269,18 @@ html.tv .seek:focus {
 .pp-head h3 {
   margin: 0;
 }
+.pp-sub {
+  margin-top: 0.4rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line);
+}
 .pp-row {
   display: flex;
   align-items: center;
   gap: 0.6rem;
 }
 .pp-label {
-  flex: 0 0 3.2rem;
+  flex: 0 0 4.6rem;
   color: var(--muted);
   font-size: 0.85rem;
 }
@@ -1312,7 +1317,7 @@ html.tv .seek:focus {
   font-variant-numeric: tabular-nums;
 }
 .pp-status {
-  margin: 0 0 0 3.8rem;
+  margin: 0 0 0 5.2rem;
 }
 .pp-actions {
   display: flex;

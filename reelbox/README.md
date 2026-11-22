@@ -16,6 +16,12 @@ A player for your **Xtream Codes** video server. One codebase runs on **iPhone, 
   - Keyboard, TV-remote and media-key support.
   - Picture-in-picture, AirPlay, lock-screen / Control Center controls.
   - Picture fixes for old videos: Fit/Fill/Stretch, forced shape, zoom, automatic black-bar removal.
+  - Brightness for a dim screen or projector, like VLC's Adjust filter: brightness, gamma, contrast and colour, with *Dim screen* / *Very dim* presets.
+    - Saved per device, not synced: the projector gets the boost, the phones don't.
+    - Works in the web app (Mac, browsers) and the Android app.
+    - Not on Samsung's built-in player (AVPlay): it draws below the app, so use the projector's own Picture settings or the *Web player* engine.
+    - Not in the iPhone app in Expo Go: its video player has no filter support.
+    - Mirroring the Mac to the projector keeps the boost. AirPlay "send video" doesn't: the projector plays the stream itself.
   - Screen stays awake while playing.
   - "Open in VLC" when a format can't be played.
 - **Offline**:
