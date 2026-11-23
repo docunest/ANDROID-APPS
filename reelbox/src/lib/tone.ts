@@ -30,6 +30,24 @@ export const clampTone = (k: keyof Tone, v: number) => {
   return Math.min(l.max, Math.max(l.min, Math.round(v / l.step) * l.step));
 };
 
+/**
+ * How the boost is drawn.
+ * - 'filter': real brightness/gamma on the video pixels (browsers, Android).
+ * - 'veil': a faint white layer over the video. Samsung TVs/projectors draw video on a hardware
+ *   plane below the page, so filters can't reach it, but the page is blended on top of it — the
+ *   veil lifts dark and mid tones with any Samsung player (AVPlay too). Blacks turn slightly grey.
+ */
+export type ToneMode = 'filter' | 'veil';
+
+/** Veil opacity that lifts mid grey about as much as the gamma/brightness would. */
+export function veilFor(t: Tone): number {
+  if (isNeutral(t)) return 0;
+  const mid = Math.min(1, Math.pow(0.5, 1 / t.gamma) * t.brightness); // where 50 % grey should land
+  // a + (1 - a)·0.5 = mid, softened: the veil also greys the blacks, so it shouldn't go all the way.
+  const a = ((mid - 0.5) / 0.5) * 0.7;
+  return Math.round(Math.min(0.45, Math.max(0, a)) * 100) / 100;
+}
+
 const SVG_ID = 'reelbox-gamma';
 
 /**

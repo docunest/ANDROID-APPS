@@ -11,7 +11,7 @@ import { episodeRef, refKey, type Kind, type MediaRef } from '../lib/xtream';
 import { isIOS, isKey, isSafari, isStandalone, isTizen, nativePlatform } from '../lib/platform';
 import { focusFirst } from '../lib/spatial';
 import { load, usePersisted } from '../lib/store';
-import { NEUTRAL_TONE, toneFilter, type Tone } from '../lib/tone';
+import { NEUTRAL_TONE, toneFilter, veilFor, type Tone, type ToneMode } from '../lib/tone';
 import { Icon, toast } from '../components/ui';
 import { playPath } from './paths';
 
@@ -61,7 +61,10 @@ export default function Player() {
   // ---- tone: brightness / gamma for this screen (per device, not synced) ----
   const [tone, mutateTone] = usePersisted<Tone>('device:tone', NEUTRAL_TONE);
   const [toneSupported, setToneSupported] = useState(true);
-  const toneKey = JSON.stringify(tone);
+  // Samsung: video is on a hardware plane the page can't filter → veil by default.
+  const [toneMode, mutateToneMode] = usePersisted<ToneMode>('device:toneMode', isTizen ? 'veil' : 'filter');
+  const veil = toneMode === 'veil' ? veilFor(tone) : 0;
+  const toneKey = JSON.stringify(tone) + toneMode;
   const [stageSize, setStageSize] = useState({ w: 0, h: 0 });
   const [detected, setDetected] = useState<Crop | null>(null);
   const [detectState, setDetectState] = useState<DetectState>('off');
@@ -165,7 +168,7 @@ export default function Player() {
   useEffect(() => {
     const en = engine.current;
     if (!en) return;
-    setToneSupported(en.setFilter(toneFilter(tone)) || en.name !== 'avplay');
+    setToneSupported(en.setFilter(toneMode === 'filter' ? toneFilter(tone) : '') || en.name !== 'avplay');
   }, [toneKey, engineName, reloadNonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Black bars: start from what we found last time for this title, then keep refining.
@@ -534,6 +537,7 @@ export default function Player() {
       }}
     >
       <div className="player-stage" ref={stage} />
+      {veil > 0 && <div className="tone-veil" style={{ opacity: veil }} aria-hidden="true" />}
       <div className="player-tap" />
       {st?.cue && <div className="player-cue">{st.cue}</div>}
       {st?.buffering && !errorMsg && <div className="player-spinner spinner" />}
@@ -653,7 +657,13 @@ export default function Player() {
           onReset={() => pic.reset()}
           onMakeDefault={() => pic.makeDefault().then(() => toast('Used as default for all videos'))}
           tone={tone}
-          toneSupported={engineName !== 'avplay' && toneSupported}
+          toneSupported={toneMode === 'veil' || (engineName !== 'avplay' && toneSupported)}
+          toneMode={toneMode}
+          showToneMode={isTizen || toneMode === 'veil'}
+          onToneMode={(m) => {
+            mutateToneMode(() => m);
+            poke();
+          }}
           onTone={(t) => {
             mutateTone(() => t);
             poke();

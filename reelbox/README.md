@@ -19,7 +19,10 @@ A player for your **Xtream Codes** video server. One codebase runs on **iPhone, 
   - Brightness for a dim screen or projector, like VLC's Adjust filter: brightness, gamma, contrast and colour, with *Dim screen* / *Very dim* presets.
     - Saved per device, not synced: the projector gets the boost, the phones don't.
     - Works in the web app (Mac, browsers) and the Android app.
-    - Not on Samsung's built-in player (AVPlay): it draws below the app, so use the projector's own Picture settings or the *Web player* engine.
+    - **Samsung (Freestyle, TVs)**: video is drawn on a hardware plane below the app, so pixel filters can't reach it.
+      - The default method there is **Veil**: a faint white layer over the video that lifts dark and mid tones. It works with every Samsung player, AVPlay included; blacks turn slightly grey.
+      - *Filter (try)* switches to real gamma, which only works if the device's Web player applies it.
+      - The projector's own *Settings → Picture* (Picture Mode, Brightness, Gamma; energy saving off) also helps.
     - Not in the iPhone app in Expo Go: its video player has no filter support.
     - Mirroring the Mac to the projector keeps the boost. AirPlay "send video" doesn't: the projector plays the stream itself.
   - Screen stays awake while playing.
@@ -164,6 +167,8 @@ Samsung devices only install **signed** packages from a PC in Developer Mode:
    tizen package -t wgt -s <your-cert-profile> -- build/tizen
    tizen install -n build/tizen/Reelbox.wgt -t <device-name-from-"sdb devices">
    ```
+
+Brightness on a dim projector: Picture → Brightness → *Dim screen* or *Very dim* (method *Veil*, see Player above). It needs no Mac and no proxy.
 
 Remote support: arrows move focus, OK selects, Back goes back (and exits from Home). Play/pause, FF and REW work in the player. MKV/AVI files open in Samsung's native **AVPlay** engine automatically; *Settings → Video engine* lets you force either engine.
 

@@ -397,6 +397,31 @@ await step('picture: brightness boost for a dim screen (per device, really brigh
   await page.keyboard.press('Escape');
 });
 
+await step('picture: Samsung brightness veil works over any player', async () => {
+  const c = await browser.newContext({ viewport: { width: 1280, height: 720 }, userAgent: 'Mozilla/5.0 (SMART-TV; LINUX; Tizen 7.0) AppleWebKit/537.36 (KHTML, like Gecko) 94.0.4606.31/7.0 TV Safari/537.36' });
+  const p = await c.newPage();
+  await login(p, 'http://localhost:8080/');
+  await p.getByRole('heading', { name: 'Recently added movies' }).waitFor({ timeout: 10000 });
+  await p.goto('http://localhost:8080/#/movie/104');
+  await p.getByRole('link', { name: /Resume|Play/ }).first().click();
+  await waitPlaying(p, 1);
+  await p.getByRole('button', { name: /Picture: aspect ratio and zoom/ }).click();
+  await p.getByRole('button', { name: 'Veil', exact: true }).waitFor(); // default method on Samsung
+  expect((await p.getByRole('button', { name: 'Veil', exact: true }).getAttribute('aria-pressed')) === 'true', 'veil is the Samsung default');
+  await p.getByRole('button', { name: 'Dim screen', exact: true }).click();
+  const veil = Number(await p.locator('.tone-veil').evaluate((e) => getComputedStyle(e).opacity));
+  expect(veil > 0.15 && veil < 0.3, `veil opacity ${veil}`);
+  expect((await p.evaluate(() => document.querySelector('video').style.filter)) === '', 'no CSS filter in veil mode');
+  // the veil sits under the controls, not over them
+  const onTop = await p.evaluate(() => { const b = document.querySelector('.player-panel').getBoundingClientRect(); return document.elementFromPoint(b.x + 20, b.y + 20)?.closest('.player-panel') != null; });
+  expect(onTop, 'panel stays above the veil');
+  await p.screenshot({ path: `${OUT}/17-samsung-veil.png` });
+  await p.getByRole('button', { name: 'Filter (try)' }).click();
+  expect((await p.locator('.tone-veil').count()) === 0, 'filter mode removes the veil');
+  expect(/brightness/.test(await p.evaluate(() => document.querySelector('video').style.filter)), 'filter mode applies CSS filter');
+  await c.close();
+});
+
 await step('search across movies, series and live', async () => {
   await page.goto('http://localhost:8080/#/search');
   await page.getByRole('searchbox', { name: 'Search' }).fill('port');

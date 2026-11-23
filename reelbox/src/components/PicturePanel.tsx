@@ -1,6 +1,6 @@
 import { ASPECTS, describeCrop, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, type Crop, type Fit, type Picture } from '../lib/picture';
 import { Icon } from './ui';
-import { clampTone, isNeutral, TONE_LIMITS, TONE_PRESETS, type Tone } from '../lib/tone';
+import { clampTone, isNeutral, TONE_LIMITS, TONE_PRESETS, veilFor, type Tone, type ToneMode } from '../lib/tone';
 
 export type DetectState = 'off' | 'scanning' | 'done' | 'unavailable';
 
@@ -19,6 +19,10 @@ interface Props {
   /** False on Samsung's AVPlay engine, which draws below the page. */
   toneSupported: boolean;
   onTone: (t: Tone) => void;
+  toneMode: ToneMode;
+  /** Offer the choice between veil and filter (Samsung). */
+  showToneMode: boolean;
+  onToneMode: (m: ToneMode) => void;
 }
 
 const FITS: { value: Fit; label: string; hint: string }[] = [
@@ -30,7 +34,7 @@ const FITS: { value: Fit; label: string; hint: string }[] = [
 const pct = (z: number) => `${Math.round(z * 100)}%`;
 const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z / ZOOM_STEP) * ZOOM_STEP));
 
-export function PicturePanel({ picture: p, custom, scopeLabel, detected, detectState, onChange, onDetectNow, onReset, onMakeDefault, onClose, tone, toneSupported, onTone }: Props) {
+export function PicturePanel({ picture: p, custom, scopeLabel, detected, detectState, onChange, onDetectNow, onReset, onMakeDefault, onClose, tone, toneSupported, onTone, toneMode, showToneMode, onToneMode }: Props) {
   const zoomed = p.zoom > 1.001 || p.fit === 'cover';
   return (
     <div className="player-panel picture-panel" data-nav-scope="" role="dialog" aria-label="Picture settings">
@@ -149,7 +153,22 @@ export function PicturePanel({ picture: p, custom, scopeLabel, detected, detectS
           })}
         </div>
       </div>
-      {(Object.keys(TONE_LIMITS) as (keyof Tone)[]).map((k) => (
+      {showToneMode && (
+        <div className="pp-row" role="group" aria-label="Boost method">
+          <span className="pp-label">Method</span>
+          <div className="seg">
+            <button className={`seg-btn ${toneMode === 'veil' ? 'on' : ''}`} aria-pressed={toneMode === 'veil'} onClick={() => onToneMode('veil')} title="Works with every Samsung player">
+              Veil
+            </button>
+            <button className={`seg-btn ${toneMode === 'filter' ? 'on' : ''}`} aria-pressed={toneMode === 'filter'} onClick={() => onToneMode('filter')} title="Real gamma — only if this device's Web player supports it">
+              Filter (try)
+            </button>
+          </div>
+        </div>
+      )}
+      {(Object.keys(TONE_LIMITS) as (keyof Tone)[])
+        .filter((k) => toneMode === 'filter' || k === 'brightness' || k === 'gamma')
+        .map((k) => (
         <div className="pp-row" role="group" aria-label={TONE_LIMITS[k].label} key={k}>
           <span className="pp-label">{TONE_LIMITS[k].label}</span>
           <div className="seg">
@@ -165,6 +184,16 @@ export function PicturePanel({ picture: p, custom, scopeLabel, detected, detectS
           </div>
         </div>
       ))}
+      {toneMode === 'veil' && (
+        <p className="pp-status muted small">
+          {isNeutral(tone)
+            ? 'Veil: a light layer over the video that lifts dark scenes. Works with every Samsung player.'
+            : `Veil ${Math.round(veilFor(tone) * 100)}% — lifts dark and mid tones; blacks look slightly grey. For a cleaner result, also raise Gamma/Brightness in the projector’s own Picture settings.`}
+        </p>
+      )}
+      {toneMode === 'filter' && showToneMode && (
+        <p className="pp-status muted small">Filter: real gamma, but only if this projector’s Web player applies it — if the picture doesn’t change, switch back to Veil.</p>
+      )}
       {!toneSupported && !isNeutral(tone) && (
         <p className="pp-status muted small">
           Samsung’s built-in player can’t be brightened by an app. Use the projector’s Settings → Picture (Gamma / Brightness), or in Reelbox Settings set Video engine to “Web player” (plays MP4 and HLS).

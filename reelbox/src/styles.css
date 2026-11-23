@@ -1269,6 +1269,12 @@ html.tv .seek:focus {
 .pp-head h3 {
   margin: 0;
 }
+.tone-veil {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  pointer-events: none;
+}
 .pp-sub {
   margin-top: 0.4rem;
   padding-top: 0.6rem;
