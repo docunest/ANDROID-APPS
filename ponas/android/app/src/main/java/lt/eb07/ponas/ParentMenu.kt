@@ -116,6 +116,7 @@ object ParentMenu {
                 append(err)
             }
             append("\n\nSource: ").append(SyncManager.MANIFEST_URL)
+            append("\n\n").append(FakeGps.statusText(home))
         }
     }
 

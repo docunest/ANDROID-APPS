@@ -240,3 +240,18 @@ installs from Ponas: parent menu → App update → Allow, or over ADB
 installs updates without a tap. CI publishes releases **only from `main`** (`versionCode` = run
 number, `versionName` = `1.<run>`); other branches build an artifact only. Status and a "Check now"
 button: parent menu → App update. Logs: `adb logcat -s PonasUpdate`.
+
+## Fake GPS (tablet has no GPS chip)
+
+Ponas is Android's mock location app. `FakeGpsService` fetches the family position from MapPal
+`/api/position` every 15 min (bearer token; the value is in the owner's `.env` as `POSITION_TOKEN`,
+never in git or the APK), keeps the last one offline, and feeds gps/network/fused every second.
+Status: parent menu → status. One-time setup over adb:
+
+```bash
+adb shell appops set lt.eb07.ponas android:mock_location allow
+adb shell cmd location set-location-enabled true
+adb shell am broadcast -a lt.eb07.ponas.SET_POSITION_TOKEN -n lt.eb07.ponas/.FakeGpsReceiver --es token <POSITION_TOKEN>
+```
+
+Switching Developer options off in Settings drops the mock app; run the first line again.
