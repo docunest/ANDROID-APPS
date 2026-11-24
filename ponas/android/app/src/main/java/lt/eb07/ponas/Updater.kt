@@ -20,14 +20,18 @@ import java.net.URL
  * uses Android's installer: after the parent allows "install unknown apps" for Ponas once, updates
  * install without a tap on Android 12 and later.
  *
- * Checked when the home screen comes back (at most every [EVERY_MS]). Installing replaces the app;
- * the next press of Home starts the new build.
+ * Checked when the home screen comes back (at most every [EVERY_MS]), or from the parent menu.
+ * A build that failed to install is retried after [RETRY_FAILED_MS]. Installing replaces the app;
+ * Android restarts the home screen with the new build.
  */
 object Updater {
     const val EVERY_MS = 15 * 60_000L
     private const val PREFS = "ponas-update"
     private const val KEY_LAST_CHECK = "lastCheck"
     private const val KEY_STATUS = "status"
+    private const val KEY_FAILED_BUILD = "failedBuild"
+    private const val KEY_FAILED_AT = "failedAt"
+    private const val RETRY_FAILED_MS = 6 * 60 * 60_000L
 
     private val worker = android.os.HandlerThread("ponas-update").apply { start() }
     private val handler = android.os.Handler(worker.looper)
@@ -42,8 +46,18 @@ object Updater {
     /** Called when the home screen resumes. Does nothing if the last check was recent. */
     fun maybeCheck(context: Context) {
         val app = context.applicationContext
-        if (System.currentTimeMillis() - prefs(app).getLong(KEY_LAST_CHECK, 0L) < EVERY_MS) return
+        val p = prefs(app)
+        if (System.currentTimeMillis() - p.getLong(KEY_LAST_CHECK, 0L) < EVERY_MS) return
+        // Stamp now, not on the worker: several resumes in a row must not queue several checks.
+        p.edit().putLong(KEY_LAST_CHECK, System.currentTimeMillis()).apply()
         handler.post { check(app) }
+    }
+
+    /** Parent menu: check right away, ignoring the 15-minute spacing and the failed-build pause. */
+    fun checkNow(context: Context) {
+        val app = context.applicationContext
+        prefs(app).edit().putLong(KEY_LAST_CHECK, System.currentTimeMillis()).apply()
+        handler.post { check(app, force = true) }
     }
 
     private fun save(c: Context, status: String) {
@@ -51,22 +65,30 @@ object Updater {
     }
 
     /** Blocking; runs on the update thread. Returns a short status line. */
-    fun check(app: Context): String {
-        prefs(app).edit().putLong(KEY_LAST_CHECK, System.currentTimeMillis()).apply()
+    fun check(app: Context, force: Boolean = false): String {
+        val p = prefs(app)
         val rel = runCatching { latest() }.getOrElse { return finish(app, "Check failed: ${it.message}") }
             ?: return finish(app, "No release found")
         if (rel.build <= BuildConfig.VERSION_CODE) return finish(app, "Up to date (build ${BuildConfig.VERSION_CODE})")
-
+        // Before downloading: without the one-time permission the APK can't be installed anyway,
+        // and the tablet's data shouldn't pay for a download every 15 minutes.
+        if (!app.packageManager.canRequestPackageInstalls()) {
+            return finish(app, "Build ${rel.build} available. Parent: allow installs from Ponas once (parent menu → App update → Allow)")
+        }
+        if (!force && p.getInt(KEY_FAILED_BUILD, 0) == rel.build &&
+            System.currentTimeMillis() - p.getLong(KEY_FAILED_AT, 0L) < RETRY_FAILED_MS
+        ) {
+            return finish(app, "Build ${rel.build} failed to install earlier; next try later")
+        }
         val file = File(app.cacheDir, "ponas-update.apk")
         runCatching { download(rel.apkUrl, file) }.getOrElse {
             file.delete()
             return finish(app, "Download failed: ${it.message}")
         }
-        if (!app.packageManager.canRequestPackageInstalls()) {
-            file.delete()
-            return finish(app, "Build ${rel.build} ready. Parent: allow installs from Ponas once (Settings → Apps → Ponas → Install unknown apps)")
-        }
         return try {
+            // Counted as failed until the new build runs (a successful install replaces this app,
+            // and the new build starts with a higher VERSION_CODE, so the mark no longer matters).
+            p.edit().putInt(KEY_FAILED_BUILD, rel.build).putLong(KEY_FAILED_AT, System.currentTimeMillis()).apply()
             install(app, file)
             finish(app, "Installing build ${rel.build}…")
         } catch (e: Exception) {

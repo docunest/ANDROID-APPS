@@ -5,182 +5,87 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Skaitymas</title>
 <style>
-  body { background: #FFF6E0; font-family: sans-serif; --t: min(16vmin, 110px); }
-  /* Top 72px stay free for ponas.js buttons. */
-  #game { position: fixed; left: 0; right: 0; top: 72px; bottom: 0;
-    display: flex; flex-direction: column; align-items: center; justify-content: space-evenly; padding: 8px; }
-  #speak { width: var(--t); height: var(--t); border-radius: 50%; border: 0; background: #26A69A;
-    box-shadow: 0 6px 0 #00000022; display: flex; align-items: center; justify-content: center; }
-  #speak:active { transform: scale(.94); }
-  #speak svg { width: 46%; height: 46%; fill: #fff; }
-  #choices { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; max-width: 100%; }
-  .tile { min-width: calc(var(--t) * 1.3); min-height: calc(var(--t) * 1.1); padding: 0 12px; border: 0; border-radius: 22px;
-    background: #FFFFFF; box-shadow: 0 5px 0 #00000022; font-size: calc(var(--t) * .8); font-weight: 700; color: #37474F;
-    touch-action: manipulation; }
-  .tile:active { transform: scale(.94); }
-  .tile.ok { background: #A5D6A7; }
-  .tile.no { opacity: .35; }
-  #dots { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 90vw; }
-  #dots i { width: 14px; height: 14px; border-radius: 50%; background: #FFB300; }
-  #dots i.off { background: #00000022; }
-  #end { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: #FFF6E0; font-size: 6vmin; }
-  #end.show { display: flex; }
+  :root {
+    --t: max(80px, min(22vmin, 104px));   /* touch target: never under 80 px (Ponas rule) */
+    --cell: max(44px, min(13vmin, 64px));
+    --ink: #263238; --bg: #FFF6E0; --card: #FFFFFF; --ok: #A5D6A7; --teal: #26A69A;
+    --vowel: #1565C0; --cons: #C62828;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); font-family: sans-serif; }
+  button { font-family: inherit; color: inherit; touch-action: manipulation; }
+
+  /* Everything lives below the 72 px strip where ponas.js puts pause and close. */
+  #stage { position: fixed; left: 0; right: 0; top: 72px; bottom: 6px; display: flex; flex-direction: row; gap: 10px; padding: 0 10px 0 10px; }
+  @media (orientation: portrait) { #stage { flex-direction: column; } }
+  #side { flex: 0 0 auto; width: 30%; max-width: 190px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
+  @media (orientation: portrait) { #side { width: auto; max-width: none; flex-direction: row; justify-content: space-evenly; min-height: 150px; } }
+  #work { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: space-evenly; gap: 8px; }
+
+  .pic { width: min(100%, 150px); aspect-ratio: 1; background: var(--card); border-radius: 18px; box-shadow: 0 4px 0 #0000001a; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  @media (orientation: portrait) { .pic { width: 140px; } }
+  .pic img { width: 100%; height: 100%; object-fit: contain; }
+  .round { width: var(--t); height: var(--t); border-radius: 50%; border: 0; background: var(--teal); box-shadow: 0 5px 0 #0000002a; display: flex; align-items: center; justify-content: center; }
+  .round svg { width: 50%; height: 50%; fill: #fff; }
+  .round:active, .tile:active, .card:active { transform: scale(.94); }
+  .home { background: #90A4AE; }
+
+  .tiles { display: flex; flex-wrap: wrap; justify-content: center; align-content: center; gap: 6px; max-width: 100%; }
+  .tile { min-width: var(--t); height: var(--t); padding: 0 8px; border: 0; border-radius: 18px; background: var(--card); box-shadow: 0 5px 0 #00000022;
+    font-size: calc(var(--t) * .5); font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .tile.big { font-size: calc(var(--t) * .42); }
+  .tile.vowel { color: var(--vowel); } .tile.cons { color: var(--cons); }
+  .tile.ok { background: var(--ok); }
+  .tile.used { visibility: hidden; }
+  .tile.no { animation: shake .3s; }
+  .tile.hint { animation: pulse 1s 3; }
+  @keyframes shake { 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+  @keyframes pulse { 50% { transform: scale(1.12); } }
+
+  .cells { display: flex; gap: 5px; justify-content: center; }
+  .cellbox { width: var(--cell); height: calc(var(--cell) * 1.15); border-radius: 10px; background: #FFFFFFAA; border: 3px dashed #B0BEC5;
+    font-size: calc(var(--cell) * .7); font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .cellbox.filled { border-style: solid; border-color: var(--teal); background: var(--card); }
+  .cellbox.target { border-color: #FFB300; border-style: solid; }
+  .cellbox.bad { border-color: #E57373; border-style: solid; }
+
+  .word { font-size: max(44px, min(14vmin, 72px)); font-weight: 700; letter-spacing: .06em; background: var(--card); border-radius: 18px; padding: 8px 18px; box-shadow: 0 4px 0 #0000001a; }
+  .cards { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  .card { width: max(96px, min(30vmin, 130px)); aspect-ratio: 1; border: 0; padding: 6px; border-radius: 18px; background: var(--card); box-shadow: 0 5px 0 #00000022; }
+  .card img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+  .card.ok { background: var(--ok); } .card.no { opacity: .35; }
+
+  #pad { position: relative; flex: 1 1 auto; width: 100%; min-height: 0; display: flex; gap: 8px; }
+  #pad canvas { flex: 1 1 auto; min-width: 0; background: var(--card); border-radius: 18px; box-shadow: inset 0 0 0 3px #CFD8DC; touch-action: none; }
+  #pad .btns { display: flex; flex-direction: column; gap: 8px; justify-content: center; }
+
+  /* Menu */
+  #menu { position: fixed; left: 0; right: 0; top: 72px; bottom: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .lvl { width: calc(var(--t) * 1.05); height: calc(var(--t) * 1.05); border: 0; border-radius: 20px; box-shadow: 0 6px 0 #00000026; position: relative; display: flex; align-items: center; justify-content: center; }
+  .lvl svg { width: 70%; height: 70%; }
+  .lvl small { position: absolute; right: 7px; bottom: 4px; font-size: 13px; font-weight: 700; opacity: .7; }
+  #parent { position: fixed; right: 0; bottom: 0; width: 80px; height: 80px; }
+
+  #panel, #done { position: fixed; inset: 0; background: var(--bg); display: none; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 80px 16px 16px; z-index: 5; font-size: 18px; }
+  #panel.show, #done.show { display: flex; }
+  #panel input { width: min(90vw, 460px); font-size: 16px; padding: 12px; border-radius: 10px; border: 2px solid #B0BEC5; user-select: text; -webkit-user-select: text; }
+  #panel .act { min-height: 56px; padding: 0 18px; border-radius: 14px; border: 0; background: var(--teal); color: #fff; font-size: 18px; }
+  #panel .muted { color: #607D8B; font-size: 15px; text-align: center; max-width: 520px; }
+  #done svg { width: 140px; height: 140px; }
+  .hidden { display: none !important; }
+  #progress { position: fixed; left: 0; bottom: 0; height: 6px; background: #FFB300; width: 0; transition: width .4s; }
 </style>
 </head>
 <body>
-<div id="game">
-  <button id="speak" aria-label="Klausyk">
-    <svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 8.5a5 5 0 0 1 0 7l-1.4-1.4a3 3 0 0 0 0-4.2z"/></svg>
-  </button>
-  <div id="choices"></div>
-  <div id="dots"></div>
-</div>
-<div id="end"></div>
+<div id="menu"></div>
+<div id="stage" class="hidden"><div id="side"></div><div id="work"></div></div>
+<div id="progress"></div>
+<div id="done"></div>
+<div id="panel"></div>
 <!-- ponas.js is added by tools/build-site.mjs. -->
 <script src="ponas.js"></script>
-<script>
-(function () {
-  'use strict';
-  var P = window.Ponas;
-
-  // Two-letter syllables (level 1). Confusable groups give harder decoys as he improves.
-  var SYL = ['ma', 'na', 'la', 'ra', 'sa', 'ša', 'pa', 'ba', 'da', 'ta', 'ka', 'ga'];
-  var CONFUSE = { ma: ['na'], na: ['ma'], la: ['ra'], ra: ['la'], sa: ['ša'], ša: ['sa'],
-    pa: ['ba'], ba: ['pa'], da: ['ta'], ta: ['da'], ka: ['ga'], ga: ['ka'] };
-  var SESSION_MS = 10 * 60 * 1000;   // about 10 minutes, then a soft stop
-  var ROUNDS_PER_SESSION = 40;
-
-  var state = P.load('level1', { opts: 3, recent: [], miss: {}, done: 0 });
-  var queue = P.load('queue', []);     // attempts waiting for the backend (MapPal host not allowed yet)
-  var target = null, options = [], asked = 0, firstTry = true, t0 = 0, locked = false;
-  var elapsed = 0, lastTick = Date.now(), sessionOver = false;
-  var choicesEl = document.getElementById('choices');
-  var dotsEl = document.getElementById('dots');
-  var endEl = document.getElementById('end');
-
-  function rnd(n) { return Math.floor(Math.random() * n); }
-  function shuffle(a) { for (var i = a.length - 1; i > 0; i--) { var j = rnd(i + 1); var t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
-
-  // Weak syllables (recent misses) come back more often.
-  function pickTarget() {
-    var weights = SYL.map(function (s) { return 1 + 3 * (state.miss[s] || 0); });
-    var total = weights.reduce(function (a, b) { return a + b; }, 0);
-    var r = Math.random() * total;
-    for (var i = 0; i < SYL.length; i++) { r -= weights[i]; if (r < 0) return SYL[i]; }
-    return SYL[0];
-  }
-
-  // Decoys: random at first, confusable (similar sound) once the child is doing well.
-  function pickOptions(t) {
-    var n = state.opts;
-    var hard = state.opts >= 5;
-    var set = [t];
-    if (hard) (CONFUSE[t] || []).forEach(function (s) { if (set.length < n) set.push(s); });
-    var pool = shuffle(SYL.filter(function (s) { return set.indexOf(s) < 0; }));
-    while (set.length < n && pool.length) set.push(pool.pop());
-    return shuffle(set);
-  }
-
-  function say(syl) {
-    try { var a = new Audio('audio/' + syl.replace('š', 'sh') + '.mp3'); a.play().catch(function () {}); } catch (e) {}
-  }
-
-  function drawDots() {
-    dotsEl.innerHTML = '';
-    for (var i = 0; i < ROUNDS_PER_SESSION; i++) {
-      var d = document.createElement('i');
-      if (i >= asked) d.className = 'off';
-      dotsEl.appendChild(d);
-    }
-  }
-
-  function renderRound() {
-    if (sessionOver) return;
-    target = pickTarget();
-    options = pickOptions(target);
-    firstTry = true; locked = false; t0 = Date.now();
-    choicesEl.innerHTML = '';
-    options.forEach(function (s) {
-      var b = document.createElement('button');
-      b.className = 'tile'; b.textContent = s; b.setAttribute('data-syl', s);
-      b.addEventListener('pointerdown', function (e) { e.preventDefault(); choose(s, b); });
-      choicesEl.appendChild(b);
-    });
-    drawDots();
-    say(target);
-  }
-
-  function log(entry) {
-    queue.push(entry);
-    if (queue.length > 500) queue = queue.slice(-500);
-    P.save('queue', queue);   // sent to the backend once the MapPal host is allowed
-  }
-
-  function choose(s, btn) {
-    if (P.paused || locked || sessionOver) return;
-    var ok = s === target;
-    var rt = Date.now() - t0;
-    log({ level: 1, item: target, options: options.slice(), answer: s, correct: ok,
-      first_try: firstTry, hint_used: false, response_ms: rt, at: new Date().toISOString() });
-    if (ok) {
-      btn.classList.add('ok');
-      P.tone(660, { dur: 0.15 }); P.tone(880, { delay: 0.12, dur: 0.25 });
-      state.recent.push(firstTry ? 1 : 0);
-      if (firstTry) state.miss[target] = Math.max(0, (state.miss[target] || 0) - 1);
-      locked = true;
-      asked++;
-      trimRecent();
-      adjustLevel();
-      P.save('level1', state);
-      setTimeout(next, 700);
-    } else {
-      firstTry = false;
-      state.miss[target] = (state.miss[target] || 0) + 1;
-      btn.classList.add('no');
-      btn.disabled = true;
-      P.tone(220, { dur: 0.25, type: 'sine', vol: 0.15 });   // soft, not a penalty
-      P.save('level1', state);
-    }
-  }
-
-  function trimRecent() { if (state.recent.length > 10) state.recent = state.recent.slice(-10); }
-
-  // Aim for about 80 to 85% first-try success: add decoys when easy, remove when hard.
-  function adjustLevel() {
-    if (state.recent.length < 5) return;
-    var rate = state.recent.reduce(function (a, b) { return a + b; }, 0) / state.recent.length;
-    if (rate >= 0.9 && state.opts < 9) state.opts++;
-    if (rate < 0.7 && state.opts > 3) state.opts--;
-  }
-
-  function next() {
-    if (asked >= ROUNDS_PER_SESSION || elapsed >= SESSION_MS) return finish();
-    renderRound();
-  }
-
-  function finish() {
-    sessionOver = true;
-    endEl.innerHTML = '<div>Gerai padirbėta!</div>';
-    endEl.classList.add('show');
-    P.save('level1', state);
-  }
-
-  document.getElementById('speak').addEventListener('pointerdown', function (e) {
-    e.preventDefault(); if (target && !P.paused) say(target);
-  });
-
-  // Session clock counts only while the game is running (not paused).
-  setInterval(function () {
-    var now = Date.now();
-    if (!P.paused && !sessionOver) elapsed += now - lastTick;
-    lastTick = now;
-    if (!sessionOver && elapsed >= SESSION_MS) finish();
-  }, 1000);
-
-  P.onStart(function () { lastTick = Date.now(); renderRound(); });
-  P.onPause(function () { /* clock and timers stop via P.paused */ });
-  P.onResume(function () { lastTick = Date.now(); });
-})();
-</script>
+<script src="data.js"></script>
+<script src="game.js"></script>
 </body>
 </html>

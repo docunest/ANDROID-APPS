@@ -2,8 +2,8 @@
   "title": "Skaitymas",
   "icon": "icon.png",
   "color": "#26A69A",
-  "order": 90,
-  "version": "2",
+  "order": 120,
+  "version": "3",
   "enabled": true,
   "network": [
     "map-pal-mike-base.vercel.app"
