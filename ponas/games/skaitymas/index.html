@@ -82,7 +82,7 @@
   }
 
   function say(syl) {
-    try { var a = new Audio('audio/' + syl + '.mp3'); a.play().catch(function () {}); } catch (e) {}
+    try { var a = new Audio('audio/' + syl.replace('š', 'sh') + '.mp3'); a.play().catch(function () {}); } catch (e) {}
   }
 
   function drawDots() {
