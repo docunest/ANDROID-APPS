@@ -23,6 +23,12 @@ android {
         versionCode = (System.getenv("PONAS_VERSION_CODE") ?: "1").toInt()
         versionName = System.getenv("PONAS_VERSION_NAME") ?: "0.1-dev"
         resValue("string", "app_name", "Ponas")
+        // Where Updater looks for new builds (GitHub releases "ponas-v<build>").
+        buildConfigField("String", "UPDATE_REPO", "\"docunest/ANDROID-APPS\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     signingConfigs {

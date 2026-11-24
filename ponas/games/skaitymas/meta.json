@@ -3,6 +3,9 @@
   "icon": "icon.png",
   "color": "#26A69A",
   "order": 90,
-  "version": "1",
-  "enabled": true
+  "version": "2",
+  "enabled": true,
+  "network": [
+    "map-pal-mike-base.vercel.app"
+  ]
 }

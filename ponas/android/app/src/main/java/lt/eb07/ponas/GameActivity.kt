@@ -45,7 +45,7 @@ class GameActivity : Activity() {
         private const val TWO_FINGER_EXIT_MS = 1500L
 
         /** Hosts any game may reach. Must match ALLOWED_HOSTS in tools/build-site.mjs. */
-        val ALLOWED_HOSTS = setOf("ntfy.sh")
+        val ALLOWED_HOSTS = setOf("ntfy.sh", "map-pal-mike-base.vercel.app")
 
         fun intent(ctx: Context, g: Game): Intent = Intent(ctx, GameActivity::class.java)
             .putExtra(EXTRA_ID, g.id)

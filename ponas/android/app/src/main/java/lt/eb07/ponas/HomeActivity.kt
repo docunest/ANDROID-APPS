@@ -77,6 +77,7 @@ class HomeActivity : Activity() {
         SyncManager.addListener(syncListener)
         render()
         SyncManager.maybeSync(this)
+        Updater.maybeCheck(this)
         handler.removeCallbacks(emptyRetry)
         handler.postDelayed(emptyRetry, 31_000)
     }

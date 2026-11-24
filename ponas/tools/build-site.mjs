@@ -31,7 +31,7 @@ const PATH_RE = /^[A-Za-z0-9._/-]{1,200}$/;
 const COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
 // Hosts a game may reach. The app has the same list (GameActivity.ALLOWED_HOSTS), so adding a host
 // needs the parent's OK AND a new APK.
-const ALLOWED_HOSTS = ['ntfy.sh'];
+const ALLOWED_HOSTS = ['ntfy.sh', 'map-pal-mike-base.vercel.app'];
 const RESERVED = ['ponas.js', 'game.json'];
 
 const args = process.argv.slice(2);
