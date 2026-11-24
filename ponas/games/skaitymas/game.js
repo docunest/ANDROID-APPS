@@ -696,6 +696,10 @@
       });
       menuEl.appendChild(row);
     });
+    var ver = el('div', null, '');   // which version is running (build-site writes game.json)
+    ver.style.cssText = 'position:fixed;left:8px;bottom:6px;font-size:13px;color:#90A4AE';
+    menuEl.appendChild(ver);
+    fetch('game.json').then(function (r) { return r.json(); }).then(function (g) { ver.textContent = 'v' + g.version; }).catch(function () { /* offline: no label */ });
     var corner = el('div'); corner.id = 'parent';   // parent: hold the bottom-right corner for 3 s
     var hold = null;
     corner.addEventListener('pointerdown', function (e) { e.preventDefault(); hold = setTimeout(openPanel, 3000); });
