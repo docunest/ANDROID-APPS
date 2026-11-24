@@ -49,6 +49,7 @@ object ParentMenu {
             "Open normal launcher",
             "Change PIN",
             "Versions",
+            "App update",
         )
         AlertDialog.Builder(home, DIALOG_THEME)
             .setTitle("Ponas – parent menu")
@@ -61,8 +62,29 @@ object ParentMenu {
                     4 -> openLauncher3(home)
                     5 -> changePin(home)
                     6 -> showText(home, "Versions", versionsText(home))
+                    7 -> showUpdate(home)
                 }
             }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    /** Self-update status (Updater), with "check now" and the one-time "allow installs" switch. */
+    private fun showUpdate(home: HomeActivity) {
+        val allowed = home.packageManager.canRequestPackageInstalls()
+        val text = buildString {
+            append("App build: ").append(BuildConfig.VERSION_CODE).append(" (").append(BuildConfig.VERSION_NAME).append(")\n")
+            append("Installs from Ponas allowed: ").append(if (allowed) "yes" else "NO — tap Allow").append("\n\n")
+            append("Last check: ").append(Updater.lastStatus(home).ifEmpty { "not yet" })
+        }
+        AlertDialog.Builder(home, DIALOG_THEME)
+            .setTitle("App update")
+            .setMessage(text)
+            .setPositiveButton("Check now") { _, _ ->
+                Updater.checkNow(home)
+                toast(home, "Checking for a new build…")
+            }
+            .setNeutralButton("Allow") { _, _ -> startSafely(home, Updater.permissionIntent(home)) }
             .setNegativeButton("Close", null)
             .show()
     }

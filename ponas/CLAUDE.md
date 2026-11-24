@@ -21,7 +21,8 @@ Do it, run the checks below, commit straight to `main` and push.
   git-ignored.
 - **Don't put `ponas.js` or `game.json` in a game folder.** The build adds them.
 - Ask before: adding Android permissions, dependencies or native libraries; adding a network
-  host (only `ntfy.sh` is allowed); loosening any limit below.
+  host (allowed: `ntfy.sh`, and `map-pal-mike-base.vercel.app` for games that log to MapPal, owner
+  2026-11-24); loosening any limit below.
 
 ## The device (hard limits)
 
@@ -43,7 +44,8 @@ Do it, run the checks below, commit straight to `main` and push.
   private to it and survives updates.
 - On GitHub Pages, all games share one origin. That's why storage keys are prefixed; `Ponas.save`
   does this for you.
-- The only network access is `https://ntfy.sh`, and only for games that list it in `meta.json`.
+- The only network access is to the allowed hosts (`https://ntfy.sh`; `https://map-pal-mike-base.vercel.app`
+  for the reading game's logs), and only for games that list the host in `meta.json` `"network"`.
   Everything else is blocked, both by the app and by a Content-Security-Policy.
 
 ## The shared kit: `sdk/ponas.js`
@@ -88,7 +90,8 @@ API:
   ```
   - `title`: a short Lithuanian word (the tile label).
   - `color`: a bright `#RRGGBB` tile background.
-  - `order`: tile position, lower comes first. Taken so far: balionai 10, piesimas 20, linkejimai 30.
+  - `order`: tile position, lower comes first. Taken so far: balionai 10, piesimas 20, linkejimai 30, matematika 40, raidziu-memory 50,
+    raidziu-poros 60, abecele 70, skiemenys 80, gulsciukas 90, minos 100, ateiviai 110, skaitymas 120.
   - `version`: **bump it when you change a game** ("1" → "2"). The parent sees it on the install
     screen. Updates are detected by content hash anyway.
   - `enabled: false` hides the game from the install list. It stays on tablets that already
@@ -170,7 +173,8 @@ chan.send({ pic: 'heart' });               // any JSON, under ~3.8 KB
 - `ponas.keystore`: the app signing key, committed on purpose (same as `dock/`), so every build
   installs over the last one.
 - `../.github/workflows/ponas-pages.yml`: publishes to GitHub Pages.
-- `../.github/workflows/ponas-apk.yml`: builds the APK when `android/**` changes and publishes it
-  as release `ponas-v<n>`.
+- `../.github/workflows/ponas-apk.yml`: builds the APK when `android/**` changes; on `main` only it
+  publishes release `ponas-v<n>`, which tablets install by themselves (self-update, `Updater.kt`).
+  Never publish a release from another branch.
 - `android/`: the Kotlin app. HomeActivity (tiles), InstallActivity (parent picks games),
   GameActivity (one game per process), SyncManager (downloads/updates), ParentMenu.

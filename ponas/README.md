@@ -10,8 +10,8 @@ phone / Claude ──push──▶ GitHub main ──Actions──▶ GitHub Pag
 ```
 
 - **App** (`android/`): Kotlin with plain Android Views. Its only dependencies are
-  `androidx.core` and `androidx.webkit`, and it needs only two permissions: `INTERNET` and
-  `ACCESS_NETWORK_STATE`.
+  `androidx.core` and `androidx.webkit`. Permissions: `INTERNET`, `ACCESS_NETWORK_STATE`, and for
+  self-update `REQUEST_INSTALL_PACKAGES` + `UPDATE_PACKAGES_WITHOUT_USER_ACTION`.
   - **Isolation:** each game runs in its own fresh browser process, which is ended when the game
     closes, so nothing leaks from one game into the next.
   - **Own storage:** each game has its own origin, so its saved progress stays private to it.
@@ -232,8 +232,14 @@ npx serve _site                   # launcher + games; use responsive mode at 640
 npm i --no-save playwright && node tools/smoke-test.mjs   # automatic check, screenshots in _shots/
 ```
 
-Not built yet: an in-app self-update from GitHub Releases. It would need the
-`REQUEST_INSTALL_PACKAGES` permission and is planned for later.
+**Self-update** (`Updater.kt`, owner 2026-11-24): the app checks GitHub releases `ponas-v<build>`
+every 15 minutes when the home screen comes back, downloads `ponas.apk` when the build is newer than
+its own `versionCode`, and installs it with PackageInstaller (no root). Once per tablet, allow
+installs from Ponas: parent menu → App update → Allow, or over ADB
+`adb shell appops set lt.eb07.ponas REQUEST_INSTALL_PACKAGES allow`. After that, Android 12+
+installs updates without a tap. CI publishes releases **only from `main`** (`versionCode` = run
+number, `versionName` = `1.<run>`); other branches build an artifact only. Status and a "Check now"
+button: parent menu → App update. Logs: `adb logcat -s PonasUpdate`.
 
 ## Fake GPS (tablet has no GPS chip)
 

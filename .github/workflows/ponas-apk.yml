@@ -39,11 +39,16 @@ jobs:
           PONAS_VERSION_NAME: "1.${{ github.run_number }}"
         run: ./gradlew --no-daemon assembleRelease
 
+      - name: Collect APK
+        run: cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/ponas.apk"
+
       - name: Publish release
+        # Only main: tablets install every ponas-v<n> release by themselves (Updater), so a
+        # work-in-progress branch must never publish one. Branch builds stay as artifacts.
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/ponas.apk"
           cd "$GITHUB_WORKSPACE"
           gh release create "ponas-v${{ github.run_number }}" ponas.apk \
             --target "${{ github.sha }}" \
