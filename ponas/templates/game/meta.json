@@ -3,6 +3,7 @@
   "icon": "icon.png",
   "color": "#FF7043",
   "order": 100,
+  "group": "fun",
   "version": "1",
   "enabled": true
 }

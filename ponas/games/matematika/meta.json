@@ -3,6 +3,7 @@
   "icon": "icon.png",
   "color": "#26A69A",
   "order": 40,
+  "group": "learning",
   "version": "2",
   "network": ["ntfy.sh"],
   "enabled": true

@@ -3,6 +3,7 @@
   "icon": "icon.png",
   "color": "#FF7043",
   "order": 60,
+  "group": "learning",
   "version": "2",
   "enabled": true
 }

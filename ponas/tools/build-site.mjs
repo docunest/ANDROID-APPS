@@ -19,6 +19,7 @@ import {
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const GROUPS = ['learning', 'fun', 'other'];
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const GAMES = join(ROOT, 'games');
 const SDK = join(ROOT, 'sdk', 'ponas.js');
@@ -90,6 +91,7 @@ for (const id of dirs) {
   const icon = meta.icon ?? 'icon.png';
   const color = meta.color;
   const order = meta.order ?? 100;
+  const group = meta.group ?? 'other';
   const version = String(meta.version ?? '1');
   const network = meta.network ?? [];
   const enabled = meta.enabled !== false;
@@ -97,6 +99,8 @@ for (const id of dirs) {
   if (typeof title !== 'string' || !title.trim()) err(id, 'meta.title must be a non-empty string');
   if (typeof color !== 'string' || !COLOR_RE.test(color)) err(id, 'meta.color must look like "#FFB300"');
   if (typeof order !== 'number' || !Number.isFinite(order)) err(id, 'meta.order must be a number');
+  if (!GROUPS.includes(group)) err(id, `meta.group must be one of ${GROUPS.join(', ')} (home-screen section)`);
+  if (meta.group === undefined) warnings.push(`${id}: no meta.group, shown under "other"`);
   if (typeof icon !== 'string' || !PATH_RE.test(icon)) err(id, 'meta.icon must be a file name like "icon.png"');
   if (meta.enabled !== undefined && typeof meta.enabled !== 'boolean') err(id, 'meta.enabled must be true or false');
   if (!/^[0-9A-Za-z.\-]{1,20}$/.test(version)) err(id, 'meta.version must be short, like "1" or "1.2"');
@@ -159,6 +163,7 @@ for (const id of dirs) {
     title: typeof title === 'string' ? title.trim() : id,
     color,
     order,
+    group,
     icon,
     version,
     enabled,
@@ -176,7 +181,8 @@ if (errors.length) {
   process.exit(1);
 }
 
-games.sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));
+// Home-screen sections, in this order (learning first, owner 2026-11-25).
+games.sort((a, b) => GROUPS.indexOf(a.group) - GROUPS.indexOf(b.group) || a.order - b.order || a.title.localeCompare(b.title));
 const manifest = { version: Math.floor(Date.now() / 1000), games };
 
 // ---- write the site ----

@@ -25,18 +25,42 @@ import java.net.URL
  * Android restarts the home screen with the new build.
  */
 object Updater {
-    const val EVERY_MS = 15 * 60_000L
+    /** Same as the dock: every minute while the home screen is up. Cheap, because unchanged answers
+     *  come back as 304 (ETag) and GitHub doesn't count those against its 60-an-hour limit. */
+    const val EVERY_MS = 60_000L
     private const val PREFS = "ponas-update"
     private const val KEY_LAST_CHECK = "lastCheck"
     private const val KEY_STATUS = "status"
     private const val KEY_FAILED_BUILD = "failedBuild"
     private const val KEY_FAILED_AT = "failedAt"
-    private const val RETRY_FAILED_MS = 6 * 60 * 60_000L
+    private const val RETRY_FAILED_MS = 10 * 60_000L
+    private const val KEY_ETAG = "etag"
+    private const val KEY_REL_BUILD = "relBuild"
+    private const val KEY_REL_URL = "relUrl"
 
     private val worker = android.os.HandlerThread("ponas-update").apply { start() }
     private val handler = android.os.Handler(worker.looper)
 
     data class Release(val build: Int, val apkUrl: String)
+
+    // What the home-screen badge shows ("v9 · Up to date", spinner while busy).
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    @Volatile var busy = false
+        private set
+    @Volatile var status = "Not checked yet"
+        private set
+    private val listeners = mutableSetOf<() -> Unit>()
+    fun addListener(l: () -> Unit) = synchronized(listeners) { listeners += l }
+    fun removeListener(l: () -> Unit) = synchronized(listeners) { listeners -= l }
+    private fun set(busy: Boolean, status: String) {
+        this.busy = busy
+        this.status = status
+        val ls = synchronized(listeners) { listeners.toList() }
+        main.post { ls.forEach { it() } }
+    }
+
+    /** From [UpdateReceiver]: the install finished (success replaces the app, so this is mostly failures). */
+    fun installResult(c: Context, status: String) = finish(c.applicationContext, status)
 
     private fun prefs(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -53,7 +77,7 @@ object Updater {
         handler.post { check(app) }
     }
 
-    /** Parent menu: check right away, ignoring the 15-minute spacing and the failed-build pause. */
+    /** Badge tap or parent menu: check right away, ignoring the spacing and the failed-build pause. */
     fun checkNow(context: Context) {
         val app = context.applicationContext
         prefs(app).edit().putLong(KEY_LAST_CHECK, System.currentTimeMillis()).apply()
@@ -67,9 +91,10 @@ object Updater {
     /** Blocking; runs on the update thread. Returns a short status line. */
     fun check(app: Context, force: Boolean = false): String {
         val p = prefs(app)
-        val rel = runCatching { latest() }.getOrElse { return finish(app, "Check failed: ${it.message}") }
+        set(true, "Checking…")
+        val rel = runCatching { latest(app) }.getOrElse { return finish(app, "Check failed: ${it.message}") }
             ?: return finish(app, "No release found")
-        if (rel.build <= BuildConfig.VERSION_CODE) return finish(app, "Up to date (build ${BuildConfig.VERSION_CODE})")
+        if (rel.build <= BuildConfig.VERSION_CODE) return finish(app, "Up to date")
         // Before downloading: without the one-time permission the APK can't be installed anyway,
         // and the tablet's data shouldn't pay for a download every 15 minutes.
         if (!app.packageManager.canRequestPackageInstalls()) {
@@ -78,8 +103,9 @@ object Updater {
         if (!force && p.getInt(KEY_FAILED_BUILD, 0) == rel.build &&
             System.currentTimeMillis() - p.getLong(KEY_FAILED_AT, 0L) < RETRY_FAILED_MS
         ) {
-            return finish(app, "Build ${rel.build} failed to install earlier; next try later")
+            return finish(app, "v${rel.build} failed to install, retrying later")
         }
+        set(true, "Downloading v${rel.build}…")
         val file = File(app.cacheDir, "ponas-update.apk")
         runCatching { download(rel.apkUrl, file) }.getOrElse {
             file.delete()
@@ -89,8 +115,10 @@ object Updater {
             // Counted as failed until the new build runs (a successful install replaces this app,
             // and the new build starts with a higher VERSION_CODE, so the mark no longer matters).
             p.edit().putInt(KEY_FAILED_BUILD, rel.build).putLong(KEY_FAILED_AT, System.currentTimeMillis()).apply()
+            set(true, "Installing v${rel.build}…")
             install(app, file)
-            finish(app, "Installing build ${rel.build}…")
+            android.util.Log.i("PonasUpdate", "Installing build ${rel.build}…")
+            "Installing build ${rel.build}…"
         } catch (e: Exception) {
             finish(app, "Install failed: ${e.message}")
         } finally {
@@ -100,20 +128,27 @@ object Updater {
 
     private fun finish(c: Context, status: String): String {
         save(c, status)
+        set(false, status)
         android.util.Log.i("PonasUpdate", status)
         return status
     }
 
     /** Newest "ponas-v<build>" release that has ponas.apk. */
-    fun latest(): Release? {
+    fun latest(c: Context): Release? {
+        val p = prefs(c)
         val conn = URL("https://api.github.com/repos/${BuildConfig.UPDATE_REPO}/releases?per_page=100").openConnection() as HttpURLConnection
         conn.setRequestProperty("Accept", "application/vnd.github+json")
+        p.getString(KEY_ETAG, null)?.let { conn.setRequestProperty("If-None-Match", it) }
         conn.connectTimeout = 10_000
         conn.readTimeout = 20_000
         try {
+            if (conn.responseCode == 304) {
+                val url = p.getString(KEY_REL_URL, null) ?: return null
+                return Release(p.getInt(KEY_REL_BUILD, 0), url)
+            }
             if (conn.responseCode != 200) throw IOException("GitHub ${conn.responseCode}")
             val arr = JSONArray(conn.inputStream.bufferedReader().use { it.readText() })
-            return (0 until arr.length()).map { arr.getJSONObject(it) }.mapNotNull { r ->
+            val rel = (0 until arr.length()).map { arr.getJSONObject(it) }.mapNotNull { r ->
                 val build = Regex("^ponas-v(\\d+)$").find(r.optString("tag_name"))?.groupValues?.get(1)?.toIntOrNull()
                     ?: return@mapNotNull null
                 val assets = r.optJSONArray("assets") ?: return@mapNotNull null
@@ -121,6 +156,12 @@ object Updater {
                     .firstOrNull { it.optString("name") == "ponas.apk" } ?: return@mapNotNull null
                 Release(build, apk.getString("browser_download_url"))
             }.maxByOrNull { it.build }
+            p.edit()
+                .putString(KEY_ETAG, conn.getHeaderField("ETag"))
+                .putInt(KEY_REL_BUILD, rel?.build ?: 0)
+                .putString(KEY_REL_URL, rel?.apkUrl)
+                .apply()
+            return rel
         } finally {
             conn.disconnect()
         }

@@ -18,9 +18,13 @@ class UpdateReceiver : BroadcastReceiver() {
                 confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 runCatching { context.startActivity(confirm) }
                 Log.i("PonasUpdate", "install waits for a tap")
+                Updater.installResult(context, "Update waits for a tap")
             }
             PackageInstaller.STATUS_SUCCESS -> Log.i("PonasUpdate", "install ok")
-            else -> Log.w("PonasUpdate", "install failed: $message")
+            else -> {
+                Log.w("PonasUpdate", "install failed: $message")
+                Updater.installResult(context, "Install failed: $message")
+            }
         }
     }
 }
