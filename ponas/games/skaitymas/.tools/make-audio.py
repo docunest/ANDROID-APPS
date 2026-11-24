@@ -4,12 +4,12 @@
   espeak-ng lt phonemes for single letter sounds ("mmm", short "bə").
 Needs: espeak-ng mbrola mbrola-lt1 ffmpeg node.   Run: python3 -I .tools/make-audio.py   (from games/skaitymas)
 Any clip can later be replaced by a parent recording with the same file name."""
-import json, os, subprocess, sys, tempfile
+import json, os, shutil, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = json.loads(subprocess.check_output(["node", "-e",
-    "require(process.argv[1]); const d=globalThis.SK_DATA; console.log(JSON.stringify({syl:d.syllables,words:d.pictureWords,"
-    "alphabet:d.alphabet,prompts:d.prompts,groups:d.phonograms}))", os.path.join(HERE, "data.js")]))
+    "require(process.argv[2]); require(process.argv[1]); const d=globalThis.SK_DATA; console.log(JSON.stringify({syl:d.syllables,words:d.pictureWords,"
+    "alphabet:d.alphabet,prompts:d.prompts,groups:d.phonograms}))", os.path.join(HERE, "data.js"), os.path.join(HERE, "words.js")]))
 
 def key(s):
     return "".join(c if ord(c) < 128 else "u%04x" % ord(c) for c in s)
@@ -22,6 +22,7 @@ LETTER_PH = {"a": "a", "ą": "a:", "b": "b@", "c": "ts@", "č": "tS@", "d": "d@"
 GROUP_PH = {"dž": "dZ@", "ch": "x@"}
 
 out_dir = os.path.join(HERE, "audio")
+shutil.rmtree(out_dir, ignore_errors=True)   # start clean: no clips left over from removed words
 os.makedirs(out_dir, exist_ok=True)
 tmp = tempfile.mkdtemp()
 
