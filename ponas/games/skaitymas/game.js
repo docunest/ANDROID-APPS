@@ -174,7 +174,7 @@
   var level = null;   // { def, rounds, last }
   function frame(opts) {
     side.innerHTML = ''; work.innerHTML = '';
-    if (opts.picture) {
+    if (opts.picture && D.photos) {
       var pic = el('div', 'pic');
       var img = el('img');
       img.src = D.image(opts.picture); img.alt = '';
@@ -193,12 +193,13 @@
   }
   function roundDone() {
     send();
+    if (!level) return;   // the child pressed Home while the round was ending
     level.rounds++;
     progressEl.style.width = (100 * level.rounds / ROUNDS) + '%';
     busy = true;
     setTimeout(function () {
       busy = false;
-      if (over) return;
+      if (over || !level) return;
       if (level.rounds >= ROUNDS || activeMs >= SESSION_MS) { goMenu(); return; }
       level.def.run();
     }, 900);
@@ -678,8 +679,8 @@
     { id: 3, tag: 'A3', color: '#AED581', face: ICON.pencil, run: runA3 },
     { id: 11, tag: 'B1', color: '#B39DDB', face: '<b style="font-size:calc(var(--t)*.36)">m…</b>', run: runB1 },
     { id: 12, tag: 'B2', color: '#FFFFFF', face: '<b style="font-size:calc(var(--t)*.42)"><span style="color:#C62828">b</span><span style="color:#1565C0">a</span></b>', run: runB2 },
-    { id: 13, tag: 'B3', color: '#F8BBD0', face: '<b style="font-size:calc(var(--t)*.28)">katė</b>', run: runRead(13, D.pink) },
-    { id: 14, tag: 'B4', color: '#90CAF9', face: '<b style="font-size:calc(var(--t)*.24)">medis</b>', run: runRead(14, D.words5) },
+    { id: 13, tag: 'B3', color: '#F8BBD0', face: '<b style="font-size:calc(var(--t)*.28)">katė</b>', run: runRead(13, D.pink), needsPhotos: true },
+    { id: 14, tag: 'B4', color: '#90CAF9', face: '<b style="font-size:calc(var(--t)*.24)">medis</b>', run: runRead(14, D.words5), needsPhotos: true },
     { id: 15, tag: 'B5', color: '#A5D6A7', face: '<b style="font-size:calc(var(--t)*.4)">uo</b>', run: runB5 }
   ];
   function drawMenu() {
@@ -689,7 +690,8 @@
       group.forEach(function (def) {
         var b = el('button', 'lvl', def.face + '<small>' + def.tag + '</small>');
         b.style.background = def.color;
-        tap(b, function () { startLevel(def); });
+        if (def.needsPhotos && !D.photos) { b.style.opacity = '.3'; b.disabled = true; }   // pictures still coming
+        else tap(b, function () { startLevel(def); });
         row.appendChild(b);
       });
       menuEl.appendChild(row);
