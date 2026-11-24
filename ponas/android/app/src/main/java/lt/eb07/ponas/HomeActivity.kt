@@ -65,6 +65,17 @@ class HomeActivity : Activity() {
         }
     }
 
+    // Version badge (bottom-left, like the dock's): "v9 · Up to date", spinner while busy; tap = check now.
+    private lateinit var versionText: TextView
+    private lateinit var versionSpinner: ProgressBar
+    private val updaterListener: () -> Unit = { renderVersion() }
+    private val updateLoop = object : Runnable {
+        override fun run() {
+            Updater.maybeCheck(this@HomeActivity)
+            handler.postDelayed(this, Updater.EVERY_MS)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Immersive.hide(window)
@@ -77,7 +88,10 @@ class HomeActivity : Activity() {
         SyncManager.addListener(syncListener)
         render()
         SyncManager.maybeSync(this)
-        Updater.maybeCheck(this)
+        Updater.addListener(updaterListener)
+        renderVersion()
+        handler.removeCallbacks(updateLoop)
+        handler.post(updateLoop)
         FakeGps.start(this)
         handler.removeCallbacks(emptyRetry)
         handler.postDelayed(emptyRetry, 31_000)
@@ -85,6 +99,8 @@ class HomeActivity : Activity() {
 
     override fun onPause() {
         SyncManager.removeListener(syncListener)
+        Updater.removeListener(updaterListener)
+        handler.removeCallbacks(updateLoop)
         handler.removeCallbacks(openParentMenu)
         handler.removeCallbacks(emptyRetry)
         super.onPause()
@@ -123,6 +139,37 @@ class HomeActivity : Activity() {
     private fun dpf(v: Float): Float = v * resources.displayMetrics.density
 
     @SuppressLint("ClickableViewAccessibility")
+    private fun versionBadge(): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        background = GradientDrawable().apply {
+            cornerRadius = dp(14).toFloat()
+            setColor(0x33FFFFFF)
+            setStroke(dp(1), 0x338D6E63)
+        }
+        alpha = 0.7f
+        setPadding(dp(10), 0, dp(12), 0)
+        isClickable = true
+        contentDescription = "App version, tap to check for updates"
+        setOnClickListener { Updater.checkNow(this@HomeActivity) }
+        versionSpinner = ProgressBar(context).apply { isIndeterminate = true }
+        addView(versionSpinner, LinearLayout.LayoutParams(dp(18), dp(18)).apply { marginEnd = dp(6) })
+        versionText = TextView(context).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTextColor(Color.parseColor("#5D4037"))
+            maxLines = 1
+            maxWidth = dp(260)
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        addView(versionText)
+    }
+
+    private fun renderVersion() {
+        if (!::versionText.isInitialized) return
+        versionText.text = "v${BuildConfig.VERSION_CODE} · ${Updater.status}"
+        versionSpinner.visibility = if (Updater.busy) View.VISIBLE else View.GONE
+    }
+
     private fun buildUi(): View {
         val root = FrameLayout(this)
 
@@ -164,6 +211,11 @@ class HomeActivity : Activity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(scroll, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+
+        root.addView(versionBadge(), FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, dp(40), Gravity.BOTTOM or Gravity.START).apply {
+            setMargins(dp(10), 0, 0, dp(14))
+        })
 
         // Small, quiet install button for the parent (PIN protected).
         val install = ImageView(this).apply {
