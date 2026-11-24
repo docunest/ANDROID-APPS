@@ -1,0 +1,8 @@
+{
+  "title": "Skaitymas",
+  "icon": "icon.png",
+  "color": "#26A69A",
+  "order": 90,
+  "version": "1",
+  "enabled": true
+}
