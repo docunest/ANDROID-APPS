@@ -38,7 +38,7 @@
   var LT_VOWELS = 'aąeęėiįyouųū';
 
   // Five-letter picture words (owner's levels A2 and A3; Montessori blue series).
-  var WORDS5 = ['medis', 'namas', 'lapas', 'ranka', 'galva', 'batas', 'sūris', 'duona', 'varlė', 'žuvis',
+  var WORDS5 = ['medis', 'namas', 'lapas', 'ranka', 'lempa', 'batas', 'sūris', 'duona', 'varlė', 'žuvis',
     'meška', 'karvė', 'rogės', 'ratas', 'saulė', 'akmuo', 'tulpė', 'slyva', 'morka', 'nosis',
     'ausis', 'durys', 'pilis', 'višta', 'antis', 'gulbė', 'voras', 'knyga', 'ledai', 'dešra'];
   // Short phonetic words (Montessori pink series).

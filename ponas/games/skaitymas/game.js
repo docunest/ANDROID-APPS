@@ -2,7 +2,7 @@
  * Branch A (owner): 1 syllables by ear, 2 build a word from letters, 3 write the word.
  * Branch B (Montessori): 11 first/last sound, 12 moveable alphabet, 13 pink, 14 blue, 15 green series.
  * Every answer is logged (level, item, options, answer, per-letter result, hint, time) and sent to
- * MapPal (/api/reading/attempts) when the parent has entered the reading token. */
+ * MapPal (/api/reading/attempts) whenever the tablet is online (no token: trusted device). */
 (function () {
   'use strict';
   var P = window.Ponas, D = window.SK_DATA;
@@ -128,15 +128,14 @@
   }
   function setSync(st) { P.save('sync', st); }
   function send() {
-    var token = P.load('token', '');
-    if (!token || sending || !queue.length) return;
+    if (sending || !queue.length) return;
     sending = true;
     var batch = queue.slice(0, 50);
     var ids = {};
     batch.forEach(function (b) { ids[b.id] = 1; });
     fetch(API + '/api/reading/attempts', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ attempts: batch })
     }).then(function (r) {
       sending = false;
@@ -702,21 +701,18 @@
     menuEl.appendChild(corner);
   }
 
-  // ---------------------------------------------------------------- parent panel: reading token, sending, photo credits
+  // ---------------------------------------------------------------- parent panel: sending status, photo credits
   function fmt(t) { return t ? new Date(t).toLocaleString('lt-LT') : 'niekada'; }
   function openPanel() {
     var st = P.load('sync', null);
     panel.innerHTML = '';
     panel.appendChild(el('b', null, 'Tėvams'));
-    var input = el('input'); input.type = 'text'; input.autocomplete = 'off'; input.placeholder = 'Skaitymo raktas (token)';
-    input.value = P.load('token', '');
-    panel.appendChild(input);
     var status = el('div', 'muted', 'Neišsiųsta atsakymų: ' + queue.length + '<br>Paskutinis siuntimas: ' +
       (st ? fmt(st.at) + (st.ok ? ' (gerai)' : ' (klaida ' + st.code + ')') : 'niekada'));
     panel.appendChild(status);
     var row = el('div', 'row');
-    var save = el('button', 'act', 'Išsaugoti ir siųsti');
-    save.addEventListener('click', function () { P.save('token', input.value.trim()); send(); setTimeout(openPanel, 1500); });
+    var save = el('button', 'act', 'Siųsti dabar');
+    save.addEventListener('click', function () { send(); setTimeout(openPanel, 1500); });
     var credits = el('button', 'act', 'Nuotraukų autoriai');
     credits.addEventListener('click', showCredits);
     var close = el('button', 'act', 'Uždaryti');
