@@ -78,6 +78,7 @@ class HomeActivity : Activity() {
         render()
         SyncManager.maybeSync(this)
         Updater.maybeCheck(this)
+        FakeGps.start(this)
         handler.removeCallbacks(emptyRetry)
         handler.postDelayed(emptyRetry, 31_000)
     }
