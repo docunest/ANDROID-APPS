@@ -86,12 +86,14 @@ API:
   `icon.png`, plus any js/css/images/sounds. File names use only `A-Z a-z 0-9 . _ - /`.
 - **`meta.json`:**
   ```json
-  { "title": "Spalvos", "icon": "icon.png", "color": "#FFB300", "order": 40, "version": "1", "enabled": true }
+  { "title": "Spalvos", "icon": "icon.png", "color": "#FFB300", "order": 40, "group": "learning", "version": "1", "enabled": true }
   ```
   - `title`: a short Lithuanian word (the tile label).
   - `color`: a bright `#RRGGBB` tile background.
   - `order`: tile position, lower comes first. Taken so far: balionai 10, piesimas 20, linkejimai 30, matematika 40, raidziu-memory 50,
     raidziu-poros 60, abecele 70, skiemenys 80, gulsciukas 90, minos 100, ateiviai 110, skaitymas 120.
+  - `group`: home-screen section: `"learning"` (shown first), `"fun"` or `"other"`. Missing means
+    `"other"`. Moving a game between sections needs no new APK.
   - `version`: **bump it when you change a game** ("1" → "2"). The parent sees it on the install
     screen. Updates are detected by content hash anyway.
   - `enabled: false` hides the game from the install list. It stays on tablets that already

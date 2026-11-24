@@ -182,7 +182,8 @@ class HomeActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
         }
-        grid = GridLayout(this).apply { setPadding(dp(8), dp(8), dp(8), dp(8)) }
+        // Bottom padding: the last row scrolls clear of the version badge and the install button.
+        grid = GridLayout(this).apply { setPadding(dp(8), dp(8), dp(8), dp(64)) }
         content.addView(grid, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
@@ -262,25 +263,44 @@ class HomeActivity : Activity() {
         return cols to size.coerceAtLeast(dp(140))
     }
 
+    /** Sections top to bottom: learning first (owner 2026-11-25), then fun, then the rest. */
+    private val sections = listOf(
+        "learning" to "📚 Mokomės",
+        "fun" to "🎈 Žaidžiam",
+        "other" to "🧩 Kita",
+    )
+
     fun render() {
-        val games = Store.loadInstalled(this)
+        // The group comes from the newest catalog, so moving a game to another section needs only
+        // a site update (installed.json keeps what the game had when it was installed).
+        val catalogGroups = Store.loadCatalog(this).associate { (g, _) -> g.id to g.group }
+        val games = Store.loadInstalled(this).map { g -> catalogGroups[g.id]?.let { g.copy(group = it) } ?: g }
         val catalogEmpty = Store.loadCatalog(this).isEmpty()
         val running = SyncManager.catalogRunning
         val (cols, size) = layoutFor()
-        val sig = games.joinToString("|") { "${it.id}:${it.hash}:${it.title}:${it.color}:${it.order}" } +
+        val sig = games.joinToString("|") { "${it.id}:${it.hash}:${it.title}:${it.color}:${it.order}:${it.group}" } +
             "#$cols#$size#${games.isEmpty()}#$catalogEmpty#$running"
         if (sig == renderedSignature) return
         renderedSignature = sig
 
         grid.removeAllViews()
         grid.columnCount = cols
-        for (g in games) {
-            val bmp = loadIcon(File(Store.gameDir(this, g.id, g.hash), g.icon), size)
-            grid.addView(makeTile(g.title, parseColor(g.color), bmp, null, size) { openGame(g) })
+        val known = sections.map { it.first }.toSet()
+        for ((key, label) in sections) {
+            val inSection = games.filter { (if (it.group in known) it.group else "other") == key }
+            // The camera tile lives in "other", so that section always shows.
+            if (inSection.isEmpty() && key != "other") continue
+            if (games.isNotEmpty()) grid.addView(sectionHeader(label, cols))
+            for (g in inSection) {
+                val bmp = loadIcon(File(Store.gameDir(this, g.id, g.hash), g.icon), size)
+                grid.addView(makeTile(g.title, parseColor(g.color), bmp, null, size) { openGame(g) })
+            }
+            if (key == "other") {
+                grid.addView(makeTile("Kamera", Color.parseColor("#7E57C2"), null, R.drawable.ic_camera, size) {
+                    openCamera()
+                })
+            }
         }
-        grid.addView(makeTile("Kamera", Color.parseColor("#7E57C2"), null, R.drawable.ic_camera, size) {
-            openCamera()
-        })
 
         if (games.isEmpty()) {
             emptyPanel.visibility = View.VISIBLE
@@ -321,6 +341,18 @@ class HomeActivity : Activity() {
             BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = sample })
         } catch (_: Throwable) {
             null
+        }
+    }
+
+    /** A section title across the whole grid row. */
+    private fun sectionHeader(label: String, cols: Int): View = TextView(this).apply {
+        text = label
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
+        setTextColor(Color.parseColor("#5D4037"))
+        typeface = Typeface.DEFAULT_BOLD
+        setPadding(dp(12), dp(14), dp(12), dp(2))
+        layoutParams = GridLayout.LayoutParams(GridLayout.spec(GridLayout.UNDEFINED), GridLayout.spec(0, cols)).apply {
+            width = ViewGroup.LayoutParams.WRAP_CONTENT
         }
     }
 

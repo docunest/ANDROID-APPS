@@ -32,8 +32,7 @@ catalog the tablet reads.
 
 ## 1. One-time setup
 
-Ponas lives in `ponas/` of **docunest/ANDROID-APPS** (moved from eb07-lab/ponas-app with its
-history). Two workflows at the repo root drive it:
+Ponas lives in `ponas/` of **docunest/ANDROID-APPS**. Two workflows at the repo root drive it:
 
 | Workflow | Runs when | Does |
 |---|---|---|

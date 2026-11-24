@@ -13,6 +13,8 @@ data class Game(
     val title: String,
     val color: String,
     val order: Int,
+    /** Home-screen section: "learning", "fun" or "other" (meta.json "group"). */
+    val group: String = "other",
     val icon: String,
     val hash: String,
     val version: String = "1",
@@ -24,7 +26,7 @@ data class Game(
     val prev: String? = null,
 ) {
     fun toJson(): JSONObject = JSONObject()
-        .put("id", id).put("title", title).put("color", color).put("order", order)
+        .put("id", id).put("title", title).put("color", color).put("order", order).put("group", group)
         .put("icon", icon).put("hash", hash).put("version", version).put("updated", updated)
         .put("size", size).put("enabled", enabled).put("network", JSONArray(network))
         .apply { if (prev != null) put("prev", prev) }
@@ -38,6 +40,7 @@ data class Game(
                 title = o.optString("title", id),
                 color = o.optString("color", "#4CAF50"),
                 order = o.optInt("order", 100),
+                group = o.optString("group", "other"),
                 icon = o.optString("icon", "icon.png"),
                 hash = o.getString("hash"),
                 version = o.optString("version", "1"),
