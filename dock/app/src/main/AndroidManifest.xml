@@ -108,6 +108,12 @@
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
 
         <activity
+            android:name=".NetDashActivity"
+            android:exported="false"
+            android:label="Network dashboard"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
+
+        <activity
             android:name=".DebugActivity"
             android:exported="false"
             android:label="Debug log"

@@ -164,6 +164,21 @@ object OfflinePois {
         return out.sortedBy { it.km }
     }
 
+    /** Average speed sections from every installed pack (table `zone`, packs from 2026-11-25 on; older packs: none). */
+    fun zones(ctx: Context): List<AvgZone.Zone> {
+        val out = ArrayList<AvgZone.Zone>()
+        for (cc in OfflinePacks.COUNTRIES.keys) {
+            val db = synchronized(this) { db(ctx, cc) } ?: continue
+            runCatching {
+                db.rawQuery("SELECT osm, lat1, lng1, lat2, lng2, maxspeed, name FROM zone", null).use { c ->
+                    while (c.moveToNext()) out += AvgZone.Zone(c.getString(0), c.getDouble(1), c.getDouble(2), c.getDouble(3), c.getDouble(4),
+                        if (c.isNull(5)) null else c.getInt(5), c.getString(6))
+                }
+            }
+        }
+        return out.distinctBy { it.osm }
+    }
+
     fun distM(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
         val x = Math.toRadians(lng2 - lng1) * cos(Math.toRadians((lat1 + lat2) / 2))
         val y = Math.toRadians(lat2 - lat1)

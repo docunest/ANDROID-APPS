@@ -130,6 +130,40 @@ Seen on the unit (build 72, Foz do Arelho → Caldas): the screen is **1280×480
 - **Tap or hold the middle** opens the big view (2× the old size, square, over Waze; the dock map no longer opens). Pinch and pan; tap a place to get a card with Waze and ✕. Buttons: ✕ · ◎ follow · Auto · City · Autobahn · Explore · Hide. A tap outside or 60 s idle closes it.
 - **Hide** switches the mini-map off. The **"Mini-map" icon** in the app list (`MiniMapLauncher`) brings it back.
 
+## Network history: drop card + dashboard (2026-11-25)
+
+Owner: "when the connection is lost show a semi-transparent tooltip … network status and issues for the last 3–5 minutes … a chart showing what
+was failing … clicking it opens a full dash … Grafana style, not random logs".
+
+- `NetHistory.kt`: every 2 s (the Wi-Fi doctor's pinger) state (online / no internet / down / Wi-Fi off), network, signal, iPhone ping (or lost),
+  link speed, traffic in/out (all minus mobile), van speed + position; every internet check (iPhone / DNS / web ms, ok?); events (drop, back,
+  Wi-Fi switched off, questions). 2 h in memory; each drop also saves its last 5 min + where it happened to `files/netdrops.json` (40 kept).
+- `DropCard.kt`: on a drop, a see-through card at the left edge: signal, iPhone ping (red ticks = lost), internet checks (red ticks = failed)
+  for the last 3 min, the reason once known, and a plain reading ("signal fine · iPhone answered · internet failing 40 s before → the iPhone's
+  mobile data first"). Live while down, closes 15 s after it's back (4 min max). Tap = dashboard. Settings → Network: on/off.
+- `NetDashActivity.kt` (+ `TimeChart.kt`): stat tiles (now, signal, ping + loss, internet checks, drops + downtime), panels (connection state band,
+  signal with −70/−80 lines, iPhone ping, internet checks, traffic, van speed), red/green dashed lines at drops/backs; 3 min · 15 min · 1 h · 2 h
+  live; right side: saved drops on a map and as a list — tap one for its 5 minutes. From the drop card, Wi-Fi doctor "📊 Dashboard", Settings.
+- **Who switches Wi-Fi off** (seen 23 Nov): Android logged `setWifiEnabled package=com.android.shell uid=0 enable=false` every ~65 s while
+  down = a root shell command (`svc wifi disable`), not Android and not Dock's code. Dock now also logs the running shell processes at that
+  moment (the script's `sleep` and parent) to find the script.
+
+## Police round 2 + average speed sections (2026-11-25)
+
+Owner: "the outline is a bit too much … it alerts only if I'm looking straight at the police … I need something that goes either on my route or
+shows proximity or the direction … 5 blocks away brings less value … a special mode when I'm in an average speed zone (Waze doesn't always show them)".
+
+- Police (`Police.evaluate`): **on the route** = along the dock's route (≤ 300 m off) or, with no dock route, a report Waze marks on its route
+  and roughly ahead (±100°) → full red/blue flash from ~90 s before (1.5–4 km). Edge line 4 dp (was 12), glow unchanged. **Nearby, off the
+  route** (any direction, ≤ 400 m under 50 km/h, ≤ 800 m faster) → soft red glow only on the side it's on, "🚓 400 m" and an arrow. The old
+  ±60° "in front of you" cone is gone. Mini-map ring flashes only for "on the route".
+- Average speed sections (`AvgZone.kt`): OSM `enforcement=average_speed` relations (from/to nodes, else first/last device; limit from the
+  relation or its section ways) → pack table `zone` (Portugal: 23 sections, 15 with a limit). In = within 120 m of a start, > 15 km/h, heading to
+  its end (±50°); average = distance driven fix by fix ÷ time since the start; out = within 50 m of the end / 400 m past the closest point /
+  far too long. Panel at the top: "⏱ AVERAGE SPEED 100 · you 97 · now 104" + "3.2 km left · max 108 km/h for the rest"; steady edge glow green /
+  amber (within 3 of the limit) / red (over). Settings → Police ahead: on/off + "Test the average-speed panel". Older packs have no `zone`
+  table → nothing shown until the packs are updated.
+
 ## Wi-Fi doctor asks before cutting a connection (2026-11-20)
 
 Owner: "way too aggressive … keeps disconnecting my phone … if you are dropping the Wi-Fi connection, it must be confirmed by me".
@@ -154,16 +188,17 @@ Evidence (log of 15 Nov, ~4 h): 12 drops started by the dock itself — 7 "hotsp
   could take 12 s, so a slow-but-working answer counted as a failure). The two failed checks must be ≥ 20 s apart. The 2-s ping has a hard
   3-s limit (a hung ping process counts as one lost answer).
 
-## Waze ignoring a sent link (2026-11-17, changed 2026-11-20)
+## Waze ignoring a sent link — hold to restart (2026-11-17, changed 11-20 and 11-25)
 
-Three links sent to a running Waze were taken (`Sending to native`) but never run; after the owner killed Waze the same link worked at once.
-The first fix (restart Waze when it hadn't started the search 12 s after a link) was **too aggressive** (owner 2026-11-20): it fired while Waze was
-still calculating a slow route, or while the owner was looking at the route before pressing Go. Removed.
+History: Waze sometimes takes a link and does nothing (after killing Waze the same link worked). Two automatic fixes guessed wrong: "restart if
+no search 12 s after a link" fired while Waze was slowly planning or the owner was looking at the route; "same place sent twice in 5 min" fired
+while the owner was mid-planning another route, and the restarted Waze asked "resume the previous drive?" and dropped the link — a loop.
 
-Now (`WazeLinkCheck.kt`, the owner's rule): **the same place sent twice within 5 minutes** = Waze ignored it ("there is no other practical need to do
-this"). Unless Waze's log showed the first link start navigation (`startNavigationFlow … caller=DeepLink`), the dock restarts Waze (root) and sends the
-link again, and an amber notice at the top stays until navigation is seen working — that log line, or the place appearing in Waze's recent places
-(Trip) — then turns green "✓ Waze is navigating…" for 4 s. Tap the notice to close it. A single send never does anything. Lines tagged `NAV`.
+Now (owner 2026-11-25) **no guessing**: every Waze button — a place's name in the list, W, "Drive · Waze", the place card's Waze, the new-place
+card, the mini-map card — is **tap = send as usual, hold 3 s = restart Waze and send** (`WazeHold.kt`: a light bar fills the button while held;
+let go early = nothing). The restart (`WazeLinkCheck.restartAndSend`): stop Waze → start it → wait 8 s (start-up and its "resume?" question)
+→ send the link → watch Waze's log for "Executing query" (took it) / startNavigationFlow (driving) → if neither within 12 s, send once more.
+A notice at the top says each step. The place menu (pin / delete / link) moved to a long-press on the map thumbnail or 🗺.
 
 ## Dock map + mini-map, round 2 (2026-11-17)
 

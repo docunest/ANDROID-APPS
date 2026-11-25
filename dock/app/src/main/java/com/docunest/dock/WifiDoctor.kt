@@ -111,11 +111,18 @@ object WifiDoctor {
     private val pingLoop = object : Runnable {
         override fun run() {
             val gw = gateway
+            var pingMs = -2
             if (connected && gw != null) {
                 val ms = ping(gw, waitSec = 1)
                 if (ms != null) lastGatewayAnswerAt = now()
                 link.add(ms)
+                pingMs = ms ?: -1
                 DebugLog.change("WIFI", "link", link.level().name, "${link.text()} · via $rttMethod to $gw")
+            }
+            // History for the drop card and the dashboard.
+            if (::app.isInitialized) runCatching {
+                val state = when { !enabled -> 2; !connected -> 0; internet == false -> 3; else -> 1 }
+                NetHistory.sample(app, state, if (connected) ssid else null, if (connected) rssi else 0, pingMs, if (connected) linkMbps else 0)
             }
             pinger.postDelayed(this, 2_000L)
         }
@@ -171,6 +178,7 @@ object WifiDoctor {
         verdict = v
         checkedAt = now()
         if (v.internet == false) { if (failedChecks == 0) firstFailedAt = now(); failedChecks++ } else failedChecks = 0
+        NetHistory.check(hotMs, dnsMs, httpMs, httpCode, v.level.name)
         DebugLog.change("WIFI", "verdict", v.level.name,
             "${v.text} · iPhone ${hotMs ?: "—"} ms · DNS ${dnsMs ?: "—"} ms · web ${httpCode ?: "—"} in ${httpMs ?: "—"} ms")
         worker.post { applyProbe(v.internet != false) }
@@ -426,7 +434,15 @@ object WifiDoctor {
             // Seen 2026-11-17/18/20: Wi-Fi switched OFF ~65 s into a drop and every ~65 s after — not by Dock.
             // Find out who: Android logs every setWifiEnabled with the calling package.
             actions.post {
-                val who = Root.output("logcat -b main,system -d -t 3000 | grep -iE 'setWifiEnabled|SelfRecovery|WifiController|setWifiApEnabled|wifi.*(disable|enable)' | tail -n 12")
+                // setWifiEnabled names the caller (2026-11-23: package=com.android.shell uid=0 = a root shell command, every ~65 s).
+                // The shell processes alive now show which script runs it (its `sleep` and parent).
+                val who = Root.output(
+                    "logcat -b main,system -d -t 3000 | grep -E 'setWifiEnabled|SelfRecovery|WifiController.*(recover|disable)' | grep -v getWifi | tail -n 6",
+                    "echo PROCESSES:",
+                    "ps -A -o PID,PPID,USER,ETIME,ARGS 2>/dev/null | grep -E ' (sh|/system/bin/sh|sleep|svc|nohup|busybox)( |$)' | grep -v grep | head -n 25",
+                    "true",
+                )
+                NetHistory.event("off", "Wi-Fi switched off — not by Dock")
                 DebugLog.log("WIFI", "Wi-Fi switched OFF — not by Dock. Android's log: " + (who?.trim()?.lines()?.joinToString(" ⏎ ")?.take(2500)?.ifEmpty { "(nothing matching)" } ?: "(log not readable)"))
             }
         }
@@ -631,6 +647,8 @@ object WifiDoctor {
     }
 
     private fun back() {
+        NetHistory.event("back", "Back on ${ssid ?: "Wi-Fi"}" + if (downSince > 0) " after ${GpsDoctor.duration(now() - downSince)}" else "")
+        main.post { DropCard.back(ssid) }
         lastGatewayAnswerAt = now() // fresh link: give the pinger its 20 s
         checkNow()
         val down = if (downSince > 0) now() - downSince else 0L
@@ -656,11 +674,10 @@ object WifiDoctor {
         val (justified, before) = LinkQuality.beforeDrop(lastRssis.lastOrNull() ?: rssi, lastRssis.maxOrNull() ?: rssi, link)
         beforeLastDrop = before
         val lostName = ssid ?: "Wi-Fi"
-        main.post {
-            runCatching {
-                android.widget.Toast.makeText(app, "📶 Wi-Fi lost ($lostName). $before", android.widget.Toast.LENGTH_LONG).show()
-            }
-        }
+        NetHistory.event("drop", "Lost $lostName")
+        runCatching { NetHistory.saveDrop(app, ssid) }
+        // A small see-through card with the last 3 minutes (tap = the dashboard) instead of a plain toast.
+        main.post { runCatching { DropCard.show(app, lostName, before) } }
         link.clear()
         runCatching { loadOurs() } // a network saved since the last drop counts too
         downSince = now()
@@ -688,6 +705,8 @@ object WifiDoctor {
                 val block = joinStatus?.takeIf { it.contains("DISABLED") }
                     ?.let { " Android has also blocked auto-join for it ($it) — it won't rejoin by itself; Dock clears that." } ?: ""
                 record("Lost $name", why + block + " " + before, fault, null, pendingAfter)
+                NetHistory.explainDrop(app, why)
+                DropCard.reason(why)
             }
             dropPending = false
             pendingAfter = null

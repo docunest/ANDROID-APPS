@@ -406,10 +406,13 @@ class MiniMap(private val ctx: Context, private val wm: WindowManager) {
             this.text = sub; textSize = 11f; setTextColor(Color.rgb(156, 163, 175)); maxLines = 2; ellipsize = TextUtils.TruncateAt.END
         })
         card.addView(text, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        card.addView(button("Waze", true, 15f) {
-            Trip.setDockDestination(ctx, p.lat, p.lng, p.title)
-            Nav.goTo(ctx, p.lat, p.lng, Prefs.NAV_WAZE)
-            collapse()
+        card.addView(button("Waze", true, 15f) {}.apply {
+            // Tap = drive there; hold 3 s = restart Waze + send (owner 2026-11-25).
+            WazeHold.attach(this, {
+                Trip.setDockDestination(ctx, p.lat, p.lng, p.title)
+                Nav.goTo(ctx, p.lat, p.lng, Prefs.NAV_WAZE)
+                collapse()
+            }, { Nav.goTo(ctx, p.lat, p.lng, Prefs.NAV_WAZE, restart = true, title = p.title); collapse() })
         }.apply { background = rounded(Color.rgb(51, 204, 255), dp(12).toFloat()); setTextColor(Color.BLACK) },
             LinearLayout.LayoutParams(dp(76), dp(52)).apply { marginStart = dp(6) })
         card.addView(button("✕", false, 18f) { card.visibility = View.GONE },
@@ -466,7 +469,7 @@ class MiniMap(private val ctx: Context, private val wm: WindowManager) {
             flash("${mode.icon} ${mode.title}")
             if (expanded) renderPanel()
         }
-        dial.police = Police.active != null && prefs.policeFlash
+        dial.police = Police.active?.onRoute == true && prefs.policeFlash
 
         val p = Trip.progress(here.latitude, here.longitude)
         val onCourse = course.feed(p?.offM, System.currentTimeMillis())

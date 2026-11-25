@@ -86,7 +86,9 @@ class WifiDoctorActivity : Activity() {
         left.addView(action)
 
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        buttons.addView(bigButton("Reconnect now", Palette.BLUE, 16f) { WifiDoctor.reconnectNow() }, LinearLayout.LayoutParams(0, dp(60), 1f))
+        buttons.addView(bigButton("📊 Dashboard", Palette.BLUE, 16f) { startActivity(android.content.Intent(this, NetDashActivity::class.java)) }, LinearLayout.LayoutParams(0, dp(60), 1f))
+        buttons.addView(space(8))
+        buttons.addView(bigButton("Reconnect now", Palette.CARD_HI, 16f) { WifiDoctor.reconnectNow() }, LinearLayout.LayoutParams(0, dp(60), 1f))
         buttons.addView(space(8))
         buttons.addView(bigButton("Kick Bluetooth", Palette.CARD_HI, 15f) { WifiDoctor.kickNow() }, LinearLayout.LayoutParams(0, dp(60), 1f))
         buttons.addView(space(8))

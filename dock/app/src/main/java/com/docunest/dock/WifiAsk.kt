@@ -55,6 +55,7 @@ object WifiAsk {
         cardKind = kind
         asked++
         DebugLog.log("WIFI", "ASK [$kind] $title — $why")
+        NetHistory.event("ask", title)
         val app = ctx.applicationContext
         main.post { show(app, kind, title, why, yesLabel, stillWrong, onYes) }
         return true
