@@ -15,19 +15,35 @@ object AppShortcuts {
     private const val PREFS = "ponas-apps"
     private const val KEY = "packages"
 
-    /** The photo viewer is on the home screen until the parent changes the list (owner 2026-11-25). */
-    private val DEFAULTS = listOf("org.fossify.gallery")
+    private const val KEY_DEFAULTS_ROUND = "defaultsRound"
+
+    /** On the home screen until the parent changes the list (owner 2026-11-25): photo viewer, Waze, Google Maps. */
+    private val DEFAULTS = listOf("org.fossify.gallery", "com.waze", "com.google.android.apps.maps")
+
+    /** Apps added to an already saved list once, by round, so a later untick sticks. */
+    private val ADDED_IN_ROUND = mapOf(1 to listOf("com.waze", "com.google.android.apps.maps"))
 
     data class App(val pkg: String, val label: String)
 
     private fun prefs(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun chosen(c: Context): List<String> {
-        val raw = prefs(c).getString(KEY, null) ?: return DEFAULTS
-        return runCatching { JSONArray(raw).let { a -> (0 until a.length()).map { a.getString(it) } } }.getOrDefault(DEFAULTS)
+        val p = prefs(c)
+        val raw = p.getString(KEY, null) ?: return DEFAULTS
+        var list = runCatching { JSONArray(raw).let { a -> (0 until a.length()).map { a.getString(it) } } }.getOrDefault(DEFAULTS)
+        val done = p.getInt(KEY_DEFAULTS_ROUND, 0)
+        val pending = ADDED_IN_ROUND.filterKeys { it > done }
+        if (pending.isNotEmpty()) {
+            list = list + pending.values.flatten().filter { it !in list }
+            p.edit().putString(KEY, JSONArray(list).toString()).putInt(KEY_DEFAULTS_ROUND, pending.keys.max()).apply()
+        }
+        return list
     }
 
-    fun save(c: Context, pkgs: List<String>) = prefs(c).edit().putString(KEY, JSONArray(pkgs).toString()).apply()
+    fun save(c: Context, pkgs: List<String>) = prefs(c).edit()
+        .putString(KEY, JSONArray(pkgs).toString())
+        .putInt(KEY_DEFAULTS_ROUND, ADDED_IN_ROUND.keys.max())
+        .apply()
 
     /** Every app with a launcher icon, except Ponas itself, sorted by name. */
     fun launchable(c: Context): List<App> {
