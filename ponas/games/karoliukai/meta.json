@@ -1,0 +1,9 @@
+{
+  "title": "Karoliukai",
+  "icon": "icon.png",
+  "color": "#FBC02D",
+  "order": 140,
+  "group": "learning",
+  "version": "1",
+  "enabled": true
+}

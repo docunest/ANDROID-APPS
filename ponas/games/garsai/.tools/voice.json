@@ -1,0 +1,21 @@
+{
+ "name-suo": "Šuo loja.",
+ "name-cikada": "Cikada čirpia.",
+ "name-jura": "Jūros bangos.",
+ "name-varpas": "Bažnyčios varpas.",
+ "name-lietus": "Lyja lietus.",
+ "name-traukinys": "Traukinio signalas.",
+ "name-gaidys": "Gaidys gieda.",
+ "name-varle": "Varlė kurkia.",
+ "name-avis": "Avis bliauna.",
+ "name-karve": "Karvė mūkia.",
+ "name-arklys": "Arklys žvengia.",
+ "name-ozka": "Ožkos mekena.",
+ "intro-pairs": "Paklausyk ir surask du vienodus garsus.",
+ "match": "Vienodi!",
+ "intro-loud": "Liesk dėžutes nuo tyliausios iki garsiausios.",
+ "notyet-loud": "Ieškok tylesnės.",
+ "done-loud": "Puiku! Nuo tyliausio iki garsiausio!",
+ "done-pairs": "Puiku! Radai visas poras!",
+ "bravo": "Šaunuolis! Penkios žvaigždės!"
+}

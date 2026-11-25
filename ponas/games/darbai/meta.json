@@ -1,0 +1,9 @@
+{
+  "title": "Darbai",
+  "icon": "icon.png",
+  "color": "#4DB6AC",
+  "order": 150,
+  "group": "learning",
+  "version": "1",
+  "enabled": true
+}

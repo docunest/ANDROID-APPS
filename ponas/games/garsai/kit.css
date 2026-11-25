@@ -1,0 +1,13 @@
+/* kit.css — shared look for stars, celebration and feedback (copy in each game folder) */
+#stars { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; z-index: 5; pointer-events: none; }
+.kstar { display: block; width: 28px; height: 28px; background: #00000022; transition: transform .3s;
+  clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%); }
+.kstar.on { background: #FFC107; transform: scale(1.15); }
+.kbit { position: fixed; width: 20px; height: 20px; border-radius: 5px; pointer-events: none; z-index: 20;
+  transition: transform 1.2s ease-out, opacity 1.2s ease-in; }
+.kshake { animation: kshake .45s; }
+@keyframes kshake { 0%,100% { translate: 0 0; } 20% { translate: -10px 0; rotate: -4deg; } 40% { translate: 9px 0; rotate: 4deg; } 60% { translate: -6px 0; rotate: 0deg; } 80% { translate: 4px 0; } }
+.kpulse { animation: kpulse 1s ease-in-out 3; }
+@keyframes kpulse { 0%,100% { scale: 1; } 50% { scale: 1.12; } }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; }
