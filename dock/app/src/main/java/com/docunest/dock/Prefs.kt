@@ -100,6 +100,10 @@ class Prefs(context: Context) {
     var miniY: Int
         get() = sp.getInt("miniY", -1)
         set(value) = sp.edit().putInt("miniY", value).apply()
+    /** See-through card with the last 3 minutes when Wi-Fi drops (owner 2026-11-25). */
+    var dropCard: Boolean
+        get() = sp.getBoolean("dropCard", true)
+        set(value) = sp.edit().putBoolean("dropCard", value).apply()
     /** Average speed section panel (owner 2026-11-25). */
     var avgZones: Boolean
         get() = sp.getBoolean("avgZones", true)

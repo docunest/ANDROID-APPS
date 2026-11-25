@@ -152,6 +152,10 @@ class SettingsActivity : Activity() {
             prefs.miniSpanM = 0; DockService.start(this, DockService.ACTION_MINIMAP)
         })
 
+        section("Network")
+        switch("When Wi-Fi drops: a see-through card with the last 3 minutes (tap = dashboard)", prefs.dropCard) { prefs.dropCard = it }
+        row(bigButton("📊 Network dashboard", Palette.BLUE, 14f) { startActivity(Intent(this, NetDashActivity::class.java)) })
+
         section("Police ahead (from Waze)")
         col.addView(label("When Waze has a police report ahead (along the route, or in front of you without one) the " +
             "screen edges flash red / blue with \"🚓 POLICE · 650 m\" at the top — about 90 s before you get there " +

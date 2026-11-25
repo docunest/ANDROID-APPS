@@ -130,6 +130,24 @@ Seen on the unit (build 72, Foz do Arelho → Caldas): the screen is **1280×480
 - **Tap or hold the middle** opens the big view (2× the old size, square, over Waze; the dock map no longer opens). Pinch and pan; tap a place to get a card with Waze and ✕. Buttons: ✕ · ◎ follow · Auto · City · Autobahn · Explore · Hide. A tap outside or 60 s idle closes it.
 - **Hide** switches the mini-map off. The **"Mini-map" icon** in the app list (`MiniMapLauncher`) brings it back.
 
+## Network history: drop card + dashboard (2026-11-25)
+
+Owner: "when the connection is lost show a semi-transparent tooltip … network status and issues for the last 3–5 minutes … a chart showing what
+was failing … clicking it opens a full dash … Grafana style, not random logs".
+
+- `NetHistory.kt`: every 2 s (the Wi-Fi doctor's pinger) state (online / no internet / down / Wi-Fi off), network, signal, iPhone ping (or lost),
+  link speed, traffic in/out (all minus mobile), van speed + position; every internet check (iPhone / DNS / web ms, ok?); events (drop, back,
+  Wi-Fi switched off, questions). 2 h in memory; each drop also saves its last 5 min + where it happened to `files/netdrops.json` (40 kept).
+- `DropCard.kt`: on a drop, a see-through card at the left edge: signal, iPhone ping (red ticks = lost), internet checks (red ticks = failed)
+  for the last 3 min, the reason once known, and a plain reading ("signal fine · iPhone answered · internet failing 40 s before → the iPhone's
+  mobile data first"). Live while down, closes 15 s after it's back (4 min max). Tap = dashboard. Settings → Network: on/off.
+- `NetDashActivity.kt` (+ `TimeChart.kt`): stat tiles (now, signal, ping + loss, internet checks, drops + downtime), panels (connection state band,
+  signal with −70/−80 lines, iPhone ping, internet checks, traffic, van speed), red/green dashed lines at drops/backs; 3 min · 15 min · 1 h · 2 h
+  live; right side: saved drops on a map and as a list — tap one for its 5 minutes. From the drop card, Wi-Fi doctor "📊 Dashboard", Settings.
+- **Who switches Wi-Fi off** (seen 23 Nov): Android logged `setWifiEnabled package=com.android.shell uid=0 enable=false` every ~65 s while
+  down = a root shell command (`svc wifi disable`), not Android and not Dock's code. Dock now also logs the running shell processes at that
+  moment (the script's `sleep` and parent) to find the script.
+
 ## Police round 2 + average speed sections (2026-11-25)
 
 Owner: "the outline is a bit too much … it alerts only if I'm looking straight at the police … I need something that goes either on my route or
