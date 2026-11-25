@@ -270,6 +270,12 @@ class HomeActivity : Activity() {
         "other" to "🧩 Kita",
     )
 
+    /** Re-render even if nothing in the games changed (the parent edited the app tiles). */
+    fun rerender() {
+        renderedSignature = null
+        render()
+    }
+
     fun render() {
         // The group comes from the newest catalog, so moving a game to another section needs only
         // a site update (installed.json keeps what the game had when it was installed).
@@ -278,7 +284,9 @@ class HomeActivity : Activity() {
         val catalogEmpty = Store.loadCatalog(this).isEmpty()
         val running = SyncManager.catalogRunning
         val (cols, size) = layoutFor()
+        val apps = AppShortcuts.onHome(this)
         val sig = games.joinToString("|") { "${it.id}:${it.hash}:${it.title}:${it.color}:${it.order}:${it.group}" } +
+            "#" + apps.joinToString(",") { it.pkg } +
             "#$cols#$size#${games.isEmpty()}#$catalogEmpty#$running"
         if (sig == renderedSignature) return
         renderedSignature = sig
@@ -299,6 +307,13 @@ class HomeActivity : Activity() {
                 grid.addView(makeTile("Kamera", Color.parseColor("#7E57C2"), null, R.drawable.ic_camera, size) {
                     openCamera()
                 })
+                // Android apps the parent put on the home screen (parent menu → Apps on home screen).
+                for (a in apps) {
+                    val icon = AppShortcuts.icon(this, a.pkg, (size * 0.6f).toInt())
+                    grid.addView(makeTile(a.label, Color.parseColor("#ECEFF1"), icon, null, size) {
+                        if (!AppShortcuts.launch(this, a.pkg)) Toast.makeText(this, a.label, Toast.LENGTH_SHORT).show()
+                    })
+                }
             }
         }
 
