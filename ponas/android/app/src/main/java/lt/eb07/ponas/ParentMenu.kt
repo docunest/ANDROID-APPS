@@ -50,6 +50,7 @@ object ParentMenu {
             "Change PIN",
             "Versions",
             "App update",
+            "Apps on home screen",
         )
         AlertDialog.Builder(home, DIALOG_THEME)
             .setTitle("Ponas – parent menu")
@@ -63,9 +64,28 @@ object ParentMenu {
                     5 -> changePin(home)
                     6 -> showText(home, "Versions", versionsText(home))
                     7 -> showUpdate(home)
+                    8 -> pickApps(home)
                 }
             }
             .setNegativeButton("Close", null)
+            .show()
+    }
+
+    /** Tick the Android apps that get a tile on the home screen (under Kita). */
+    private fun pickApps(home: HomeActivity) {
+        val all = AppShortcuts.launchable(home)
+        val chosen = AppShortcuts.chosen(home).toMutableList()
+        val checked = BooleanArray(all.size) { all[it].pkg in chosen }
+        AlertDialog.Builder(home, DIALOG_THEME)
+            .setTitle("Apps on home screen")
+            .setMultiChoiceItems(all.map { it.label }.toTypedArray(), checked) { _, which, on -> checked[which] = on }
+            .setPositiveButton("Save") { _, _ ->
+                // keep the earlier order, new ones at the end
+                val picked = all.filterIndexed { i, _ -> checked[i] }.map { it.pkg }
+                AppShortcuts.save(home, chosen.filter { it in picked } + picked.filter { it !in chosen })
+                home.rerender()
+            }
+            .setNegativeButton("Cancel", null)
             .show()
     }
 

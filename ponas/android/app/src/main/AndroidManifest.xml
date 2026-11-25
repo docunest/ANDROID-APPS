@@ -21,6 +21,11 @@
     <queries>
         <package android:name="com.android.launcher3" />
         <package android:name="com.softwinner.camera2" />
+        <!-- Apps the parent can put on the home screen (AppShortcuts): every app with a launcher icon. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
     </queries>
 
     <application
