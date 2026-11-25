@@ -1,0 +1,17 @@
+{
+ "intro-tower": "Pastatyk bokštą. Pirmiausia paimk didžiausią kubą.",
+ "intro-boards": "Sukrauk lentas. Pirmiausia paimk storiausią lentą.",
+ "intro-colours": "Sudėk spalvas. Pirmiausia paimk tamsiausią.",
+ "more-tower": "Ieškok didesnio kubo.",
+ "more-boards": "Ieškok storesnės lentos.",
+ "more-colours": "Ieškok tamsesnės spalvos.",
+ "next-tower": "Paimk didžiausią kubą iš likusių.",
+ "next-boards": "Paimk storiausią lentą iš likusių.",
+ "next-colours": "Paimk tamsiausią spalvą iš likusių.",
+ "done-tower": "Puiku! Bokštas pastatytas!",
+ "done-boards": "Puiku! Lentos sukrautos!",
+ "done-colours": "Puiku! Spalvos sudėtos!",
+ "bravo": "Šaunuolis! Penkios žvaigždės!",
+ "n1": "vienas", "n2": "du", "n3": "trys", "n4": "keturi", "n5": "penki",
+ "n6": "šeši", "n7": "septyni", "n8": "aštuoni", "n9": "devyni", "n10": "dešimt"
+}

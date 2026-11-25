@@ -91,7 +91,8 @@ API:
   - `title`: a short Lithuanian word (the tile label).
   - `color`: a bright `#RRGGBB` tile background.
   - `order`: tile position, lower comes first. Taken so far: balionai 10, piesimas 20, linkejimai 30, matematika 40, raidziu-memory 50,
-    raidziu-poros 60, abecele 70, skiemenys 80, gulsciukas 90, minos 100, ateiviai 110, skaitymas 120.
+    raidziu-poros 60, abecele 70, skiemenys 80, gulsciukas 90, minos 100, ateiviai 110, rasyk 112, skaityk 114,
+    deliok 116, skaitymas 120, bokstas 130, karoliukai 140, darbai 150, garsai 160, zemelapis 170.
   - `group`: home-screen section: `"learning"` (shown first), `"fun"` or `"other"`. Missing means
     `"other"`. Moving a game between sections needs no new APK.
   - `version`: **bump it when you change a game** ("1" → "2"). The parent sees it on the install

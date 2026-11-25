@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Karoliukai</title>
+<link rel="stylesheet" href="kit.css">
+<style>
+  body { background: #FFF8E7; font-family: sans-serif; --d: 14px; }
+  #game { position: fixed; left: 0; right: 0; top: 72px; bottom: 0; display: grid; gap: 8px; padding: 0 8px 8px;
+    grid-template-columns: 34% 1fr; grid-template-rows: 1fr auto; grid-template-areas: "task mat" "task supply"; }
+  @media (orientation: portrait) {
+    #game { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; grid-template-areas: "task" "mat" "supply"; }
+  }
+  #task { grid-area: task; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
+  @media (orientation: portrait) { #task { flex-direction: row; min-height: 110px; } }
+  #ctx { font-size: 40px; line-height: 1; min-height: 40px; }
+  #card { background: #fff; border-radius: 18px; box-shadow: 0 4px 0 #00000018; padding: 6px 18px; font-weight: bold;
+    font-size: min(17vmin, 84px); letter-spacing: 2px; line-height: 1.1; min-width: 120px; text-align: center; }
+  .dh { color: #E53935; } .dt { color: #1E88E5; } .du { color: #43A047; }
+  #choices { display: flex; gap: 10px; }
+  #choices .card { font-size: min(11vmin, 54px); min-width: 84px; min-height: 84px; display: flex; align-items: center; justify-content: center; padding: 4px 10px; }
+  #mat { grid-area: mat; background: #2E7D32; border-radius: 18px; display: flex; align-items: stretch; justify-content: center; gap: 10px; padding: 10px; position: relative; }
+  .col { display: flex; align-items: flex-end; justify-content: center; border-radius: 12px; background: #ffffff14; padding: 6px; min-width: 60px; position: relative; }
+  .col.h { flex-wrap: nowrap; } .col.t { gap: calc(var(--d) * .35); } .col.u { display: grid; grid-template-columns: repeat(2, var(--d)); grid-auto-rows: var(--d); gap: 3px; align-content: end; }
+  .col::after { content: ""; position: absolute; left: 0; right: 0; bottom: -6px; height: 5px; border-radius: 3px; }
+  .col.h::after { background: #E53935; } .col.t::after { background: #42A5F5; } .col.u::after { background: #66BB6A; }
+  .bead { width: var(--d); height: var(--d); border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #FFF3B0 0, #FBC02D 45%, #B8860B 100%); }
+  .bar { width: var(--d); height: calc(var(--d) * 10);
+    background: radial-gradient(circle at 40% 40%, #FFF3B0 0, #FBC02D 40%, #B8860B 68%, transparent 72%) 0 0 / var(--d) var(--d) repeat-y; }
+  .sq { width: calc(var(--d) * 10); height: calc(var(--d) * 10); background-color: #00000022; border: 2px solid #8D6E00;
+    background-image: radial-gradient(circle at 40% 40%, #FFF3B0 0, #FBC02D 40%, #B8860B 68%, transparent 72%);
+    background-size: calc(var(--d) - .4px) calc(var(--d) - .4px); }
+  .col.h .sq + .sq { margin-left: calc(var(--d) * -9); box-shadow: -2px 0 0 #5D4300; }       /* a fanned stack: each square shows its edge */
+  .pop { animation: pop .35s ease-out; }
+  @keyframes pop { from { scale: .3; opacity: 0; } to { scale: 1; opacity: 1; } }
+  .glow { animation: glow .5s ease-in-out 3; }
+  @keyframes glow { 50% { scale: 1.25; } }
+  #supply { grid-area: supply; display: flex; justify-content: center; align-items: center; gap: min(12px, 2.5vw); }
+  .btn { width: min(84px, 22vw); height: min(84px, 22vw); border-radius: 20px; background: #fff; box-shadow: 0 4px 0 #00000022;
+    display: flex; align-items: center; justify-content: center; }
+  .btn:active { transform: translateY(3px); box-shadow: 0 1px 0 #00000022; }
+  .btn .bead { --d: 34px; } .btn .bar { --d: 7px; } .btn .sq { --d: 6.4px; border-width: 1px; }
+  #ok { background: #43A047; }
+  #ok svg { width: 56px; height: 56px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="stars"></div>
+<div id="game">
+  <div id="task"><div id="ctx"></div><div id="card" class="card"></div><div id="choices"></div></div>
+  <div id="mat">
+    <div class="col h" id="colH"></div>
+    <div class="col t" id="colT"></div>
+    <div class="col u" id="colU"></div>
+  </div>
+  <div id="supply">
+    <div class="btn" id="addH"><div class="sq"></div></div>
+    <div class="btn" id="addT"><div class="bar"></div></div>
+    <div class="btn" id="addU"><div class="bead"></div></div>
+    <div class="btn" id="ok"><svg viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+  </div>
+</div>
+<script src="ponas.js"></script>
+<script src="kit.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

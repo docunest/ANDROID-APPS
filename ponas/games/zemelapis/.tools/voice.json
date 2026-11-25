@@ -1,0 +1,20 @@
+{
+ "intro-pieces": "Sudėk žemėlapį. Nutempk Ispaniją ir Portugaliją į jų vietas.",
+ "name-ispanija": "Ispanija.",
+ "name-portugalija": "Portugalija.",
+ "placed-ispanija": "Teisingai! Čia Ispanija.",
+ "placed-portugalija": "Teisingai! Čia Portugalija.",
+ "notthere": "Ne čia. Pabandyk dar.",
+ "intro-cities": "Kur šis miestas? Paliesk tašką žemėlapyje.",
+ "city-lisabona": "Lisabona – Portugalijos sostinė. Čia stovi Belemo bokštas.",
+ "city-portas": "Portas – miestas prie Douro upės, su dideliu geležiniu tiltu.",
+ "city-madridas": "Madridas – Ispanijos sostinė. Čia stovi karališkieji rūmai.",
+ "city-barselona": "Barselona – miestas prie Viduržemio jūros. Čia statoma Šventosios Šeimos bažnyčia.",
+ "city-sevilija": "Sevilija – miestas Ispanijos pietuose. Šis bokštas vadinasi Giralda.",
+ "city-santjagas": "Santjagas de Kompostela. Čia, prie katedros, baigiasi piligrimų kelias.",
+ "right": "Teisingai!",
+ "wrongdot": "Ne šitas taškas. Pabandyk kitą.",
+ "done-pieces": "Puiku! Žemėlapis sudėtas!",
+ "done-cities": "Puiku! Radai visus miestus!",
+ "bravo": "Šaunuolis! Penkios žvaigždės!"
+}

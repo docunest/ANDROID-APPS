@@ -1,0 +1,9 @@
+{
+  "title": "Garsai",
+  "icon": "icon.png",
+  "color": "#7986CB",
+  "order": 160,
+  "group": "learning",
+  "version": "1",
+  "enabled": true
+}

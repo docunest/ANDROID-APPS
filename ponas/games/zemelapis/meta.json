@@ -1,0 +1,9 @@
+{
+  "title": "Žemėlapis",
+  "icon": "icon.png",
+  "color": "#4FC3F7",
+  "order": 170,
+  "group": "learning",
+  "version": "1",
+  "enabled": true
+}

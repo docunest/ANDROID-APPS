@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Garsai</title>
+<link rel="stylesheet" href="kit.css">
+<style>
+  body { background: #EDE7F6; font-family: sans-serif; }
+  #game { position: fixed; left: 0; right: 0; top: 72px; bottom: 0; display: flex; align-items: center; justify-content: center; padding: 0 8px 10px; }
+  #grid { display: grid; gap: min(2.4vmin, 14px); }
+  /* a Montessori sound cylinder: wooden body, coloured cap */
+  .box { width: var(--b); height: var(--b); position: relative; display: flex; align-items: center; justify-content: center; }
+  .box .cyl { position: absolute; left: 18%; right: 18%; top: 14%; bottom: 4%; border-radius: 14% / 9%;
+    background: linear-gradient(90deg, #C8955B, #E8C08A 40%, #B98448); box-shadow: 0 4px 0 #00000025; transition: transform .2s; }
+  .box .cap { position: absolute; left: 14%; right: 14%; top: 4%; height: 18%; border-radius: 40%;
+    background: radial-gradient(ellipse at 45% 35%, #FF8A80, #E53935 60%, #B71C1C); box-shadow: 0 3px 0 #00000030; transition: transform .2s; }
+  .box.sel .cyl, .box.sel .cap { transform: translateY(-8px); }
+  .box.sel .cap { background: radial-gradient(ellipse at 45% 35%, #FFE082, #FFB300 60%, #E65100); }
+  .box.play { animation: wob .35s ease-in-out 3; }
+  @keyframes wob { 25% { rotate: -6deg; } 75% { rotate: 6deg; } }
+  .box .face { position: absolute; inset: 6%; border-radius: 22px; background: #fff; box-shadow: 0 4px 0 #00000020, 0 0 0 4px #66BB6A;
+    display: flex; align-items: center; justify-content: center; font-size: calc(var(--b) * .5); opacity: 0; transform: scale(.4);
+    transition: transform .3s, opacity .3s; }
+  .box.done .face { opacity: 1; transform: scale(1); }
+  .box.done .cyl, .box.done .cap { opacity: 0; }
+  .box .dots { position: absolute; bottom: 10%; display: flex; gap: 3px; }
+  .box .dots i { width: 10px; height: 10px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px #2E7D32; }
+  .box.locked .cap { background: radial-gradient(ellipse at 45% 35%, #B9F6CA, #43A047 60%, #1B5E20); }
+  .box.loud .cyl { background: linear-gradient(90deg, #8D6E63, #BCAAA4 40%, #6D4C41); }
+</style>
+</head>
+<body>
+<div id="stars"></div>
+<div id="game"><div id="grid"></div></div>
+<script src="ponas.js"></script>
+<script src="kit.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

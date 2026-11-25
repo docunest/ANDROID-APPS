@@ -1,0 +1,9 @@
+{
+  "title": "Bokštas",
+  "icon": "icon.png",
+  "color": "#80DEEA",
+  "order": 130,
+  "group": "learning",
+  "version": "1",
+  "enabled": true
+}

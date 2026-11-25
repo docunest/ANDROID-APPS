@@ -1,0 +1,44 @@
+{
+ "lisabona": {
+  "file": "Torre de Belém and wooden bridge - landscape view - Lisbon - 2026-05-14.jpg",
+  "page": "https://commons.wikimedia.org/wiki/File:Torre_de_Bel%C3%A9m_and_wooden_bridge_-_landscape_view_-_Lisbon_-_2026-05-14.jpg",
+  "author": "Norbert Nagel",
+  "license": "CC BY-SA 4.0",
+  "changes": "cropped to a square, 240 px"
+ },
+ "portas": {
+  "file": "Ponte de Dom Luís I and Ribeira, Porto (54795128175).jpg",
+  "page": "https://commons.wikimedia.org/wiki/File:Ponte_de_Dom_Lu%C3%ADs_I_and_Ribeira,_Porto_(54795128175).jpg",
+  "author": "Dale Cruse - 10M views from San Francisco, CA, USA",
+  "license": "CC BY 4.0",
+  "changes": "cropped to a square, 240 px"
+ },
+ "madridas": {
+  "file": "Palacio Real de Madrid-Fachada Sur.jpg",
+  "page": "https://commons.wikimedia.org/wiki/File:Palacio_Real_de_Madrid-Fachada_Sur.jpg",
+  "author": "Basilio",
+  "license": "CC BY-SA 4.0",
+  "changes": "cropped to a square, 240 px"
+ },
+ "barselona": {
+  "file": "Barcelona - Exterior of the Apse of the Sagrada Família - Western exposure.jpg",
+  "page": "https://commons.wikimedia.org/wiki/File:Barcelona_-_Exterior_of_the_Apse_of_the_Sagrada_Fam%C3%ADlia_-_Western_exposure.jpg",
+  "author": "Didier Descouens",
+  "license": "CC BY-SA 4.0",
+  "changes": "cropped to a square, 240 px"
+ },
+ "sevilija": {
+  "file": "Giralda Sevilla.jpg",
+  "page": "https://commons.wikimedia.org/wiki/File:Giralda_Sevilla.jpg",
+  "author": "Kiban",
+  "license": "CC BY-SA 3.0",
+  "changes": "cropped to a square, 240 px"
+ },
+ "santjagas": {
+  "file": "Catedral de Santiago de Compostela, vista desde la Praza do Obradoiro.jpg",
+  "page": "https://commons.wikimedia.org/wiki/File:Catedral_de_Santiago_de_Compostela,_vista_desde_la_Praza_do_Obradoiro.jpg",
+  "author": "D.Rovchak",
+  "license": "CC BY-SA 4.0",
+  "changes": "cropped to a square, 240 px"
+ }
+}
