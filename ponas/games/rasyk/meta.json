@@ -1,0 +1,12 @@
+{
+  "title": "Rašyk",
+  "icon": "icon.png",
+  "color": "#AED581",
+  "order": 112,
+  "group": "learning",
+  "version": "7",
+  "enabled": true,
+  "network": [
+    "map-pal-mike-base.vercel.app"
+  ]
+}

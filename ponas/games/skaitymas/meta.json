@@ -4,7 +4,7 @@
   "color": "#26A69A",
   "order": 120,
   "group": "learning",
-  "version": "6",
+  "version": "7",
   "enabled": true,
   "network": [
     "map-pal-mike-base.vercel.app"

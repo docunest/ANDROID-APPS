@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Rašyk</title>
+<style>
+  :root {
+    --t: max(80px, min(22vmin, 104px));   /* touch target: never under 80 px (Ponas rule) */
+    --cell: max(44px, min(13vmin, 64px));
+    --ink: #263238; --bg: #FFF6E0; --card: #FFFFFF; --ok: #A5D6A7; --teal: #26A69A;
+    --vowel: #1565C0; --cons: #C62828;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); font-family: sans-serif; }
+  button { font-family: inherit; color: inherit; touch-action: manipulation; }
+
+  /* Everything lives below the 72 px strip where ponas.js puts pause and close. */
+  #stage { position: fixed; left: 0; right: 0; top: 72px; bottom: 6px; display: flex; flex-direction: row; gap: 10px; padding: 0 10px 0 10px; }
+  @media (orientation: portrait) { #stage { flex-direction: column; } }
+  #side { flex: 0 0 auto; width: 30%; max-width: 190px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
+  @media (orientation: portrait) { #side { width: auto; max-width: none; flex-direction: row; justify-content: space-evenly; min-height: 150px; } }
+  #work { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: space-evenly; gap: 8px; }
+
+  .pic { width: min(100%, 150px); aspect-ratio: 1; background: var(--card); border-radius: 18px; box-shadow: 0 4px 0 #0000001a; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  @media (orientation: portrait) { .pic { width: 140px; } }
+  .pic img { width: 100%; height: 100%; object-fit: contain; }
+  .round { width: var(--t); height: var(--t); border-radius: 50%; border: 0; background: var(--teal); box-shadow: 0 5px 0 #0000002a; display: flex; align-items: center; justify-content: center; }
+  .round svg { width: 50%; height: 50%; fill: #fff; }
+  .round:active, .tile:active, .card:active { transform: scale(.94); }
+  .home { background: #90A4AE; }
+
+  .tiles { display: flex; flex-wrap: wrap; justify-content: center; align-content: center; gap: 6px; max-width: 100%; }
+  .tile { min-width: var(--t); height: var(--t); padding: 0 8px; border: 0; border-radius: 18px; background: var(--card); box-shadow: 0 5px 0 #00000022;
+    font-size: calc(var(--t) * .5); font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .tile.big { font-size: calc(var(--t) * .42); }
+  .tile.vowel { color: var(--vowel); } .tile.cons { color: var(--cons); }
+  .tile.ok { background: var(--ok); }
+  .tile.used { visibility: hidden; }
+  .tile.no { animation: shake .3s; }
+  .tile.hint { animation: pulse 1s 3; }
+  @keyframes shake { 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+  @keyframes pulse { 50% { transform: scale(1.12); } }
+
+  .cells { display: flex; gap: 5px; justify-content: center; }
+  .cellbox { width: var(--cell); height: calc(var(--cell) * 1.15); border-radius: 10px; background: #FFFFFFAA; border: 3px dashed #B0BEC5;
+    font-size: calc(var(--cell) * .7); font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .cellbox.filled { border-style: solid; border-color: var(--teal); background: var(--card); }
+  .cellbox.target { border-color: #FFB300; border-style: solid; }
+  .cellbox.bad { border-color: #E57373; border-style: solid; }
+
+  .word { font-size: max(44px, min(14vmin, 72px)); font-weight: 700; letter-spacing: .06em; background: var(--card); border-radius: 18px; padding: 8px 18px; box-shadow: 0 4px 0 #0000001a; }
+  .cards { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  .card { width: max(96px, min(30vmin, 130px)); aspect-ratio: 1; border: 0; padding: 6px; border-radius: 18px; background: var(--card); box-shadow: 0 5px 0 #00000022; }
+  .card img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+  .card.ok { background: var(--ok); } .card.no { opacity: .35; }
+
+  #pad { position: relative; flex: 1 1 auto; width: 100%; min-height: 0; display: flex; gap: 8px; }
+  #pad canvas { flex: 1 1 auto; min-width: 0; background: var(--card); border-radius: 18px; box-shadow: inset 0 0 0 3px #CFD8DC; touch-action: none; }
+  #pad .btns { display: flex; flex-direction: column; gap: 8px; justify-content: center; }
+
+  /* Menu */
+  #menu { position: fixed; left: 0; right: 0; top: 72px; bottom: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .lvl { width: calc(var(--t) * 1.05); height: calc(var(--t) * 1.05); border: 0; border-radius: 20px; box-shadow: 0 6px 0 #00000026; position: relative; display: flex; align-items: center; justify-content: center; }
+  .lvl svg { width: 70%; height: 70%; }
+  .lvl small { position: absolute; right: 7px; bottom: 4px; font-size: 13px; font-weight: 700; opacity: .7; }
+  #parent { position: fixed; right: 0; bottom: 0; width: 80px; height: 80px; }
+
+  #panel, #done { position: fixed; inset: 0; background: var(--bg); display: none; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 80px 16px 16px; z-index: 5; font-size: 18px; }
+  #panel.show, #done.show { display: flex; }
+  #panel .act { min-height: 56px; padding: 0 18px; border-radius: 14px; border: 0; background: var(--teal); color: #fff; font-size: 18px; }
+  #panel .muted { color: #607D8B; font-size: 15px; text-align: center; max-width: 520px; }
+  #done svg { width: 140px; height: 140px; }
+  .hidden { display: none !important; }
+  /* Dėliok full keyboard: the whole abėcėlė in fixed places (owner's request: keys are smaller than 80 px). */
+  .kb { display: grid; grid-template-columns: repeat(8, 1fr); gap: 5px; width: 100%; max-width: 560px; }
+  @media (orientation: portrait) { .kb { grid-template-columns: repeat(6, 1fr); } }
+  .key { height: max(46px, min(13vmin, 62px)); border: 0; border-radius: 12px; background: var(--card); box-shadow: 0 4px 0 #00000022;
+    font-size: max(24px, min(8vmin, 36px)); font-weight: 700; touch-action: manipulation; }
+  .key.vowel { color: var(--vowel); } .key.cons { color: var(--cons); }
+  .key:active { transform: scale(.94); }
+  .key.no, .tile.no { animation: shake .3s; }
+  .key.hint { animation: pulse 1s 3; }
+  #progress { position: fixed; left: 0; bottom: 0; height: 6px; background: #FFB300; width: 0; transition: width .4s; }
+</style>
+</head>
+<body>
+<div id="menu"></div>
+<div id="stage" class="hidden"><div id="side"></div><div id="work"></div></div>
+<div id="progress"></div>
+<div id="done"></div>
+<div id="panel"></div>
+<!-- ponas.js is added by tools/build-site.mjs. -->
+<script src="ponas.js"></script>
+<script src="words.js"></script>
+<script src="content.js"></script>
+<script src="data.js"></script>
+<script src="only.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

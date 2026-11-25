@@ -1,0 +1,12 @@
+{
+  "title": "Dėliok",
+  "icon": "icon.png",
+  "color": "#FFCC80",
+  "order": 116,
+  "group": "learning",
+  "version": "7",
+  "enabled": true,
+  "network": [
+    "map-pal-mike-base.vercel.app"
+  ]
+}

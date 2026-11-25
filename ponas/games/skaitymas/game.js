@@ -208,6 +208,9 @@
 
   // ---------------------------------------------------------------- level frame
   var level = null;   // { def, rounds, last }
+  // Single-level games (Rašyk, Skaityk, Dėliok): only.js sets SK_ONLY; no menu, no Home button,
+  // rounds continue until the session's ~10 minutes are up. The Ponas X closes the game.
+  var ONLY = window.SK_ONLY || null;
   function frame(opts) {
     side.innerHTML = ''; work.innerHTML = '';
     if (opts.picture && D.photos) {
@@ -223,9 +226,11 @@
       tap(sp, opts.sound);
       side.appendChild(sp);
     }
-    var home = el('button', 'round home', ICON.home);
-    tap(home, goMenu);
-    side.appendChild(home);
+    if (!ONLY) {
+      var home = el('button', 'round home', ICON.home);
+      tap(home, goMenu);
+      side.appendChild(home);
+    }
   }
   function roundDone() {
     send();
@@ -250,6 +255,13 @@
   }
   function goMenu() {
     stopSound();
+    if (ONLY && level) {   // single-level game: next batch of rounds instead of a menu
+      var def = level.def;
+      level = null;
+      if (activeMs >= SESSION_MS) { finishSession(); return; }
+      startLevel(def);
+      return;
+    }
     level = null;
     progressEl.style.width = '0';
     stageEl.classList.add('hidden');
@@ -719,6 +731,89 @@
     say();
   }
 
+  // ---------------------------------------------------------------- Dėliok: build the word, 2 modes × 2 keyboards
+  // strict: the next letter or it's a mistake (like A2). fill: a letter goes to the first empty place
+  // that needs it, gaps stay. full: the whole abėcėlė in fixed places (he learns where letters are);
+  // subset: 7–10 keys, about half decoys. The combination rotates per session (logged as level
+  // 21–24, so the stats compare them); the parent can lock one in the parent panel.
+  var BUILD = [{ id: 21, mode: 'strict', kb: 'full' }, { id: 22, mode: 'strict', kb: 'subset' },
+    { id: 23, mode: 'fill', kb: 'full' }, { id: 24, mode: 'fill', kb: 'subset' }];
+  var BUILD_LABEL = { 21: 'griežtai, visa abėcėlė', 22: 'griežtai, kelios raidės', 23: 'į laisvą vietą, visa abėcėlė', 24: 'į laisvą vietą, kelios raidės' };
+  var buildVariant = null;
+  function pickVariant() {
+    if (buildVariant) return buildVariant;
+    var lock = P.load('buildLock', 0);
+    buildVariant = BUILD.filter(function (v) { return v.id === lock; })[0] || null;
+    if (!buildVariant) {
+      var n = P.load('buildSession', 0);
+      buildVariant = BUILD[n % BUILD.length];
+      P.save('buildSession', n + 1);
+    }
+    return buildVariant;
+  }
+  function runBuild() {
+    var v = pickVariant(), s = lv(21);
+    var word = nextItem(21, uniq(D.words5.concat(D.pink)), level.last); level.last = word;
+    var w = chars(word);
+    var keys;
+    if (v.kb === 'full') keys = D.alphabet.slice();
+    else {
+      var own = uniq(w), total = Math.max(7, Math.min(10, own.length * 2));
+      keys = shuffle(own.concat(letterDecoys(word, total - own.length, 2 + s.diff)));
+    }
+    var filled = [], taps = [], letterOk = [], mistakes = 0, wrongHere = 0, hint = false, t0 = Date.now(), done = false;
+    var vc = voices('word', word, 'word', A.word(word));
+    frame({ picture: word, sound: function () { play(vc.next()); } });
+    var cr = cellsRow(w.length); work.appendChild(cr.row);
+    function nextEmpty() { for (var i = 0; i < w.length; i++) if (!filled[i]) return i; return -1; }
+    function mark() { cr.cells.forEach(function (c, i) { c.classList.toggle('target', v.mode === 'strict' && i === nextEmpty()); }); }
+    mark();
+    var box = el('div', v.kb === 'full' ? 'kb' : 'tiles'), buttons = [];
+    keys.forEach(function (ch) {
+      var b = el('button', v.kb === 'full' ? 'key ' + (D.isVowel(ch) ? 'vowel' : 'cons') : 'tile', ch);
+      b.setAttribute('data-ch', ch);
+      buttons.push(b);
+      tap(b, function () { press(ch, b); });   // keys stay: a letter can be used twice (namas)
+      box.appendChild(b);
+    });
+    work.appendChild(box);
+    function press(ch, b) {
+      if (done) return;
+      play(A.letter(ch));
+      if (taps.length < 40) taps.push(ch);
+      var at = -1;
+      if (v.mode === 'strict') { var n = nextEmpty(); if (w[n] === ch) at = n; else if (letterOk[n] === undefined) letterOk[n] = 0; }
+      else { for (var i = 0; i < w.length; i++) if (!filled[i] && w[i] === ch) { at = i; break; } }
+      if (at < 0) {
+        mistakes++; soft(); b.classList.remove('no'); void b.offsetWidth; b.classList.add('no');
+        if (v.mode === 'strict' && ++wrongHere >= 2) {   // after two misses the right key pulses (a hint)
+          hint = true;
+          buttons.forEach(function (x) { if (x.getAttribute('data-ch') === w[nextEmpty()]) x.classList.add('hint'); });
+        }
+        return;
+      }
+      if (letterOk[at] === undefined) letterOk[at] = 1;
+      filled[at] = true; wrongHere = 0;
+      buttons.forEach(function (x) { x.classList.remove('hint'); });
+      cr.cells[at].textContent = ch; cr.cells[at].classList.add('filled');
+      mark();
+      if (nextEmpty() < 0) finish();
+    }
+    function finish() {
+      done = true;
+      var allOk = mistakes === 0;
+      var a = { level: v.id, item: word, options: keys, answer: taps.join('').slice(0, 16), correct: allOk, first_try: true,
+        hint_used: hint, response_ms: Date.now() - t0 };
+      if (v.mode === 'strict') a.letter_ok = letterOk.map(function (x) { return x ? 1 : 0; }).join('');
+      log(a);
+      if (allOk) hit(21, s, word); else missed(21, s, word);
+      score(21, s, allOk);
+      good();
+      setTimeout(function () { play(A.word(word), roundDone); }, 350);
+    }
+    play(vc.first());
+  }
+
   // ---------------------------------------------------------------- menu
   var LEVELS = [
     { id: 1, tag: 'A1', color: '#FF8A65', face: '<b style="font-size:calc(var(--t)*.5)">ma</b>', run: runA1 },
@@ -727,11 +822,14 @@
     { id: 11, tag: 'B1', color: '#B39DDB', face: '<b style="font-size:calc(var(--t)*.36)">m…</b>', run: runB1 },
     { id: 12, tag: 'B2', color: '#FFFFFF', face: '<b style="font-size:calc(var(--t)*.42)"><span style="color:#C62828">b</span><span style="color:#1565C0">a</span></b>', run: runB2 },
     { id: 13, tag: 'B3', color: '#F8BBD0', face: '<b style="font-size:calc(var(--t)*.28)">katė</b>', run: runRead(13, D.pink), needsPhotos: true },
-    { id: 14, tag: 'B4', color: '#90CAF9', face: '<b style="font-size:calc(var(--t)*.24)">medis</b>', run: runRead(14, D.words5), needsPhotos: true },
-    { id: 15, tag: 'B5', color: '#A5D6A7', face: '<b style="font-size:calc(var(--t)*.4)">uo</b>', run: runB5 }
+    { id: 14, tag: 'B4', color: '#90CAF9', face: '<b style="font-size:calc(var(--t)*.24)">medis</b>', run: runRead(14, uniq(D.words5.concat(D.pink))), needsPhotos: true },
+    { id: 15, tag: 'B5', color: '#A5D6A7', face: '<b style="font-size:calc(var(--t)*.4)">uo</b>', run: runB5 },
+    { id: 21, tag: 'D', color: '#FFCC80', face: '<b style="font-size:calc(var(--t)*.3)">d_lio</b>', run: runBuild, single: 'deliok' }
   ];
+  var SINGLE = { rasyk: 3, skaityk: 14, deliok: 21 };
   function drawMenu() {
     menuEl.innerHTML = '';
+    if (ONLY) { parentCorner(document.body); return; }
     [LEVELS.slice(0, 3), LEVELS.slice(3)].forEach(function (group) {
       var row = el('div', 'row');
       group.forEach(function (def) {
@@ -747,11 +845,14 @@
     ver.style.cssText = 'position:fixed;left:8px;bottom:6px;font-size:13px;color:#90A4AE';
     menuEl.appendChild(ver);
     fetch('game.json').then(function (r) { return r.json(); }).then(function (g) { ver.textContent = 'v' + g.version; }).catch(function () { /* offline: no label */ });
-    var corner = el('div'); corner.id = 'parent';   // parent: hold the bottom-right corner for 3 s
+    parentCorner(menuEl);
+  }
+  function parentCorner(parent) {   // parent: hold the bottom-right corner for 3 s
+    var corner = el('div'); corner.id = 'parent';
     var hold = null;
     corner.addEventListener('pointerdown', function (e) { e.preventDefault(); hold = setTimeout(openPanel, 3000); });
     ['pointerup', 'pointerleave', 'pointercancel'].forEach(function (ev) { corner.addEventListener(ev, function () { clearTimeout(hold); }); });
-    menuEl.appendChild(corner);
+    parent.appendChild(corner);
   }
 
   // ---------------------------------------------------------------- parent panel: sending status, photo credits
@@ -766,6 +867,17 @@
     var row = el('div', 'row');
     var save = el('button', 'act', 'Siųsti dabar');
     save.addEventListener('click', function () { send(); setTimeout(openPanel, 1500); });
+    if (!ONLY || ONLY === 'deliok') {
+      var lock = P.load('buildLock', 0);
+      var lk = el('div', 'row');
+      [[0, 'Dėliok: keisti kas kartą']].concat(BUILD.map(function (b) { return [b.id, 'Dėliok: ' + BUILD_LABEL[b.id]]; })).forEach(function (o) {
+        var bb = el('button', 'act', o[1]);
+        if (o[0] === lock) bb.style.background = '#00695C';
+        bb.addEventListener('click', function () { P.save('buildLock', o[0]); buildVariant = null; openPanel(); });
+        lk.appendChild(bb);
+      });
+      panel.appendChild(lk);
+    }
     var credits = el('button', 'act', 'Nuotraukų autoriai');
     credits.addEventListener('click', showCredits);
     var close = el('button', 'act', 'Uždaryti');
@@ -792,7 +904,11 @@
 
   // ---------------------------------------------------------------- Ponas lifecycle
   drawMenu();
-  P.onStart(function () { startClock(); send(); if (window.SK_CONTENT) window.SK_CONTENT.start(); });
+  if (ONLY) menuEl.classList.add('hidden');
+  P.onStart(function () {
+    startClock(); send(); if (window.SK_CONTENT) window.SK_CONTENT.start();
+    if (ONLY) startLevel(LEVELS.filter(function (d) { return d.id === SINGLE[ONLY]; })[0]);
+  });
   P.onPause(function () { stopClock(); stopSound(); if (window.SK_CONTENT) window.SK_CONTENT.stop(); });
   P.onResume(function () { startClock(); if (window.SK_CONTENT) window.SK_CONTENT.start(); });
 })();

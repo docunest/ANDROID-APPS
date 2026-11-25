@@ -1,0 +1,12 @@
+{
+  "title": "Skaityk",
+  "icon": "icon.png",
+  "color": "#90CAF9",
+  "order": 114,
+  "group": "learning",
+  "version": "7",
+  "enabled": true,
+  "network": [
+    "map-pal-mike-base.vercel.app"
+  ]
+}
