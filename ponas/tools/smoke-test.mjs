@@ -8,7 +8,7 @@
 //
 // Checks per game and orientation: loads without JS errors, the ▶ start overlay works,
 // nothing scrolls, pause shows the overlay and resume hides it, close leaves the game,
-// and no network requests except ntfy.sh (mocked here) for games that declare it.
+// and no network requests except to hosts the game declares (ntfy.sh, MapPal; mocked here).
 // Screenshots go to _shots/<id>-<orientation>.png — look at them.
 
 import { createServer } from 'node:http';
@@ -65,9 +65,13 @@ for (const g of games) {
     page.on('request', (r) => {
       const u = r.url();
       if (u.startsWith(BASE) || u.startsWith('data:') || u.startsWith('blob:')) return;
-      if (u.startsWith('https://ntfy.sh/') && g.network.includes('ntfy.sh')) return;
+      // Hosts the game declares in meta.json "network" (and the app allows) are mocked below.
+      if (g.network.some((h) => u.startsWith('https://' + h + '/'))) return;
       problems.push('network request not allowed: ' + u);
     });
+    // MapPal (the reading game's backend): answer "nothing new", so tests never reach the live site.
+    await page.route('https://map-pal-mike-base.vercel.app/**', (r) => r.fulfill({ status: 200,
+      headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' }, body: '{"version":0,"unchanged":true}' }));
     await page.route('https://ntfy.sh/**', (r) => r.request().url().endsWith('/sse')
       ? r.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream', 'access-control-allow-origin': '*' }, body: '' })
       : r.fulfill({ status: 200, headers: { 'access-control-allow-origin': '*' }, body: '{}' }));

@@ -42,12 +42,19 @@
   var buffers = {}, bufferOrder = [], current = null;
   function loadBuffer(url, cb) {
     if (buffers[url]) return cb(buffers[url]);
+    if (url.indexOf('media:') === 0) {   // a backend file by hash (content.js keeps it in the cache)
+      if (!window.SK_CONTENT) return cb(null);
+      return window.SK_CONTENT.mediaUrl(url.slice(6)).then(function (u) { decodeFrom(url, u, cb); }, function () { cb(null); });
+    }
+    decodeFrom(url, url, cb);
+  }
+  function decodeFrom(key, url, cb) {
     var ctx = P.audio();
     if (!ctx) return cb(null);
     fetch(url).then(function (r) { return r.ok ? r.arrayBuffer() : null; }).then(function (ab) {
       if (!ab) return cb(null);
       ctx.decodeAudioData(ab, function (b) {
-        buffers[url] = b; bufferOrder.push(url);
+        buffers[key] = b; bufferOrder.push(key);
         if (bufferOrder.length > 60) delete buffers[bufferOrder.shift()];   // little memory on the tablet
         cb(b);
       }, function () { cb(null); });
@@ -71,12 +78,30 @@
     var i = 0;
     (function next() { if (i >= urls.length) { if (done) done(); return; } play(urls[i++], next); })();
   }
+  var roundVoices = null;
+  function voices(kind, text, clip, fallback) {
+    var o = window.SK_CONTENT ? window.SK_CONTENT.options(kind, text, clip) : [];
+    var list = o.length ? o.map(function (x) { return { voice: x.voice, src: 'media:' + x.hash }; }) : [{ voice: 'builtin', src: fallback }];
+    var i = 0, played = {};
+    var vc = {
+      first: function () { i = 0; played[list[0].voice] = 1; return list[0].src; },
+      next: function () { i = (i + 1) % list.length; played[list[i].voice] = 1; return list[i].src; },
+      tag: function () { return Object.keys(played).map(function (v) { return clip + ':' + v; }).join(' '); }
+    };
+    roundVoices = vc;
+    return vc;
+  }
   function good() { P.tone(660, { dur: 0.12 }); P.tone(880, { delay: 0.1, dur: 0.22 }); }
   function soft() { P.tone(220, { dur: 0.22, type: 'sine', vol: 0.12 }); }   // a mistake is soft, never a penalty
+  // The parent's default clip from the backend when there is one, else the built-in file.
+  function backend(kind, text, clip, fallback) {
+    var o = window.SK_CONTENT ? window.SK_CONTENT.options(kind, text, clip) : [];
+    return o.length ? 'media:' + o[0].hash : fallback;
+  }
   var A = {
-    syl: function (s) { return D.audio('syl', s); },
-    word: function (w) { return D.audio('word', w); },
-    letter: function (c) { return D.audio('letter', c.toLowerCase()); },
+    syl: function (s) { return backend('pair', s, 'sound', D.audio('syl', s)); },
+    word: function (w) { return backend('word', w, 'word', D.audio('word', w)); },
+    letter: function (c) { var l = c.toLowerCase(); return backend('letter', l, 'sound', D.audio('letter', l)); },
     group: function (g) { return D.audio('group', g); },
     prompt: function (k) { return 'audio/prompt-' + k + '.mp3'; }
   };
@@ -107,7 +132,14 @@
     var s = lv(id);
     var deck = P.load('deck' + id, []).filter(function (x) { return items.indexOf(x) >= 0; });
     if (!deck.length) {
-      deck = shuffle(items.slice()).sort(function (a, b) { return (s.miss[b] || 0) - (s.miss[a] || 0); });
+      var kind = id === 1 ? 'pair' : 'word', C = window.SK_CONTENT, dealt = [];
+      items.forEach(function (x) {
+        var w = C ? C.weight(kind, x) : 1;
+        var copies = w >= 3 ? 3 : w >= 1 ? 1 : (Math.random() < w ? 1 : 0);
+        for (var k = 0; k < copies; k++) dealt.push(x);
+      });
+      if (!dealt.length) dealt = items.slice();
+      deck = shuffle(dealt).sort(function (a, b) { return (s.miss[b] || 0) - (s.miss[a] || 0); });
     }
     var i = deck[0] === last && deck.length > 1 ? 1 : 0;
     var item = deck.splice(i, 1)[0];
@@ -120,6 +152,10 @@
   var sending = false;
   function uid() { return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); }
   function log(a) {
+    var C = window.SK_CONTENT;
+    var itemId = C && C.id(a.level === 1 ? 'pair' : 'word', String(a.item).split('@')[0]);
+    if (itemId) a.item_id = itemId;
+    if (roundVoices && roundVoices.tag()) a.audio = roundVoices.tag();
     a.id = uid();
     a.at = new Date().toISOString();
     queue.push(a);
@@ -177,7 +213,7 @@
     if (opts.picture && D.photos) {
       var pic = el('div', 'pic');
       var img = el('img');
-      img.src = D.image(opts.picture); img.alt = '';
+      setImg(img, opts.picture); img.alt = '';
       pic.appendChild(img);
       side.appendChild(pic);
     }
@@ -219,6 +255,11 @@
     stageEl.classList.add('hidden');
     if (activeMs >= SESSION_MS) { finishSession(); return; }
     menuEl.classList.remove('hidden');
+  }
+  function setImg(img, word) {
+    var h = window.SK_CONTENT && window.SK_CONTENT.image(word);
+    if (!h) { img.src = D.image(word); return; }
+    window.SK_CONTENT.mediaUrl(h).then(function (u) { img.src = u; }, function () { img.src = D.image(word); });
   }
   function tilesBox(parent) { var t = el('div', 'tiles'); parent.appendChild(t); return t; }
   function letterTile(ch, colored) {
@@ -271,7 +312,8 @@
     var t = nextItem(id, D.syllables, level.last); level.last = t;
     var opts = a1Options(t, Math.min(9, 3 + s.diff), s.diff);
     var t0 = Date.now(), first = true, done = false;
-    frame({ sound: function () { play(A.syl(t)); } });
+    var vc = voices('pair', t, 'sound', A.syl(t));
+    frame({ sound: function () { play(vc.next()); } });   // each tap: the next voice
     var box = tilesBox(work);
     opts.forEach(function (o) {
       var b = el('button', 'tile', o);
@@ -290,7 +332,7 @@
       });
       box.appendChild(b);
     });
-    play(A.syl(t));
+    play(vc.first());
   }
 
   // ---------------------------------------------------------------- A2: picture, build the word from letters (instant feedback)
@@ -301,7 +343,8 @@
     var decoys = letterDecoys(word, Math.min(4, 2 + Math.floor(s.diff / 2)), s.diff);
     var tiles = shuffle(w.concat(decoys));
     var pos = 0, firstTaps = [], letterOk = [], wrongHere = 0, hint = false, t0 = Date.now(), done = false;
-    frame({ picture: word, sound: function () { play(A.word(word)); } });
+    var vc = voices('word', word, 'word', A.word(word));
+    frame({ picture: word, sound: function () { play(vc.next()); } });   // each tap: the next voice
     var cr = cellsRow(w.length); work.appendChild(cr.row);
     var box = tilesBox(work), buttons = [];
     tiles.forEach(function (ch) {
@@ -338,7 +381,7 @@
       good();
       setTimeout(function () { play(A.word(word), roundDone); }, 350);
     }
-    play(A.word(word));
+    play(vc.first());
   }
 
   // ---------------------------------------------------------------- A3: picture, write each letter (JS recognizer, no Google services)
@@ -427,7 +470,8 @@
     var word = nextItem(id, D.words5, level.last); level.last = word;
     var w = chars(word);
     var pos = 0, tries = 0, firstRec = [], letterOk = [], hint = false, t0 = Date.now(), done = false;
-    frame({ picture: word, sound: function () { play(A.word(word)); } });
+    var vc = voices('word', word, 'word', A.word(word));
+    frame({ picture: word, sound: function () { play(vc.next()); } });   // each tap: the next voice
     var cr = cellsRow(w.length); work.appendChild(cr.row);
     cr.cells[0].classList.add('target');
     var pad = el('div'); pad.id = 'pad';
@@ -489,7 +533,7 @@
       good();
       setTimeout(function () { play(A.word(word), roundDone); }, 400);
     }
-    play(A.prompt('write'), function () { play(A.word(word)); });
+    play(A.prompt('write'), function () { play(vc.first()); });
   }
 
   // ---------------------------------------------------------------- B1 (Montessori sound game): first or last sound of a word
@@ -506,7 +550,8 @@
     randomLetters(opts.concat(w), n).forEach(function (c) { if (opts.length < n) opts.push(c); });
     opts = shuffle(opts);
     var item = word + '@' + mode, t0 = Date.now(), first = true, done = false;
-    function say() { playSeq([A.prompt(mode), A.word(word)]); }
+    var vc = voices('word', word, 'word', A.word(word)), said = false;
+    function say() { playSeq([A.prompt(mode), said ? vc.next() : vc.first()]); said = true; }
     frame({ picture: word, sound: say });
     var cr = cellsRow(w.length); work.appendChild(cr.row);   // the word's shape, the asked sound marked
     cr.cells[mode === 'first' ? 0 : w.length - 1].classList.add('target');
@@ -542,7 +587,8 @@
     var nDecoys = Math.max(0, Math.min(9 - w.length, 3 + s.diff));
     var tiles = shuffle(w.concat(letterDecoys(word, nDecoys, s.diff + 2)));
     var placed = new Array(w.length), checks = 0, firstCheck = null, t0 = Date.now(), done = false;
-    frame({ picture: word, sound: function () { play(A.word(word)); } });
+    var vc = voices('word', word, 'word', A.word(word));
+    frame({ picture: word, sound: function () { play(vc.next()); } });   // each tap: the next voice
     var cr = cellsRow(w.length); work.appendChild(cr.row);
     var box = tilesBox(work), buttons = [];
     tiles.forEach(function (ch) {
@@ -595,7 +641,7 @@
         wrong.forEach(function (i) { if (placed[i]) { placed[i].classList.remove('used'); placed[i] = null; } cr.cells[i].textContent = ''; cr.cells[i].classList.remove('bad'); });
       }, 900);
     });
-    playSeq([A.prompt('build'), A.word(word)]);
+    playSeq([A.prompt('build'), vc.first()]);
   }
 
   // ---------------------------------------------------------------- B3 pink / B4 blue: read the word, find its picture
@@ -615,7 +661,7 @@
       var box = el('div', 'cards'); work.appendChild(box);
       opts.forEach(function (x) {
         var b = el('button', 'card');
-        var img = el('img'); img.src = D.image(x); img.alt = '';
+        var img = el('img'); setImg(img, x); img.alt = '';
         b.appendChild(img);
         tap(b, function () {
           if (done || b.disabled) return;
@@ -649,7 +695,8 @@
     });
     opts = shuffle(opts);
     var t0 = Date.now(), first = true, done = false;
-    function say() { playSeq([A.prompt('group'), A.word(word)]); }
+    var vc = voices('word', word, 'word', A.word(word)), said = false;
+    function say() { playSeq([A.prompt('group'), said ? vc.next() : vc.first()]); said = true; }
     frame({ picture: word, sound: say });
     var box = tilesBox(work);
     opts.forEach(function (g) {
@@ -745,7 +792,7 @@
 
   // ---------------------------------------------------------------- Ponas lifecycle
   drawMenu();
-  P.onStart(function () { startClock(); send(); });
-  P.onPause(function () { stopClock(); stopSound(); });
-  P.onResume(function () { startClock(); });
+  P.onStart(function () { startClock(); send(); if (window.SK_CONTENT) window.SK_CONTENT.start(); });
+  P.onPause(function () { stopClock(); stopSound(); if (window.SK_CONTENT) window.SK_CONTENT.stop(); });
+  P.onResume(function () { startClock(); if (window.SK_CONTENT) window.SK_CONTENT.start(); });
 })();

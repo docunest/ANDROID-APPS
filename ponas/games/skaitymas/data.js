@@ -61,7 +61,7 @@
 
   root.SK_DATA = {
     fileKey: fileKey,
-    syllables: syllables,
+    syllables: (W.pairs && W.pairs.length) ? W.pairs : syllables,   // backend pairs when the parent manages them
     diphthongs: DIPHTHONGS,
     consonants: CONSONANTS,
     vowels: VOWELS,
