@@ -544,6 +544,7 @@ class DockActivity : Activity() {
                         outline.setRoundRect(0, 0, view.width, view.height, dp(10).toFloat())
                 }
                 setOnClickListener { focus(item) }
+                setOnLongClickListener { itemMenu(item); true } // pin / delete / link (the name's hold is Waze's restart)
             }, LinearLayout.LayoutParams(dp(64), dp(64)).apply { marginEnd = dp(12) })
         }
         val text = LinearLayout(this).apply {
@@ -551,21 +552,25 @@ class DockActivity : Activity() {
             minimumHeight = dp(56)
             gravity = Gravity.CENTER_VERTICAL
             isClickable = true
-            // The name is the button: one tap = navigate with the usual app.
-            setOnClickListener { Nav.go(this@DockActivity, item, nav) }
-            setOnLongClickListener { itemMenu(item); true }
+            // The name is the button: one tap = navigate with the usual app; with Waze, hold 3 s = restart Waze + send.
+            if (nav == Prefs.NAV_WAZE) WazeHold.attach(this, { Nav.go(this@DockActivity, item, nav) }, { Nav.go(this@DockActivity, item, nav, restart = true) })
+            else {
+                setOnClickListener { Nav.go(this@DockActivity, item, nav) }
+                setOnLongClickListener { itemMenu(item); true }
+            }
         }
         text.addView(label((if (item.pinned) "📌 " else "") + item.title, 19f, bold = true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
         text.addView(label(subtitle(item), 13f, if (item.isNew) Palette.AMBER else Palette.MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
         r.addView(text, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if (item.hasPoint && thumb == null) {
-            r.addView(bigButton("🗺", Palette.CARD_HI, 16f) { focus(item) }, LinearLayout.LayoutParams(dp(56), dp(56)).apply { marginEnd = dp(6) })
+            r.addView(bigButton("🗺", Palette.CARD_HI, 16f) { focus(item) }.apply { setOnLongClickListener { itemMenu(item); true } },
+                LinearLayout.LayoutParams(dp(56), dp(56)).apply { marginEnd = dp(6) })
         }
         r.addView(
             bigButton(if (alt == Prefs.NAV_GMAPS) "G" else "W", if (alt == Prefs.NAV_GMAPS) Palette.GMAPS else Palette.WAZE, 18f) {
                 // G = the place in Google Maps beside Waze (photos, reviews, hours; Directions one tap there).
                 if (alt == Prefs.NAV_GMAPS) Split.preview(this, item) else Nav.go(this, item, alt)
-            },
+            }.apply { if (alt == Prefs.NAV_WAZE) WazeHold.attach(this, { Nav.go(this@DockActivity, item, alt) }, { Nav.go(this@DockActivity, item, alt, restart = true) }) },
             LinearLayout.LayoutParams(dp(56), dp(56)),
         )
         return r
@@ -650,15 +655,16 @@ class DockActivity : Activity() {
         text.addView(label(title, 17f, bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
         text.addView(label(sub, 12f, Palette.MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
         bar.addView(text, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        fun go(app: String) {
+        fun go(app: String, restart: Boolean = false) {
             if (asTrip) Trip.setDockDestination(this, lat, lng, title)
-            if (item != null) Nav.go(this, item, app) else Nav.goTo(this, lat, lng, app)
+            if (item != null) Nav.go(this, item, app, restart) else Nav.goTo(this, lat, lng, app, restart, title)
         }
-        bar.addView(bigButton(if (nav == Prefs.NAV_GMAPS) "Drive · Maps" else "Drive · Waze", if (nav == Prefs.NAV_GMAPS) Palette.GMAPS else Palette.WAZE, 16f) { go(nav) })
+        bar.addView(bigButton(if (nav == Prefs.NAV_GMAPS) "Drive · Maps" else "Drive · Waze", if (nav == Prefs.NAV_GMAPS) Palette.GMAPS else Palette.WAZE, 16f) { go(nav) }
+            .apply { if (nav == Prefs.NAV_WAZE) WazeHold.attach(this, { go(nav) }, { go(nav, true) }) })
         bar.addView(space(6))
         bar.addView(bigButton(if (alt == Prefs.NAV_GMAPS) "G" else "W", Palette.CARD_HI, 16f) {
             if (alt == Prefs.NAV_GMAPS && item != null) Split.preview(this, item) else go(alt)
-        }, LinearLayout.LayoutParams(dp(56), dp(56)))
+        }.apply { if (alt == Prefs.NAV_WAZE) WazeHold.attach(this, { go(alt) }, { go(alt, true) }) }, LinearLayout.LayoutParams(dp(56), dp(56)))
         bar.visibility = View.VISIBLE
         statusChips.visibility = View.GONE
     }
@@ -939,10 +945,12 @@ class DockActivity : Activity() {
         text.addView(label("${p.icon} ${p.title}", 17f, bold = true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
         text.addView(label(sub, 12f, Palette.MUTED).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
         bar.addView(text, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        bar.addView(bigButton("Waze", Palette.WAZE, 16f) {
-            // Drive there now: also the dock's trip (start = here).
-            Trip.setDockDestination(this, p.lat, p.lng, p.title)
-            Nav.goTo(this, p.lat, p.lng, Prefs.NAV_WAZE)
+        bar.addView(bigButton("Waze", Palette.WAZE, 16f) {}.apply {
+            // Drive there now: also the dock's trip (start = here). Hold 3 s = restart Waze + send.
+            WazeHold.attach(this, {
+                Trip.setDockDestination(this@DockActivity, p.lat, p.lng, p.title)
+                Nav.goTo(this@DockActivity, p.lat, p.lng, Prefs.NAV_WAZE)
+            }, { Nav.goTo(this@DockActivity, p.lat, p.lng, Prefs.NAV_WAZE, restart = true, title = p.title) })
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(56)).apply { marginStart = dp(6) })
         bar.addView(bigButton("Google Maps", Palette.GMAPS, 15f) {
             // Its Google card (photos, reviews, hours) beside Waze; Directions is one tap there.

@@ -15,10 +15,11 @@ import org.json.JSONObject
  * / geo: variant opened Waze without a usable destination.
  */
 object Nav {
-    fun go(context: Context, item: Item, app: String = Prefs(context).defaultNav) {
+    /** [restart] = the owner held the Waze button 3 s: restart Waze, then send ([WazeLinkCheck.restartAndSend]). */
+    fun go(context: Context, item: Item, app: String = Prefs(context).defaultNav, restart: Boolean = false) {
         // Road ahead: the picked place is the trip's destination (start = here, locked).
         if (item.lat != null && item.lng != null) Trip.setDockDestination(context, item.lat, item.lng, item.title)
-        val ok = start(context, app, item.lat, item.lng, item.title, item.address, item.resolvedUrl ?: item.sourceUrl)
+        val ok = start(context, app, item.lat, item.lng, item.title, item.address, item.resolvedUrl ?: item.sourceUrl, restart)
         if (ok) Sync.patch(item.id, JSONObject().put("opened", true))
     }
 
@@ -34,8 +35,8 @@ object Nav {
         return if (i.resolveActivity(context.packageManager) != null) i else view(item.resolvedUrl ?: item.sourceUrl ?: return null, null)
     }
 
-    fun goTo(context: Context, lat: Double, lng: Double, app: String = Prefs(context).defaultNav) {
-        start(context, app, lat, lng, null, null, null)
+    fun goTo(context: Context, lat: Double, lng: Double, app: String = Prefs(context).defaultNav, restart: Boolean = false, title: String? = null) {
+        start(context, app, lat, lng, null, null, null, restart, title)
     }
 
     /** "Name, address" for Waze to search; plain coordinates when there's no name. */
@@ -49,7 +50,8 @@ object Nav {
     private fun wazeLink(title: String?, address: String?, lat: Double?, lng: Double?): String? =
         wazeQuery(title, address, lat, lng)?.let { "https://waze.com/ul?q=${Uri.encode(it)}&navigate=yes" }
 
-    private fun start(context: Context, app: String, lat: Double?, lng: Double?, title: String?, address: String?, url: String?): Boolean {
+    private fun start(context: Context, app: String, lat: Double?, lng: Double?, title: String?, address: String?, url: String?,
+                      restart: Boolean = false, label: String? = null): Boolean {
         val q = Uri.encode(title ?: "")
         val intents = mutableListOf<Intent>()
         if (app == Prefs.NAV_GMAPS && Apps.installed(context, Apps.GMAPS)) {
@@ -65,7 +67,12 @@ object Nav {
                 return true
             }
         } else if (app != Prefs.NAV_GMAPS) {
-            wazeLink(title, address, lat, lng)?.let { intents += view(it, Apps.WAZE) }
+            val link = wazeLink(title, address, lat, lng)
+            if (restart && link != null) {
+                WazeLinkCheck.restartAndSend(context, link, label ?: title, lat, lng)
+                return true
+            }
+            link?.let { intents += view(it, Apps.WAZE) }
         }
         // App missing or no coordinates: any map app, then the original link.
         if (lat != null && lng != null) intents += view("geo:$lat,$lng?q=$lat,$lng(${Uri.encode(title ?: "")})", null)
@@ -76,9 +83,6 @@ object Nav {
                 Split.openMaps(context, i.dataString)
                 return true
             }
-            // The same place sent twice in a few minutes = Waze ignored it: restart Waze and resend (WazeLinkCheck).
-            if (i.`package` == Apps.WAZE && i.dataString != null &&
-                WazeLinkCheck.beforeSend(context, i.dataString!!, title, lat, lng)) return true
             if (runCatching { context.startActivity(i) }.isSuccess) return true
         }
         Toast.makeText(context, "No navigation app could open this place", Toast.LENGTH_LONG).show()

@@ -670,7 +670,7 @@ class DockService : Service() {
         root.addView(gap())
         root.addView(bigButton(if (nav == Prefs.NAV_GMAPS) "Drive · Maps" else "Drive · Waze", if (nav == Prefs.NAV_GMAPS) Palette.GMAPS else Palette.WAZE) {
             hideCard(); Nav.go(this, item, nav)
-        })
+        }.apply { if (nav == Prefs.NAV_WAZE) WazeHold.attach(this, { hideCard(); Nav.go(this@DockService, item, nav) }, { hideCard(); Nav.go(this@DockService, item, nav, restart = true) }) })
         root.addView(gap())
         // Look at it in Google Maps beside Waze, without touching the current route.
         root.addView(bigButton("Preview", Palette.GMAPS, 15f) {
@@ -681,7 +681,7 @@ class DockService : Service() {
         root.addView(gap())
         root.addView(bigButton(if (alt == Prefs.NAV_GMAPS) "Maps" else "Waze", Palette.CARD_HI, 15f) {
             hideCard(); Nav.go(this, item, alt)
-        })
+        }.apply { if (alt == Prefs.NAV_WAZE) WazeHold.attach(this, { hideCard(); Nav.go(this@DockService, item, alt) }, { hideCard(); Nav.go(this@DockService, item, alt, restart = true) }) })
         if (more > 0) {
             root.addView(gap())
             root.addView(bigButton("All", Palette.CARD_HI, 15f) {

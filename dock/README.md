@@ -170,16 +170,17 @@ Evidence (log of 15 Nov, ~4 h): 12 drops started by the dock itself — 7 "hotsp
   could take 12 s, so a slow-but-working answer counted as a failure). The two failed checks must be ≥ 20 s apart. The 2-s ping has a hard
   3-s limit (a hung ping process counts as one lost answer).
 
-## Waze ignoring a sent link (2026-11-17, changed 2026-11-20)
+## Waze ignoring a sent link — hold to restart (2026-11-17, changed 11-20 and 11-25)
 
-Three links sent to a running Waze were taken (`Sending to native`) but never run; after the owner killed Waze the same link worked at once.
-The first fix (restart Waze when it hadn't started the search 12 s after a link) was **too aggressive** (owner 2026-11-20): it fired while Waze was
-still calculating a slow route, or while the owner was looking at the route before pressing Go. Removed.
+History: Waze sometimes takes a link and does nothing (after killing Waze the same link worked). Two automatic fixes guessed wrong: "restart if
+no search 12 s after a link" fired while Waze was slowly planning or the owner was looking at the route; "same place sent twice in 5 min" fired
+while the owner was mid-planning another route, and the restarted Waze asked "resume the previous drive?" and dropped the link — a loop.
 
-Now (`WazeLinkCheck.kt`, the owner's rule): **the same place sent twice within 5 minutes** = Waze ignored it ("there is no other practical need to do
-this"). Unless Waze's log showed the first link start navigation (`startNavigationFlow … caller=DeepLink`), the dock restarts Waze (root) and sends the
-link again, and an amber notice at the top stays until navigation is seen working — that log line, or the place appearing in Waze's recent places
-(Trip) — then turns green "✓ Waze is navigating…" for 4 s. Tap the notice to close it. A single send never does anything. Lines tagged `NAV`.
+Now (owner 2026-11-25) **no guessing**: every Waze button — a place's name in the list, W, "Drive · Waze", the place card's Waze, the new-place
+card, the mini-map card — is **tap = send as usual, hold 3 s = restart Waze and send** (`WazeHold.kt`: a light bar fills the button while held;
+let go early = nothing). The restart (`WazeLinkCheck.restartAndSend`): stop Waze → start it → wait 8 s (start-up and its "resume?" question)
+→ send the link → watch Waze's log for "Executing query" (took it) / startNavigationFlow (driving) → if neither within 12 s, send once more.
+A notice at the top says each step. The place menu (pin / delete / link) moved to a long-press on the map thumbnail or 🗺.
 
 ## Dock map + mini-map, round 2 (2026-11-17)
 
