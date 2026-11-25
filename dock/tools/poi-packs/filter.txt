@@ -13,3 +13,4 @@ nwr/landuse=quarry
 nwr/waterway=dam
 nwr/aeroway=aerodrome
 nwr/historic=castle
+r/enforcement=average_speed

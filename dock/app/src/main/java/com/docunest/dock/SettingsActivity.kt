@@ -161,6 +161,11 @@ class SettingsActivity : Activity() {
         switch("Record Waze details while driving (road type, turns, reports → debug log)", prefs.wazeRecord) {
             prefs.wazeRecord = it; WazeTap.enabled = it
         }
+        switch("Average speed sections: panel with your average while inside one", prefs.avgZones) { prefs.avgZones = it }
+        row(bigButton("⏱ Test the average-speed panel (8 s)", Palette.CARD_HI, 14f) {
+            DockService.start(this, DockService.ACTION_ZONE_TEST)
+            Toast.makeText(this, "Close this screen to see it over Waze", Toast.LENGTH_SHORT).show()
+        })
         row(bigButton("🚓 Test the flash (6 s)", Palette.RED, 14f) {
             DockService.start(this, DockService.ACTION_POLICE_TEST)
             Toast.makeText(this, "Close this screen to see it over Waze", Toast.LENGTH_SHORT).show()

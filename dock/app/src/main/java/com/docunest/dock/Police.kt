@@ -44,8 +44,13 @@ object Police {
     private const val KEEP_MS = 90 * 60_000L
 
     val reports = java.util.concurrent.ConcurrentHashMap<String, Report>()
-    /** The report flashing now and metres to it (null = nothing ahead). */
-    @Volatile var active: Pair<Report, Double>? = null
+    /**
+     * What the overlay shows: [onRoute] = on the route ahead ([m] along it) → the full flash; otherwise
+     * nearby ([m] straight line) → a soft glow on the side it's on, with an arrow ([relDeg]: 0 = ahead,
+     * 90 = right, -90 = left, 180 = behind; null = no heading, so no arrow).
+     */
+    data class Hit(val report: Report, val m: Double, val onRoute: Boolean, val relDeg: Float?)
+    @Volatile var active: Hit? = null
         private set
     @Volatile var debugLog: Boolean? = null
         private set
@@ -174,44 +179,47 @@ object Police {
     // --- Is one ahead? ---------------------------------------------------------------------------
 
     /**
-     * Every second: the nearest report ahead within warning distance. Owner 2026-11-17: "better to
-     * err on more alerting than less" — so generous: ~90 s ahead (1.5–4 km), 300 m either side of the
-     * route, a ±60° cone ahead without a route (±100° when Waze says it's on its route), anything
-     * within 500 m whatever the direction, and within 1 km when stopped / no heading.
+     * Every second. Owner 2026-11-25: "it alerts only if I'm looking straight at the police … I need
+     * something that goes either on my route or then shows proximity or the direction".
+     *  - **On the route**: along the dock's route (≤ 300 m off it), or — with no dock route — a report
+     *    Waze marks as on its route and roughly ahead (±100°). Full flash from ~90 s before (1.5–4 km)
+     *    until passed.
+     *  - **Nearby**, any direction: within 400 m in town (< 50 km/h), 800 m faster. Soft glow on the
+     *    side it's on + an arrow; "5 blocks away" doesn't get the full flash any more.
      */
     fun evaluate(here: Location?) {
         if (here == null || reports.isEmpty()) { active = null; return }
         val speed = if (here.hasSpeed()) here.speed else 0f
-        val warnM = (speed * 90.0).coerceIn(1500.0, 4000.0)
+        val routeWarnM = (speed * 90.0).coerceIn(1500.0, 4000.0)
+        val nearM = if (speed * 3.6f < 50f) 400.0 else 800.0
         val r = Trip.route
         val p = Trip.progress(here.latitude, here.longitude)?.takeIf { r != null && !r.straight && it.offM < 300 }
         val heading = if (here.hasBearing() && speed > 1.5f) here.bearing else null
-        var best: Pair<Report, Double>? = null
+        var route: Hit? = null
+        var near: Hit? = null
         for (rep in reports.values) {
             if (rep.done) continue
             val d = RouteGeo.distM(here.latitude, here.longitude, rep.lat, rep.lng)
-            val onRoute: Double? = if (p != null && r != null) {
-                val pr = RouteGeo.project(r.lat, r.lng, r.cum, rep.lat, rep.lng)
-                if (pr.off < 300) pr.along - p.alongM else null
-            } else null
-            val cone: Double? = heading?.let { h ->
-                val diff = abs(((bearing(here.latitude, here.longitude, rep.lat, rep.lng) - h + 540f) % 360f) - 180f)
-                if (diff <= 60f || (rep.wazeOnRoute && diff <= 100f)) d else null
-            }
-            val aheadM: Double? = onRoute ?: cone ?: when {
-                d < 500 -> d
-                heading == null && d < 1000 -> d
+            val rel = heading?.let { h -> ((bearing(here.latitude, here.longitude, rep.lat, rep.lng) - h + 540f) % 360f) - 180f }
+            val along: Double? = when {
+                p != null && r != null -> RouteGeo.project(r.lat, r.lng, r.cum, rep.lat, rep.lng).let { pr -> if (pr.off < 300) pr.along - p.alongM else null }
+                rep.wazeOnRoute && rel != null && abs(rel) <= 100f -> d
                 else -> null
             }
-            // Passed it (well behind, or moving away after having been close): never again.
-            if (rep.lastAheadM < 600 && ((aheadM != null && aheadM < -150) || (aheadM == null && d > 400))) rep.done = true
-            if (aheadM != null) rep.lastAheadM = aheadM
-            if (rep.done || aheadM == null || aheadM < -100 || aheadM > warnM) continue
-            if (best == null || aheadM < best.second) best = rep to aheadM
+            if (along != null) {
+                // Passed it on the route: never again.
+                if (rep.lastAheadM < 600 && along < -150) { rep.done = true; continue }
+                rep.lastAheadM = along
+                if (along >= -100 && along <= routeWarnM && (route == null || along < route.m)) route = Hit(rep, along, true, rel)
+                if (along >= -100 && along <= routeWarnM) continue
+            }
+            if (d <= nearM && (near == null || d < near.m)) near = Hit(rep, d, false, rel)
         }
-        if (best != null && active?.first?.id != best.first.id) {
-            DebugLog.log("POLICE", "FLASH: police ${best.second.toInt()} m ahead (${best.first.street ?: "?"}), " +
-                "${(speed * 3.6f).toInt()} km/h, ${if (p != null) "on the dock route" else if (heading != null) "by heading" else "no heading"}")
+        val best = route ?: near
+        if (best != null && (active?.report?.id != best.report.id || active?.onRoute != best.onRoute)) {
+            DebugLog.log("POLICE", (if (best.onRoute) "FLASH (on the route)" else "NEARBY") + ": ${best.m.toInt()} m " +
+                (best.relDeg?.let { "at ${it.toInt()}° " } ?: "") + "(${best.report.street ?: "?"}), ${(speed * 3.6f).toInt()} km/h, " +
+                if (p != null) "dock route" else if (best.report.wazeOnRoute) "Waze says on its route" else "no route")
         }
         active = best
     }
@@ -223,27 +231,36 @@ object Police {
 }
 
 /**
- * The flash: a red / blue glow along all four screen edges, pulsing, plus a small "🚓 POLICE 650 m"
- * tag at the top centre. Touch passes straight through; the middle of the screen (Waze's map) stays clear.
+ * The overlay over Waze, touch-through, the middle of the screen clear:
+ *  - police on the route: red / blue glow pulsing on all four edges (thin line, owner 2026-11-25:
+ *    "the outline is a bit too much") + "🚓 POLICE · 650 m · street";
+ *  - police nearby, off the route: a soft red glow only on the side it's on + "🚓 400 m" with an arrow;
+ *  - in an average speed section ([AvgZone]): a steady glow — green under the limit, amber close, red
+ *    over — and a panel with the limit, your average, your speed now, km left and the most you can
+ *    do for the rest. Shown together with police.
  */
 class PoliceFlash(private val ctx: Context, private val wm: WindowManager) {
     private val main = Handler(Looper.getMainLooper())
     private val prefs = Prefs(ctx)
     private var view: FlashView? = null
     private var testUntil = 0L
+    private var testZoneUntil = 0L
 
     private val tick = object : Runnable {
         override fun run() {
             val here = Trip.here(ctx)
             Police.evaluate(here)
-            val a = Police.active
-            val testing = SystemClock.elapsedRealtime() < testUntil
-            when {
-                testing -> show("🚓 POLICE · 650 m  (test)")
-                a != null && prefs.policeFlash -> show("🚓 POLICE · " + km(a.second.coerceAtLeast(0.0).toFloat()) +
-                    (a.first.street?.let { " · $it" } ?: ""))
-                else -> hide()
+            val zone = if (prefs.avgZones) AvgZone.update(ctx, here) else null
+            val now = SystemClock.elapsedRealtime()
+            val police = when {
+                now < testUntil -> FlashView.P(true, "🚓 POLICE · 650 m  (test)", null)
+                else -> Police.active?.takeIf { prefs.policeFlash }?.let { h ->
+                    if (h.onRoute) FlashView.P(true, "🚓 POLICE · " + km(h.m.coerceAtLeast(0.0).toFloat()) + (h.report.street?.let { " · $it" } ?: ""), h.relDeg)
+                    else FlashView.P(false, "🚓 " + km(h.m.toFloat()), h.relDeg)
+                }
             }
+            val z = if (now < testZoneUntil) AvgZone.State(100, 97.0, 104.0, 3200.0, 108.0, "A1 (test)") else zone
+            if (police == null && z == null) hide() else show(police, z)
             main.postDelayed(this, 1000)
         }
     }
@@ -251,10 +268,11 @@ class PoliceFlash(private val ctx: Context, private val wm: WindowManager) {
     fun start() { main.removeCallbacks(tick); main.post(tick) }
     fun stop() { main.removeCallbacks(tick); hide() }
     fun test() { testUntil = SystemClock.elapsedRealtime() + 6000; main.removeCallbacks(tick); main.post(tick) }
+    fun testZone() { testZoneUntil = SystemClock.elapsedRealtime() + 8000; main.removeCallbacks(tick); main.post(tick) }
 
-    private fun show(text: String) {
-        view?.let { it.text = text; return }
-        val v = FlashView(ctx).also { it.text = text }
+    private fun show(p: FlashView.P?, z: AvgZone.State?) {
+        view?.let { it.police = p; it.zone = z; return }
+        val v = FlashView(ctx).also { it.police = p; it.zone = z }
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -263,7 +281,7 @@ class PoliceFlash(private val ctx: Context, private val wm: WindowManager) {
             PixelFormat.TRANSLUCENT,
         )
         if (runCatching { wm.addView(v, params) }.isSuccess) view = v
-        else DebugLog.log("POLICE", "can't show the flash (overlay permission?)")
+        else DebugLog.log("POLICE", "can't show the overlay (overlay permission?)")
     }
 
     private fun hide() {
@@ -271,43 +289,96 @@ class PoliceFlash(private val ctx: Context, private val wm: WindowManager) {
         view = null
     }
 
-    private class FlashView(ctx: Context) : View(ctx) {
+    class FlashView(ctx: Context) : View(ctx) {
+        /** Police: [route] = full flash; [relDeg] = arrow (null = none). */
+        data class P(val route: Boolean, val text: String, val relDeg: Float?)
+        @Volatile var police: P? = null
+        @Volatile var zone: AvgZone.State? = null
         private val d = ctx.resources.displayMetrics.density
-        var text = ""
         private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
         private val glow = Paint(Paint.ANTI_ALIAS_FLAG)
         private val tagBg = Paint(Paint.ANTI_ALIAS_FLAG)
         private val tagText = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 22 * d; isFakeBoldText = true; textAlign = Paint.Align.CENTER }
-        private val tagEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 3 * d; color = Color.WHITE }
+        private val small = Paint(tagText).apply { textSize = 16 * d; isFakeBoldText = false }
+        private val tagEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2 * d; color = Color.WHITE }
+        private val arrow = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
         private val rect = RectF()
         private val start = SystemClock.elapsedRealtime()
 
+        private fun edgeGlow(c: Canvas, side: Int, col: Int, depth: Float) {
+            val w = width.toFloat(); val h = height.toFloat()
+            val clear = Color.argb(0, Color.red(col), Color.green(col), Color.blue(col))
+            when (side) {
+                0 -> { glow.shader = LinearGradient(0f, 0f, 0f, depth, col, clear, Shader.TileMode.CLAMP); c.drawRect(0f, 0f, w, depth, glow) }
+                1 -> { glow.shader = LinearGradient(w, 0f, w - depth, 0f, col, clear, Shader.TileMode.CLAMP); c.drawRect(w - depth, 0f, w, h, glow) }
+                2 -> { glow.shader = LinearGradient(0f, h, 0f, h - depth, col, clear, Shader.TileMode.CLAMP); c.drawRect(0f, h - depth, w, h, glow) }
+                else -> { glow.shader = LinearGradient(0f, 0f, depth, 0f, col, clear, Shader.TileMode.CLAMP); c.drawRect(0f, 0f, depth, h, glow) }
+            }
+        }
+
+        private fun pill(c: Canvas, text: String, cx: Float, top: Float, color: Int, paint: Paint, h: Float): RectF {
+            val tw = paint.measureText(text) + 36 * d
+            rect.set(cx - tw / 2, top, cx + tw / 2, top + h)
+            tagBg.color = color
+            c.drawRoundRect(rect, h / 2, h / 2, tagBg)
+            c.drawRoundRect(rect, h / 2, h / 2, tagEdge)
+            c.drawText(text, cx, rect.centerY() + paint.textSize / 3, paint)
+            return RectF(rect)
+        }
+
         override fun onDraw(c: Canvas) {
             val t = (SystemClock.elapsedRealtime() - start) / 1000.0
-            // Red / blue every half second (police lights), each one pulsing bright → dim.
-            val red = ((t * 2).toInt() % 2) == 0
-            val pulse = 0.55 + 0.45 * (0.5 + 0.5 * sin(t * 4 * Math.PI))
-            val base = if (red) Color.rgb(255, 30, 30) else Color.rgb(40, 100, 255)
-            val a = (255 * pulse).toInt()
-            val w = width.toFloat(); val h = height.toFloat()
-            val g = 70 * d // glow depth: edges only, the map stays clear
-            val col = Color.argb(a, Color.red(base), Color.green(base), Color.blue(base))
-            val clear = Color.argb(0, Color.red(base), Color.green(base), Color.blue(base))
-            glow.shader = LinearGradient(0f, 0f, 0f, g, col, clear, Shader.TileMode.CLAMP); c.drawRect(0f, 0f, w, g, glow)
-            glow.shader = LinearGradient(0f, h, 0f, h - g, col, clear, Shader.TileMode.CLAMP); c.drawRect(0f, h - g, w, h, glow)
-            glow.shader = LinearGradient(0f, 0f, g, 0f, col, clear, Shader.TileMode.CLAMP); c.drawRect(0f, 0f, g, h, glow)
-            glow.shader = LinearGradient(w, 0f, w - g, 0f, col, clear, Shader.TileMode.CLAMP); c.drawRect(w - g, 0f, w, h, glow)
-            edge.strokeWidth = 12 * d
-            edge.color = Color.argb(a, Color.red(base), Color.green(base), Color.blue(base))
-            c.drawRect(6 * d, 6 * d, w - 6 * d, h - 6 * d, edge)
-            // The tag, top centre (small: Waze's own panels are top-left and bottom).
-            val tw = tagText.measureText(text) + 36 * d
-            rect.set(w / 2 - tw / 2, 14 * d, w / 2 + tw / 2, 14 * d + 50 * d)
-            tagBg.color = Color.argb(235, Color.red(base), Color.green(base), Color.blue(base))
-            c.drawRoundRect(rect, 25 * d, 25 * d, tagBg)
-            c.drawRoundRect(rect, 25 * d, 25 * d, tagEdge)
-            c.drawText(text, w / 2, rect.centerY() + tagText.textSize / 3, tagText)
-            postInvalidateDelayed(50) // ~20 fps: smooth enough, light on the head unit
+            val w = width.toFloat()
+            val p = police
+            val z = zone
+            var top = 14 * d
+            // Average speed section: steady glow by how you're doing (drawn first; police goes over it).
+            if (z != null && (p == null || !p.route)) {
+                val col = when (z.level()) { 0 -> Color.argb(150, 22, 163, 74); 1 -> Color.argb(170, 245, 158, 11); else -> Color.argb(190, 239, 68, 68) }
+                for (side in 0..3) edgeGlow(c, side, col, 46 * d)
+            }
+            if (p != null && p.route) {
+                // Police lights: red / blue every half second, pulsing; a thin line (was 12 dp).
+                val red = ((t * 2).toInt() % 2) == 0
+                val pulse = 0.55 + 0.45 * (0.5 + 0.5 * sin(t * 4 * Math.PI))
+                val base = if (red) Color.rgb(255, 30, 30) else Color.rgb(40, 100, 255)
+                val col = Color.argb((255 * pulse).toInt(), Color.red(base), Color.green(base), Color.blue(base))
+                for (side in 0..3) edgeGlow(c, side, col, 70 * d)
+                edge.strokeWidth = 4 * d
+                edge.color = col
+                c.drawRect(2 * d, 2 * d, width - 2 * d, height - 2 * d, edge)
+                val r = pill(c, p.text, w / 2, top, Color.argb(235, Color.red(base), Color.green(base), Color.blue(base)), tagText, 50 * d)
+                p.relDeg?.let { drawArrow(c, r.right + 30 * d, r.centerY(), it) }
+                top = r.bottom + 8 * d
+            } else if (p != null) {
+                // Nearby, off the route: soft red glow on the side(s) it's on (no heading: all sides, faint).
+                val pulse = 0.6 + 0.4 * (0.5 + 0.5 * sin(t * 2 * Math.PI))
+                val rel = p.relDeg
+                for (side in 0..3) {
+                    val k = if (rel == null) 0.35 else cos(Math.toRadians((rel - side * 90f).toDouble())).coerceAtLeast(0.0)
+                    if (k > 0.05) edgeGlow(c, side, Color.argb((200 * k * pulse).toInt(), 255, 40, 40), 60 * d)
+                }
+                val r = pill(c, p.text, w / 2, top, Color.argb(220, 185, 28, 28), tagText, 46 * d)
+                rel?.let { drawArrow(c, r.right + 30 * d, r.centerY(), it) }
+                top = r.bottom + 8 * d
+            }
+            if (z != null) {
+                val col = when (z.level()) { 0 -> Color.argb(230, 21, 128, 61); 1 -> Color.argb(235, 180, 83, 9); else -> Color.argb(240, 185, 28, 28) }
+                val r = pill(c, z.line1(), w / 2, top, col, tagText, 48 * d)
+                pill(c, z.line2(), w / 2, r.bottom + 6 * d, Color.argb(200, 17, 24, 39), small, 34 * d)
+            }
+            postInvalidateDelayed(50) // ~20 fps
+        }
+
+        /** A white arrow in a dark circle pointing where it is (0 = straight ahead = up). */
+        private fun drawArrow(c: Canvas, x: Float, y: Float, relDeg: Float) {
+            tagBg.color = Color.argb(220, 17, 24, 39)
+            c.drawCircle(x, y, 22 * d, tagBg)
+            c.save(); c.rotate(relDeg, x, y)
+            val s = 13 * d
+            val path = android.graphics.Path().apply { moveTo(x, y - s); lineTo(x + s * 0.7f, y + s * 0.7f); lineTo(x, y + s * 0.3f); lineTo(x - s * 0.7f, y + s * 0.7f); close() }
+            c.drawPath(path, arrow)
+            c.restore()
         }
     }
 }

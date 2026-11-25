@@ -156,6 +156,8 @@ class DockService : Service() {
             WifiDoctor.ownerChoice(intent.getStringExtra(EXTRA_SSID)?.takeIf { it.isNotEmpty() })
         } else if (intent?.action == ACTION_POLICE_TEST) {
             policeFlash?.test()
+        } else if (intent?.action == ACTION_ZONE_TEST) {
+            policeFlash?.testZone()
         } else if (intent?.action == ACTION_MINIMAP) {
             miniMap?.relayout() ?: miniMap?.sync()
         } else if (intent?.action == ACTION_CLEAR_SKY) {
@@ -804,6 +806,7 @@ class DockService : Service() {
         const val ACTION_CLEAR_SKY = "com.docunest.dock.CLEAR_SKY"
         const val ACTION_MINIMAP = "com.docunest.dock.MINIMAP"
         const val ACTION_POLICE_TEST = "com.docunest.dock.POLICE_TEST"
+        const val ACTION_ZONE_TEST = "com.docunest.dock.ZONE_TEST"
         const val ACTION_WIFI_CHOICE = "com.docunest.dock.WIFI_CHOICE"
         const val EXTRA_SSID = "ssid"
         private var rootTried = false

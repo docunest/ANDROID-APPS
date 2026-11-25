@@ -466,7 +466,7 @@ class MiniMap(private val ctx: Context, private val wm: WindowManager) {
             flash("${mode.icon} ${mode.title}")
             if (expanded) renderPanel()
         }
-        dial.police = Police.active != null && prefs.policeFlash
+        dial.police = Police.active?.onRoute == true && prefs.policeFlash
 
         val p = Trip.progress(here.latitude, here.longitude)
         val onCourse = course.feed(p?.offM, System.currentTimeMillis())

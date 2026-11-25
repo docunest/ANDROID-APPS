@@ -193,6 +193,47 @@ class Collect(osmium.SimpleHandler):
             self.add(f"r{a.orig_id()}", t, sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts))
 
 
+def zones_of(src):
+    """Average speed sections (owner 2026-11-25: "Waze does not always show average speed zones"):
+    OSM relations type=enforcement + enforcement=average_speed with `from` / `to` nodes (else the first
+    and last `device`), the limit from the relation or its `section` ways. Directional: from → to."""
+    rels = []
+    for o in osmium.FileProcessor(src).with_filter(osmium.filter.TagFilter(("enforcement", "average_speed"))):
+        if not o.is_relation():
+            continue
+        m = [(x.type, x.ref, x.role) for x in o.members]
+        a = next((r for t, r, ro in m if t == "n" and ro == "from"), None)
+        b = next((r for t, r, ro in m if t == "n" and ro == "to"), None)
+        dev = [r for t, r, ro in m if t == "n" and ro == "device"]
+        if (a is None or b is None) and len(dev) >= 2:
+            a, b = dev[0], dev[-1]
+        if a is None or b is None or a == b:
+            continue
+        rels.append({"id": o.id, "a": a, "b": b, "ways": {r for t, r, ro in m if t == "w"},
+                     "max": num(o.tags.get("maxspeed", "")), "name": o.tags.get("name") or o.tags.get("ref")})
+    if not rels:
+        return []
+    need_n = {r["a"] for r in rels} | {r["b"] for r in rels}
+    need_w = set().union(*(r["ways"] for r in rels))
+    loc, wmax, wref = {}, {}, {}
+    for o in osmium.FileProcessor(src):
+        if o.is_node() and o.id in need_n and o.location.valid():
+            loc[o.id] = (o.location.lat, o.location.lon)
+        elif o.is_way() and o.id in need_w:
+            wmax[o.id] = num(o.tags.get("maxspeed", ""))
+            wref[o.id] = o.tags.get("ref") or o.tags.get("name")
+    out = []
+    for r in rels:
+        if r["a"] not in loc or r["b"] not in loc:
+            continue
+        mx = r["max"] or next((wmax[w] for w in r["ways"] if wmax.get(w)), None)
+        name = r["name"] or next((wref[w] for w in r["ways"] if wref.get(w)), None)
+        (la1, ln1), (la2, ln2) = loc[r["a"]], loc[r["b"]]
+        out.append((f"r{r['id']}", round(la1, 6), round(ln1, 6), round(la2, 6), round(ln2, 6),
+                    int(mx) if mx else None, name))
+    return out
+
+
 def build(src, out, country, source_date):
     h = Collect()
     h.apply_file(src, locations=True)
@@ -209,12 +250,16 @@ def build(src, out, country, source_date):
     h.rows.sort(key=lambda r: (r[1], r[2]))
     db.executemany("INSERT INTO poi(osm, layer, lat, lng, name, brand, info) VALUES (?,?,?,?,?,?,?)", h.rows)
     db.execute("CREATE INDEX poi_layer_lat ON poi(layer, lat)")
+    # Average speed sections (car only; older Dock builds ignore the table).
+    zs = zones_of(src)
+    db.execute("CREATE TABLE zone(id INTEGER PRIMARY KEY, osm TEXT, lat1 REAL, lng1 REAL, lat2 REAL, lng2 REAL, maxspeed INTEGER, name TEXT)")
+    db.executemany("INSERT INTO zone(osm, lat1, lng1, lat2, lng2, maxspeed, name) VALUES (?,?,?,?,?,?,?)", zs)
     counts = {}
     for r in h.rows:
         counts[r[1]] = counts.get(r[1], 0) + 1
     meta = {"version": VERSION, "country": country, "source": "OpenStreetMap via Geofabrik (ODbL)",
             "sourceDate": source_date, "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "count": len(h.rows), "layers": ",".join(f"{k}:{v}" for k, v in sorted(counts.items()))}
+            "count": len(h.rows), "zones": len(zs), "layers": ",".join(f"{k}:{v}" for k, v in sorted(counts.items()))}
     db.executemany("INSERT INTO meta VALUES (?, ?)", [(k, str(v)) for k, v in meta.items()])
     db.commit()
     db.execute("VACUUM")

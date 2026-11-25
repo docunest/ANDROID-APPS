@@ -130,6 +130,22 @@ Seen on the unit (build 72, Foz do Arelho → Caldas): the screen is **1280×480
 - **Tap or hold the middle** opens the big view (2× the old size, square, over Waze; the dock map no longer opens). Pinch and pan; tap a place to get a card with Waze and ✕. Buttons: ✕ · ◎ follow · Auto · City · Autobahn · Explore · Hide. A tap outside or 60 s idle closes it.
 - **Hide** switches the mini-map off. The **"Mini-map" icon** in the app list (`MiniMapLauncher`) brings it back.
 
+## Police round 2 + average speed sections (2026-11-25)
+
+Owner: "the outline is a bit too much … it alerts only if I'm looking straight at the police … I need something that goes either on my route or
+shows proximity or the direction … 5 blocks away brings less value … a special mode when I'm in an average speed zone (Waze doesn't always show them)".
+
+- Police (`Police.evaluate`): **on the route** = along the dock's route (≤ 300 m off) or, with no dock route, a report Waze marks on its route
+  and roughly ahead (±100°) → full red/blue flash from ~90 s before (1.5–4 km). Edge line 4 dp (was 12), glow unchanged. **Nearby, off the
+  route** (any direction, ≤ 400 m under 50 km/h, ≤ 800 m faster) → soft red glow only on the side it's on, "🚓 400 m" and an arrow. The old
+  ±60° "in front of you" cone is gone. Mini-map ring flashes only for "on the route".
+- Average speed sections (`AvgZone.kt`): OSM `enforcement=average_speed` relations (from/to nodes, else first/last device; limit from the
+  relation or its section ways) → pack table `zone` (Portugal: 23 sections, 15 with a limit). In = within 120 m of a start, > 15 km/h, heading to
+  its end (±50°); average = distance driven fix by fix ÷ time since the start; out = within 50 m of the end / 400 m past the closest point /
+  far too long. Panel at the top: "⏱ AVERAGE SPEED 100 · you 97 · now 104" + "3.2 km left · max 108 km/h for the rest"; steady edge glow green /
+  amber (within 3 of the limit) / red (over). Settings → Police ahead: on/off + "Test the average-speed panel". Older packs have no `zone`
+  table → nothing shown until the packs are updated.
+
 ## Wi-Fi doctor asks before cutting a connection (2026-11-20)
 
 Owner: "way too aggressive … keeps disconnecting my phone … if you are dropping the Wi-Fi connection, it must be confirmed by me".
