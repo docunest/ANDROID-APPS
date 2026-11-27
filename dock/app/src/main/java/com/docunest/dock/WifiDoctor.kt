@@ -459,11 +459,16 @@ object WifiDoctor {
                     ours = ours + name
                 }
             }
-            rssi = info?.rssi ?: 0
+            // -127 is Android's "no reading" (the link is already going down), not a signal: keep the last real one.
+            // (2026-11-27 on the unit: the drop card said "Signal too weak (-127 dBm)" while the signal was -42.)
+            val r = info?.rssi ?: 0
+            if (r in -120..-1) {
+                rssi = r
+                lastRssis.addLast(r)
+                while (lastRssis.size > 6) lastRssis.removeFirst()
+            }
             linkMbps = info?.linkSpeed ?: 0
             freqMhz = info?.frequency ?: 0
-            lastRssis.addLast(rssi)
-            while (lastRssis.size > 6) lastRssis.removeFirst()
             validated = net?.let { cm.getNetworkCapabilities(it)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) } == true
             // IPv4 first (iPhone: 172.20.10.1); an IPv6 link-local gateway needs ping6 with the interface.
             val lp = net?.let { cm.getLinkProperties(it) }
