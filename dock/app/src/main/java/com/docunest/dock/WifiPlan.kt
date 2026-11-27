@@ -85,11 +85,15 @@ class WifiPlan {
     }
 
     companion object {
-        /** 2 s after the hotspot shows up (5 s in build 77–78 made reconnects slower — back to 2 s). */
-        const val FIRST_JOIN_MS = 2_000L
+        /**
+         * Android rejoins by itself within 2–5 s when it can (log 2026-11-27: 19:12:34 → :36 with no help); Dock's
+         * join only helps when Android is stuck (e.g. it blocked the hotspot after a dead spot). So Android gets
+         * 12 s alone, and the join itself steps aside if Android is busy ([RootWifi] "enable").
+         */
+        const val FIRST_JOIN_MS = 12_000L
         /** Not seen for this long = gone (a scan-list flicker doesn't count). */
         const val VISIBLE_FORGET_MS = 20_000L
-        val JOIN_GAPS_MS = longArrayOf(6_000, 10_000, 20_000, 30_000)
+        val JOIN_GAPS_MS = longArrayOf(15_000, 20_000, 30_000)
         const val JOINING_GRACE_MS = 8_000L
         const val KICK_AFTER_MS = 10_000L
         const val BT_SETTLE_MS = 25_000L
