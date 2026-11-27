@@ -183,6 +183,11 @@ Evidence (log of 15 Nov, ~4 h): 12 drops started by the dock itself — 7 "hotsp
   the scan list). Not Dock: Dock logs every Wi-Fi restart it does and none happened then. When Wi-Fi goes off and Dock didn't do it, Dock now
   logs Android's own lines about it (`setWifiEnabled package=…`, SelfRecovery, WifiController) to name the culprit.
 - "Reconnect now" / "Kick Bluetooth now" on the doctor screen still act at once (you asked).
+- **Fixed 2026-11-27: Dock's own join killed fresh connections.** Log 19:11:40.9 join started → 19:11:41.1 Android reconnected by itself →
+  19:11:42.6 dropped (also 19:11:27→29, 19:12:46→48). The join runs through root 1–2 s after Dock decides, and its `reconnect()` restarted
+  the link Android had just made. Now `RootWifi enable` checks wpa_supplicant at the moment it runs and does nothing if Android is already
+  joining or connected ("skip android-busy …"), and calls `reconnect()` only when idle; the extra status call before it is gone. Owner-approved
+  reconnects / network switches use `RootWifi switch` (acts even when connected).
 - Each internet check is no longer single-shot: DNS = 2 queries (3 s + 4 s), web = HTTPS generate_204 then plain-HTTP generate_204 on a
   second host (≤ 12 s each), and the checks are waited for as long as their own timeouts (it used to give up after 8 s while the web request
   could take 12 s, so a slow-but-working answer counted as a failure). The two failed checks must be ≥ 20 s apart. The 2-s ping has a hard

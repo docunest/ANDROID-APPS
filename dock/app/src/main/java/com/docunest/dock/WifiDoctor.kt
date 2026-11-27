@@ -388,13 +388,13 @@ object WifiDoctor {
             lastAction = "Reconnecting to $name (you asked)"
             record("Hotspot stalled", "Wi-Fi stayed connected but the iPhone didn't answer — you chose to reconnect.", Fault.IPHONE, silent)
             actions.post {
-                val r = rootWifi("enable", name)
+                val r = rootWifi("switch", name)
                 DebugLog.log("WIFI", "stall: rejoin $name → ${r ?: "root refused"}")
                 Thread.sleep(10_000)
                 if (now() - lastGatewayAnswerAt > 60_000) {
                     DebugLog.log("WIFI", "stall: still silent — Wi-Fi off/on, then join $name")
                     ourToggleAt = now(); Root.run("svc wifi disable", "sleep 2", "svc wifi enable", "sleep 5")
-                    rootWifi("enable", name)
+                    rootWifi("switch", name)
                 }
                 refreshNow()
             }
@@ -622,7 +622,7 @@ object WifiDoctor {
             DebugLog.log("WIFI", "prefer: owner said switch $current → $to")
             lastAction = "Switching to $to (you asked)"
             actions.post {
-                val r = rootWifi("enable", to)
+                val r = rootWifi("switch", to)
                 DebugLog.log("WIFI", "prefer: switch to $to → ${r ?: "root refused"}")
                 refreshNow()
             }
@@ -810,9 +810,12 @@ object WifiDoctor {
                     changed()
                     ourToggleAt = now(); Root.run("svc wifi disable", "sleep 2", "svc wifi enable", "sleep 4")
                 }
-                joinStatus = rootWifi("status", t)?.substringAfter(' ', "")?.takeIf { it.isNotBlank() }
-                if (joinStatus?.contains("DISABLED") == true) lastAction += " (Android had blocked it: $joinStatus — clearing)"
+                // One root call (the separate status call added ~1–2 s, making the race below worse). The join itself
+                // does nothing when Android is already joining / connected ("skip android-busy …").
                 val r = rootWifi("enable", t)
+                DebugLog.log("WIFI", "join $t → ${r ?: "root refused"}")
+                joinStatus = r?.takeIf { it.startsWith("ok") }?.split(' ')?.drop(2)?.joinToString(" ")?.takeIf { it.isNotBlank() }
+                if (joinStatus?.contains("DISABLED") == true) lastAction += " (Android had blocked it: $joinStatus — cleared)"
                 if (r?.startsWith("ok") != true) lastAction += " — ${r ?: "root refused"}"
                 lastRestartAt = now()
             }
