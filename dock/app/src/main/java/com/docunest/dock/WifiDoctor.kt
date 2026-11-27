@@ -59,8 +59,8 @@ object WifiDoctor {
     private const val WEAK_RSSI = -80
     private const val NOTIFY_ID = 7
     /** "Ours" seen this recently counts as visible. */
-    /** 12 s (was 6): scan results arrive every few seconds and the iPhone is sometimes missing from one. */
-    private const val VISIBLE_MS = 12_000L
+    /** 15 s: while down Dock scans every 10 s, and the iPhone is sometimes missing from one scan. */
+    private const val VISIBLE_MS = 15_000L
     /** The hotspot silent this long (and a fresh check failing) before a forced reconnect. */
     private const val STALL_MS = 60_000L
     /** Automatic network switches per session before Dock stops and asks. */
@@ -349,11 +349,12 @@ object WifiDoctor {
         if (hasRoot == true) {
             Diagnostics.runAsync(app) // once root works: the full scan into the debug log
             // Scans more often than 4 per 2 min (Android's default throttle).
-            Root.run(
+            val ok = Root.run(
                 "settings put global wifi_scan_throttle_enabled 0",
-                // Android 10 drops Wi-Fi when the gateway misses ARP replies — iPhones in power save do. Not kept across reboots.
+                // Android 10 drops Wi-Fi when the gateway misses ARP replies — iPhones in power save / dead spots do. Not kept across reboots.
                 "cmd wifi set-ipreach-disconnect disabled",
             )
+            DebugLog.log("WIFI", "Android's 'drop Wi-Fi when the iPhone misses ARP replies': " + if (ok) "switched off" else "couldn't switch off")
         }
         loadOurs()
     }
@@ -501,7 +502,15 @@ object WifiDoctor {
         } else {
             gatewayPingMs = null
             internet = null
-            @Suppress("DEPRECATION") runCatching { wm.startScan() }
+            // Scan every 10 s (was 2 s), and never while Android is mid-join: a scan takes the radio off-channel
+            // and can abort the association Android is making by itself.
+            @Suppress("DEPRECATION") val sup = runCatching { wm.connectionInfo?.supplicantState }.getOrNull()
+            val joiningNow = sup in setOf(SupplicantState.ASSOCIATING, SupplicantState.ASSOCIATED, SupplicantState.AUTHENTICATING,
+                SupplicantState.FOUR_WAY_HANDSHAKE, SupplicantState.GROUP_HANDSHAKE, SupplicantState.COMPLETED)
+            if (!joiningNow && now() - lastDownScan > 10_000) {
+                lastDownScan = now()
+                @Suppress("DEPRECATION") runCatching { wm.startScan() }
+            }
             if (autoFix && !acting) {
                 acting = true
                 actions.post { try { runCatching { act(force = false) } } finally { acting = false } }
@@ -513,6 +522,7 @@ object WifiDoctor {
 
     private var lastConnectedSsid: String? = null
     private var lastPreferScan = 0L
+    private var lastDownScan = 0L
     private var lastPreferSwitch = 0L
     private var preferTries = 0
     /** Automatic network switches this session (since the dock started or the owner last answered). */
@@ -567,11 +577,13 @@ object WifiDoctor {
      */
     private fun preferIPhone(wm: WifiManager) {
         val current = ssid
-        if (now() - lastPreferScan > 6_000) {
+        // Once a minute while connected (was every 6 s): each scan takes the radio off the iPhone's channel —
+        // the regular ping spikes on the owner's drop card (2026-11-27), worst when the iPhone already struggles.
+        if (now() - lastPreferScan > 60_000) {
             lastPreferScan = now()
             @Suppress("DEPRECATION") runCatching { wm.startScan() }
         }
-        val visible = if (now() - oursSeenAt < VISIBLE_MS) oursVisible else emptyMap()
+        val visible = if (now() - oursSeenAt < 75_000) oursVisible else emptyMap()
         // What we're on: its signal, and whether its internet worked at the last check (≤ 90 s old).
         val works = if (connected && now() - checkedAt < 90_000) verdict.internet else null
         if (connected && current != null && works == false) failedAt[current] = now()
@@ -688,6 +700,7 @@ object WifiDoctor {
         downSince = now()
         upSince = 0L
         restarts = 0
+        val wasDeadSpot = noInternetSince > 0 || verdict.level == NetVerdict.Level.NO_DATA
         noInternetSince = 0L
         val lastGood = lastRssis.maxOrNull() ?: rssi
         val lastSeen = lastRssis.lastOrNull() ?: rssi
@@ -702,6 +715,10 @@ object WifiDoctor {
         actions.postDelayed({
             runCatching {
                 val reason = if (hasRoot == true) disconnectReason() else null
+                // Who ended it — the iPhone, or Android itself — and was it a dead spot (iPhone up, no internet)?
+                val deadSpot = wasDeadSpot
+                DebugLog.log("WIFI", "drop of $name: " + (reason?.let { "code ${it.code} from ${if (it.local) "ANDROID (this unit)" else "the iPhone"}" } ?: "no disconnect code") +
+                    (if (deadSpot) " · during a dead spot (no mobile data)" else "") + " · last signal $lastSeen dBm")
                 joinStatus = if (hasRoot == true) rootWifi("status", name)?.substringAfter(' ', "")?.takeIf { it.isNotBlank() } else null
                 val visible = now() - targetSeenAt < 12_000
                 val switched = ssid?.takeIf { connected && it != name }

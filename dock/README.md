@@ -130,6 +130,19 @@ Seen on the unit (build 72, Foz do Arelho → Caldas): the screen is **1280×480
 - **Tap or hold the middle** opens the big view (2× the old size, square, over Waze; the dock map no longer opens). Pinch and pan; tap a place to get a card with Waze and ✕. Buttons: ✕ · ◎ follow · Auto · City · Autobahn · Explore · Hide. A tap outside or 60 s idle closes it.
 - **Hide** switches the mini-map off. The **"Mini-map" icon** in the app list (`MiniMapLauncher`) brings it back.
 
+## Dead spots: leave the Wi-Fi alone (2026-11-27)
+
+Owner: "If the phone loses 5G there is nothing you can do by dropping Wi-Fi. When driving there will always be dead spots. Build a solution
+to handle this, not make it worse." Log 19:06–19:13: in a dead spot the iPhone stayed loud (−44 dBm) but answered slowly / not at all, the
+Wi-Fi was dropped ~15–20 s into it (by the iPhone or Android), Android rejoined by itself in 2–5 s — and Dock's joins and scans got in the way.
+
+- Dock never cuts Wi-Fi for missing internet (only with your Yes, see below); no internet = wait.
+- While down: Android gets **12 s alone** (it usually rejoins in 2–5 s); then a join every 15 / 20 / 30 s that **does nothing if Android is
+  already joining or connected** (`RootWifi enable`). Scans every 10 s (was 2 s), never while Android is mid-join.
+- While connected: a scan once a minute (was every 6 s) — each scan takes the radio off the iPhone's channel (the regular ping spikes).
+- Android's "drop Wi-Fi when the gateway misses ARP replies" is switched off at start (now logged), and every drop logs who ended it
+  (disconnect code from the iPhone or from Android) and whether it was a dead spot — so the next log says which side drops in dead spots.
+
 ## Network history: drop card + dashboard (2026-11-25)
 
 Owner: "when the connection is lost show a semi-transparent tooltip … network status and issues for the last 3–5 minutes … a chart showing what
