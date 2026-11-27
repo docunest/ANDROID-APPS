@@ -72,7 +72,8 @@ class TimeChart(ctx: Context) : View(ctx) {
         var lx = 8 * d + titleP.measureText(title) + 12 * d
         for (ln in lines) {
             val last = ln.ys.lastOrNull { !it.isNaN() }
-            val txt = "● ${ln.label}" + (last?.let { " ${fmt(it)}${ln.unit}" } ?: "")
+            // "● 273 ms", "● web 565 ms" — the unit once (was "ms 273 ms").
+            val txt = "●" + (if (ln.label.isEmpty()) "" else " ${ln.label}") + (last?.let { " ${fmt(it)}${ln.unit}" } ?: " —")
             legend.color = ln.color
             c.drawText(txt, lx, (if (compact) 12 else 15) * d, legend)
             lx += legend.measureText(txt) + 10 * d
@@ -85,7 +86,8 @@ class TimeChart(ctx: Context) : View(ctx) {
             c.drawRect(maxOf(pl, x(b.from)), pt, minOf(pr, x(b.to)), pb, fill)
         }
         // y range.
-        val all = lines.flatMap { l -> l.ys.filter { !it.isNaN() } } + thresholds.map { it.first }
+        // Guide lines don't stretch the scale (a 3 s line squashed 200 ms answers flat): drawn only if in range.
+        val all = lines.flatMap { l -> l.ys.filter { !it.isNaN() } }
         var lo = yMin ?: (all.minOrNull() ?: 0f)
         var hi = yMax ?: (all.maxOrNull() ?: 1f)
         if (yMin == null && yMax == null && hi - lo < 1e-3f) { lo -= 1; hi += 1 }
@@ -102,7 +104,7 @@ class TimeChart(ctx: Context) : View(ctx) {
             if (!compact) c.drawText(fmt(g), 4 * d, yy + 4 * d, axis)
             g += step
         }
-        for ((v, col) in thresholds) { dash.color = col; c.drawLine(pl, y(v), pr, y(v), dash) }
+        if (!compact) for ((v, col) in thresholds) if (v in lo..hi) { dash.color = col; c.drawLine(pl, y(v), pr, y(v), dash) }
         // Lines with gaps (no value, or more than 7 s between points).
         for (ln in lines) {
             lineP.color = ln.color
@@ -167,21 +169,24 @@ object NetCharts {
         return out
     }
 
+    /** Only the time Wi-Fi was down / off, shaded red (no green tint over everything). */
+    fun downBands(s: List<NetHistory.Sample>) = stateBands(s, 60).filterIndexed { _, b -> Color.red(b.color) == Color.red(RED) || Color.red(b.color) == Color.red(GREY) }
+
     fun eventMarks(e: List<NetHistory.Event>) = e.mapNotNull { ev ->
         when (ev.kind) { "drop" -> TimeChart.Mark(ev.t, RED); "back" -> TimeChart.Mark(ev.t, GREEN); "off" -> TimeChart.Mark(ev.t, GREY); "ask" -> TimeChart.Mark(ev.t, AMBER); else -> null }
     }
 
     fun signal(ch: TimeChart, s: List<NetHistory.Sample>) {
         ch.title = "Wi-Fi signal"
-        ch.lines = listOf(TimeChart.Line("dBm", BLUE, LongArray(s.size) { s[it].t },
-            FloatArray(s.size) { s[it].rssi.takeIf { r -> r != 0 && r > -127 }?.toFloat() ?: Float.NaN }))
+        ch.lines = listOf(TimeChart.Line("", BLUE, LongArray(s.size) { s[it].t },
+            FloatArray(s.size) { s[it].rssi.takeIf { r -> r in -120..-1 }?.toFloat() ?: Float.NaN }, unit = " dBm"))
         ch.thresholds = listOf(-70f to AMBER, -80f to RED)
         ch.yMin = -95f; ch.yMax = -30f
     }
 
     fun ping(ch: TimeChart, s: List<NetHistory.Sample>) {
         ch.title = "iPhone ping"
-        ch.lines = listOf(TimeChart.Line("ms", GREEN, LongArray(s.size) { s[it].t }, FloatArray(s.size) { s[it].pingMs.takeIf { p -> p >= 0 }?.toFloat() ?: Float.NaN }, unit = " ms"))
+        ch.lines = listOf(TimeChart.Line("", GREEN, LongArray(s.size) { s[it].t }, FloatArray(s.size) { s[it].pingMs.takeIf { p -> p >= 0 }?.toFloat() ?: Float.NaN }, unit = " ms"))
         ch.ticks = s.filter { it.pingMs == -1 }.map { TimeChart.Mark(it.t, RED) }
         ch.thresholds = listOf(150f to AMBER)
         ch.yMin = 0f; ch.yMax = null
@@ -211,7 +216,7 @@ object NetCharts {
 
     fun speed(ch: TimeChart, s: List<NetHistory.Sample>) {
         ch.title = "Van speed"
-        ch.lines = listOf(TimeChart.Line("km/h", AMBER, LongArray(s.size) { s[it].t }, FloatArray(s.size) { s[it].speedKmh }, unit = " km/h"))
+        ch.lines = listOf(TimeChart.Line("", AMBER, LongArray(s.size) { s[it].t }, FloatArray(s.size) { s[it].speedKmh }, unit = " km/h"))
         ch.yMin = 0f; ch.yMax = null
     }
 

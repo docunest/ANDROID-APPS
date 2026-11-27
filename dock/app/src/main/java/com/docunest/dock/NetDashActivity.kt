@@ -120,7 +120,7 @@ class NetDashActivity : Activity() {
         val marks = NetCharts.eventMarks(ev)
         charts.forEachIndexed { i, ch ->
             ch.t0 = t0; ch.t1 = t1; ch.marks = marks; ch.relative = d == null
-            if (i > 0) ch.bands = NetCharts.stateBands(s, 28)
+            if (i > 0) ch.bands = NetCharts.downBands(s)
             ch.invalidate()
         }
         renderTiles(s, c, ev, t1)

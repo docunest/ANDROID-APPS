@@ -54,7 +54,7 @@ object NetHistory {
         val txK = if (lastTx >= 0 && secs > 0 && tx >= lastTx) (tx - lastTx) / 1024f / secs else 0f
         lastRx = rx; lastTx = tx; lastBytesAt = now
         val here = runCatching { Trip.here(ctx) }.getOrNull()
-        val s = Sample(now, state, ssid, rssi, pingMs, linkMbps, rxK, txK,
+        val s = Sample(now, state, ssid, if (rssi in -120..-1) rssi else 0, pingMs, linkMbps, rxK, txK,
             here?.takeIf { it.hasSpeed() }?.speed?.times(3.6f) ?: 0f, here?.latitude ?: 0.0, here?.longitude ?: 0.0)
         synchronized(lock) { samples.addLast(s); trim(now) }
     }
@@ -127,26 +127,44 @@ object NetHistory {
         return Drop(o.getLong("t"), o.optString("ssid").ifEmpty { null }, o.getDouble("lat"), o.getDouble("lng"), o.optString("why"), samples, checks)
     }
 
-    /** A plain-words summary of the minute before [t]: what was failing first. */
+    /**
+     * One plain reading of the minute before a drop at [t], from the same data the charts show (so the card
+     * never contradicts its own charts): signal (steady, weak, or collapsing in the last seconds), the iPhone's
+     * ping, and the internet checks — what failed first.
+     */
     fun diagnose(s: List<Sample>, c: List<Check>, t: Long): String {
         val before = s.filter { it.t in (t - 60_000)..t && it.state != 0 && it.state != 2 }
         if (before.isEmpty()) return "No data from the minute before."
-        val rssis = before.map { it.rssi }.filter { it != 0 && it > -127 }
+        val sig = before.filter { it.rssi in -120..-1 }
+        val last = sig.lastOrNull()?.rssi
+        val typical = sig.filter { it.t < t - 10_000 }.map { it.rssi }.sorted().let { if (it.isEmpty()) null else it[it.size / 2] }
         val pings = before.filter { it.pingMs != -2 }
         val loss = if (pings.isEmpty()) 0 else pings.count { it.pingMs == -1 } * 100 / pings.size
         val lastAnswer = before.lastOrNull { it.pingMs >= 0 }
+        val silent = lastAnswer?.let { ((t - it.t) / 1000).toInt() }?.takeIf { it > 6 }
         val failed = c.filter { it.t in (t - 90_000)..t && !it.webOk }
-        val bits = mutableListOf<String>()
-        if (rssis.isNotEmpty()) bits += if (rssis.last() <= -80) "signal weak (${rssis.last()} dBm)" else "signal fine (${rssis.last()} dBm)"
-        bits += if (loss >= 30) "iPhone lost $loss% of pings" else "iPhone answered (${loss}% lost)"
-        if (lastAnswer != null && t - lastAnswer.t > 6_000) bits += "silent ${(t - lastAnswer.t) / 1000} s before"
-        bits += if (failed.isNotEmpty()) "internet failing ${(t - failed.first().t) / 1000} s before" else "internet OK"
-        val verdict = when {
-            rssis.isNotEmpty() && rssis.last() <= -80 -> "→ reception"
-            failed.isNotEmpty() && loss < 30 -> "→ the iPhone's mobile data first, then Wi-Fi"
-            loss >= 30 -> "→ the iPhone's hotspot stopped answering"
-            else -> "→ sudden, no warning: the iPhone (or Android) ended it"
+        val collapsed = last != null && typical != null && last <= -78 && typical >= -68
+        val weak = last != null && last <= -78 && !collapsed
+        val facts = mutableListOf<String>()
+        facts += when {
+            last == null -> "no signal reading"
+            collapsed -> "signal fell from $typical to $last dBm in the last seconds"
+            weak -> "signal weak ($last dBm)"
+            else -> "signal good ($last dBm)"
         }
-        return bits.joinToString(" · ") + " " + verdict
+        facts += when {
+            silent != null -> "iPhone silent ${silent} s before"
+            loss >= 30 -> "iPhone lost $loss % of pings"
+            else -> "iPhone answering"
+        }
+        facts += if (failed.isNotEmpty()) "internet failing ${(t - failed.first().t) / 1000} s before" else "internet OK"
+        val verdict = when {
+            collapsed -> "the hotspot went away suddenly (iPhone switched it off or restarted it)"
+            weak -> "reception: too far or blocked"
+            failed.isNotEmpty() && silent == null && loss < 30 -> "the iPhone's mobile data failed first, then Wi-Fi"
+            silent != null || loss >= 30 -> "the iPhone's hotspot stopped answering first"
+            else -> "sudden, no warning in the data"
+        }
+        return facts.joinToString(" · ") + " → " + verdict
     }
 }
