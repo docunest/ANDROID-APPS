@@ -206,7 +206,7 @@ Evidence (log of 15 Nov, ~4 h): 12 drops started by the dock itself — 7 "hotsp
   could take 12 s, so a slow-but-working answer counted as a failure). The two failed checks must be ≥ 20 s apart. The 2-s ping has a hard
   3-s limit (a hung ping process counts as one lost answer).
 
-## Waze ignoring a sent link — hold to restart (2026-11-17, changed 11-20 and 11-25)
+## Waze ignoring a sent link — receipt check + hold to restart (2026-11-17, changed 11-20, 11-25, 11-28)
 
 History: Waze sometimes takes a link and does nothing (after killing Waze the same link worked). Two automatic fixes guessed wrong: "restart if
 no search 12 s after a link" fired while Waze was slowly planning or the owner was looking at the route; "same place sent twice in 5 min" fired
@@ -217,6 +217,14 @@ card, the mini-map card — is **tap = send as usual, hold 3 s = restart Waze an
 let go early = nothing). The restart (`WazeLinkCheck.restartAndSend`): stop Waze → start it → wait 8 s (start-up and its "resume?" question)
 → send the link → watch Waze's log for "Executing query" (took it) / startNavigationFlow (driving) → if neither within 12 s, send once more.
 A notice at the top says each step. The place menu (pin / delete / link) moved to a long-press on the map thumbnail or 🗺.
+
+**2026-11-28: a tap is checked again — by receipt, not by guessing.** With tap = plain send, a stuck Waze meant nothing happened at all
+(4 taps 12:56–12:58, no destination). The receipt signal: Waze's *engine* logs every link it takes within 0–2 s ("Url is not valid …
+Falling back to init" from urlscheme.cc, then "Executing query"); all links that worked on 11-18/11-20 had it, the stuck ones didn't
+(Waze's Java side may still say "URL to handle" — that's not receipt). So after a tap (`WazeLinkCheck.sent`): engine line within 8 s
+(25 s if Waze wasn't running) → done, Waze is never touched for that link however long it plans or shows the route; Waze's log moving but
+no engine line → stuck → restart + send with the notice ("Waze didn't take … — restarting Waze…"); Waze's log silent → leave it alone.
+Taps during a restart are not sent (toast). Hold 3 s = restart at once, as before. Every send and receipt is in the NAV log.
 
 ## Dock map + mini-map, round 2 (2026-11-17)
 

@@ -15,7 +15,8 @@ import org.json.JSONObject
  * / geo: variant opened Waze without a usable destination.
  */
 object Nav {
-    /** [restart] = the owner held the Waze button 3 s: restart Waze, then send ([WazeLinkCheck.restartAndSend]). */
+    /** [restart] = the owner held the Waze button 3 s: restart Waze, then send. A tap is checked too: a Waze that
+     *  never takes the link gets restarted ([WazeLinkCheck]). */
     fun go(context: Context, item: Item, app: String = Prefs(context).defaultNav, restart: Boolean = false) {
         // Road ahead: the picked place is the trip's destination (start = here, locked).
         if (item.lat != null && item.lng != null) Trip.setDockDestination(context, item.lat, item.lng, item.title)
@@ -68,6 +69,10 @@ object Nav {
             }
         } else if (app != Prefs.NAV_GMAPS) {
             val link = wazeLink(title, address, lat, lng)
+            if (link != null && WazeLinkCheck.busy) {
+                Toast.makeText(context, "Waze is restarting — tap again when it is up", Toast.LENGTH_SHORT).show()
+                return true
+            }
             if (restart && link != null) {
                 WazeLinkCheck.restartAndSend(context, link, label ?: title, lat, lng)
                 return true
@@ -83,7 +88,11 @@ object Nav {
                 Split.openMaps(context, i.dataString)
                 return true
             }
-            if (runCatching { context.startActivity(i) }.isSuccess) return true
+            if (runCatching { context.startActivity(i) }.isSuccess) {
+                // Check it reached Waze's engine; a stuck Waze gets restarted (WazeLinkCheck).
+                if (i.`package` == Apps.WAZE && i.dataString != null) WazeLinkCheck.sent(context, i.dataString!!, label ?: title)
+                return true
+            }
         }
         Toast.makeText(context, "No navigation app could open this place", Toast.LENGTH_LONG).show()
         return false
